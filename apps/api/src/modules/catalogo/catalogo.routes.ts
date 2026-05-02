@@ -25,6 +25,8 @@ router.delete('/productos/:id', requireAdmin, asyncH(ctrl.eliminarProducto));
 router.post('/productos/:id/precio-sucursal', requireAdmin, asyncH(ctrl.setPrecioSucursal));
 router.put('/productos/:id/receta', requireAdmin, asyncH(ctrl.setReceta));
 router.delete('/productos/:id/receta', requireAdmin, asyncH(ctrl.eliminarReceta));
+router.put('/productos/:id/combo', requireAdmin, asyncH(ctrl.setCombo));
+router.delete('/productos/:id/combo', requireAdmin, asyncH(ctrl.eliminarCombo));
 
 export default router;
 

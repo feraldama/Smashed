@@ -8,6 +8,7 @@ import type {
   CrearCategoriaInput,
   CrearProductoInput,
   ListarProductosQuery,
+  SetComboInput,
   SetPrecioSucursalInput,
   SetRecetaInput,
 } from './catalogo.schemas.js';
@@ -483,6 +484,145 @@ export async function eliminarReceta(empresaId: string, productoVentaId: string)
 
   await prisma.itemReceta.deleteMany({ where: { recetaId: receta.id } });
   await prisma.receta.delete({ where: { id: receta.id } });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  WRITE — Combo (grupos + opciones)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Reemplaza la configuración de combo de un producto.
+ *
+ * Validaciones:
+ *  - Producto pertenece a la empresa
+ *  - Cada opción referencia un ProductoVenta de la misma empresa, vendible y NO combo
+ *  - Por cada grupo: a lo sumo una opción con esDefault=true
+ *  - Si el producto no tenía esCombo=true, lo marca en la misma transacción
+ *  - Operación atómica: borra combo previo (cascada) y crea nuevo
+ */
+export async function setCombo(
+  empresaId: string,
+  productoVentaId: string,
+  input: SetComboInput,
+) {
+  const producto = await prisma.productoVenta.findFirst({
+    where: { id: productoVentaId, empresaId, deletedAt: null },
+    select: { id: true, esCombo: true },
+  });
+  if (!producto) throw Errors.notFound('Producto no encontrado');
+
+  for (const [i, g] of input.grupos.entries()) {
+    const defaults = g.opciones.filter((o) => o.esDefault).length;
+    if (defaults > 1) {
+      throw Errors.validation({
+        [`grupos.${i}.opciones`]: 'Solo una opción puede ser default por grupo',
+      });
+    }
+    const productoIds = g.opciones.map((o) => o.productoVentaId);
+    if (new Set(productoIds).size !== productoIds.length) {
+      throw Errors.validation({
+        [`grupos.${i}.opciones`]: 'Hay productos repetidos en el mismo grupo',
+      });
+    }
+  }
+
+  const opcionProductoIds = [
+    ...new Set(input.grupos.flatMap((g) => g.opciones.map((o) => o.productoVentaId))),
+  ];
+  if (opcionProductoIds.includes(productoVentaId)) {
+    throw Errors.validation({ opciones: 'El combo no puede contenerse a sí mismo como opción' });
+  }
+  const opcionesProductos = await prisma.productoVenta.findMany({
+    where: { id: { in: opcionProductoIds }, empresaId, deletedAt: null },
+    select: { id: true, esCombo: true, esVendible: true },
+  });
+  if (opcionesProductos.length !== opcionProductoIds.length) {
+    throw Errors.validation({ opciones: 'Algún producto opción no existe o no es de tu empresa' });
+  }
+  const noVendibles = opcionesProductos.filter((p) => !p.esVendible).map((p) => p.id);
+  if (noVendibles.length > 0) {
+    throw Errors.validation({
+      opciones: `Productos no vendibles no pueden ser opciones: ${noVendibles.join(', ')}`,
+    });
+  }
+  const combosAnidados = opcionesProductos.filter((p) => p.esCombo).map((p) => p.id);
+  if (combosAnidados.length > 0) {
+    throw Errors.validation({
+      opciones: `No se permiten combos anidados como opciones: ${combosAnidados.join(', ')}`,
+    });
+  }
+
+  return prisma.$transaction(async (tx) => {
+    await tx.combo.deleteMany({ where: { productoVentaId } });
+
+    if (!producto.esCombo) {
+      await tx.productoVenta.update({
+        where: { id: productoVentaId },
+        data: { esCombo: true },
+      });
+    }
+
+    await tx.combo.create({
+      data: {
+        empresaId,
+        productoVentaId,
+        descripcion: input.descripcion,
+        grupos: {
+          create: input.grupos.map((g) => ({
+            nombre: g.nombre,
+            orden: g.orden,
+            tipo: g.tipo,
+            obligatorio: g.obligatorio,
+            opciones: {
+              create: g.opciones.map((o) => ({
+                productoVentaId: o.productoVentaId,
+                precioExtra: o.precioExtra,
+                esDefault: o.esDefault,
+                orden: o.orden,
+              })),
+            },
+          })),
+        },
+      },
+    });
+
+    return tx.combo.findUnique({
+      where: { productoVentaId },
+      include: {
+        grupos: {
+          orderBy: { orden: 'asc' },
+          include: {
+            opciones: {
+              orderBy: { orden: 'asc' },
+              include: {
+                productoVenta: {
+                  select: { id: true, codigo: true, nombre: true, precioBase: true, imagenUrl: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+  });
+}
+
+export async function eliminarCombo(empresaId: string, productoVentaId: string) {
+  const producto = await prisma.productoVenta.findFirst({
+    where: { id: productoVentaId, empresaId, deletedAt: null },
+    select: { id: true, esCombo: true },
+  });
+  if (!producto) throw Errors.notFound('Producto no encontrado');
+
+  return prisma.$transaction(async (tx) => {
+    await tx.combo.deleteMany({ where: { productoVentaId } });
+    if (producto.esCombo) {
+      await tx.productoVenta.update({
+        where: { id: productoVentaId },
+        data: { esCombo: false },
+      });
+    }
+  });
 }
 
 /**

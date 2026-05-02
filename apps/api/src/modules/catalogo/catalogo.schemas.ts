@@ -1,4 +1,10 @@
-import { CategoriaProducto, SectorComanda, TasaIva, UnidadMedida } from '@prisma/client';
+import {
+  CategoriaProducto,
+  SectorComanda,
+  TasaIva,
+  TipoModificadorGrupo,
+  UnidadMedida,
+} from '@prisma/client';
 import { z } from 'zod';
 
 const guaraniEntero = z
@@ -102,6 +108,28 @@ export const setRecetaInput = z.object({
   items: z.array(itemRecetaInput).min(1).max(50),
 });
 
+// ───── Combo ─────
+
+export const comboGrupoOpcionInput = z.object({
+  productoVentaId: z.string().cuid(),
+  precioExtra: guaraniEntero.default(0),
+  esDefault: z.boolean().default(false),
+  orden: z.number().int().nonnegative().default(0),
+});
+
+export const comboGrupoInput = z.object({
+  nombre: z.string().trim().min(1).max(100),
+  orden: z.number().int().nonnegative().default(0),
+  tipo: z.nativeEnum(TipoModificadorGrupo).default(TipoModificadorGrupo.UNICA),
+  obligatorio: z.boolean().default(true),
+  opciones: z.array(comboGrupoOpcionInput).min(1).max(50),
+});
+
+export const setComboInput = z.object({
+  descripcion: z.string().trim().max(500).optional(),
+  grupos: z.array(comboGrupoInput).min(1).max(20),
+});
+
 export type ListarProductosQuery = z.infer<typeof listarProductosQuery>;
 export type CrearCategoriaInput = z.infer<typeof crearCategoriaInput>;
 export type ActualizarCategoriaInput = z.infer<typeof actualizarCategoriaInput>;
@@ -110,3 +138,6 @@ export type ActualizarProductoInput = z.infer<typeof actualizarProductoInput>;
 export type SetPrecioSucursalInput = z.infer<typeof setPrecioSucursalInput>;
 export type SetRecetaInput = z.infer<typeof setRecetaInput>;
 export type ItemRecetaInput = z.infer<typeof itemRecetaInput>;
+export type SetComboInput = z.infer<typeof setComboInput>;
+export type ComboGrupoInput = z.infer<typeof comboGrupoInput>;
+export type ComboGrupoOpcionInput = z.infer<typeof comboGrupoOpcionInput>;

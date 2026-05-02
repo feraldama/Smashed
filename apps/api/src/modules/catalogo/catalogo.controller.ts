@@ -10,6 +10,7 @@ import {
   listarProductosQuery,
   obtenerProductoParams,
   productoIdParam,
+  setComboInput,
   setPrecioSucursalInput,
   setRecetaInput,
 } from './catalogo.schemas.js';
@@ -138,5 +139,20 @@ export async function eliminarReceta(req: Request, res: Response) {
   const { empresaId } = requireEmpresa(req);
   const { id } = productoIdParam.parse(req.params);
   await service.eliminarReceta(empresaId, id);
+  res.status(204).send();
+}
+
+export async function setCombo(req: Request, res: Response) {
+  const { empresaId } = requireEmpresa(req);
+  const { id } = productoIdParam.parse(req.params);
+  const input = setComboInput.parse(req.body);
+  const combo = await service.setCombo(empresaId, id, input);
+  res.json({ combo });
+}
+
+export async function eliminarCombo(req: Request, res: Response) {
+  const { empresaId } = requireEmpresa(req);
+  const { id } = productoIdParam.parse(req.params);
+  await service.eliminarCombo(empresaId, id);
   res.status(204).send();
 }
