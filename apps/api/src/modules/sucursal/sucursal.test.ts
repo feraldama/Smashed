@@ -1,8 +1,8 @@
 /**
  * Tests del módulo sucursal.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../app.js';
 import { prisma } from '../../lib/prisma.js';
@@ -26,9 +26,7 @@ async function cleanupTest() {
 describe('GET /sucursales', () => {
   it('admin lista sucursales de su empresa', async () => {
     const token = await login(ADMIN);
-    const res = await request(app)
-      .get('/sucursales')
-      .set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/sucursales').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.sucursales.length).toBeGreaterThanOrEqual(2);
     const nombres = res.body.sucursales.map((s: { nombre: string }) => s.nombre);
@@ -37,9 +35,7 @@ describe('GET /sucursales', () => {
 
   it('cajero también puede listar (lo necesitan los selectores)', async () => {
     const token = await login(CAJERO);
-    const res = await request(app)
-      .get('/sucursales')
-      .set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/sucursales').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
   });
 });
@@ -83,14 +79,21 @@ describe('POST /sucursales', () => {
   it('rechaza establecimiento duplicado → 409', async () => {
     await cleanupTest();
     const token = await login(ADMIN);
-    await request(app)
-      .post('/sucursales')
-      .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: 'Sucursal A', codigo: 'TEST_A', establecimiento: '777', direccion: 'Calle Test 100' });
+    await request(app).post('/sucursales').set('Authorization', `Bearer ${token}`).send({
+      nombre: 'Sucursal A',
+      codigo: 'TEST_A',
+      establecimiento: '777',
+      direccion: 'Calle Test 100',
+    });
     const res = await request(app)
       .post('/sucursales')
       .set('Authorization', `Bearer ${token}`)
-      .send({ nombre: 'Sucursal B', codigo: 'TEST_B', establecimiento: '777', direccion: 'Calle Test 200' });
+      .send({
+        nombre: 'Sucursal B',
+        codigo: 'TEST_B',
+        establecimiento: '777',
+        direccion: 'Calle Test 200',
+      });
     expect(res.status).toBe(409);
   });
 
@@ -189,18 +192,14 @@ describe('DELETE /sucursales/:id', () => {
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
 
-    const list = await request(app)
-      .get('/sucursales')
-      .set('Authorization', `Bearer ${token}`);
+    const list = await request(app).get('/sucursales').set('Authorization', `Bearer ${token}`);
     const ids = list.body.sucursales.map((s: { id: string }) => s.id);
     expect(ids).not.toContain(id);
   });
 
   it('rechaza eliminar sucursal con comprobantes (Centro tiene)', async () => {
     const token = await login(ADMIN);
-    const list = await request(app)
-      .get('/sucursales')
-      .set('Authorization', `Bearer ${token}`);
+    const list = await request(app).get('/sucursales').set('Authorization', `Bearer ${token}`);
     const centro = list.body.sucursales.find(
       (s: { nombre: string }) => s.nombre === 'Asunción Centro',
     );

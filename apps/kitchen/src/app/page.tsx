@@ -1,7 +1,7 @@
 'use client';
 
 import { ChefHat, LogOut, Volume2, VolumeX } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 
 import { AuthGate } from '@/components/AuthGate';
 import { PedidoKdsCard } from '@/components/PedidoKdsCard';
@@ -70,7 +70,7 @@ function KdsScreen() {
     map.set('TODOS', 0);
     for (const p of pedidos) {
       for (const it of p.items) {
-        const s = (it.sectorComanda ?? it.productoVenta.sectorComanda);
+        const s = it.sectorComanda ?? it.productoVenta.sectorComanda;
         if (s) {
           map.set(s, (map.get(s) ?? 0) + 1);
         }
@@ -133,7 +133,9 @@ function KdsScreen() {
             </span>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => {
+                void logout();
+              }}
               className="flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
             >
               <LogOut className="h-3.5 w-3.5" /> Salir

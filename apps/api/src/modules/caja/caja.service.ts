@@ -1,4 +1,4 @@
-import { EstadoCaja, MetodoPago, type Rol, TipoMovimientoCaja } from '@prisma/client';
+import { EstadoCaja, MetodoPago, type Prisma, type Rol, TipoMovimientoCaja } from '@prisma/client';
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -34,8 +34,10 @@ export async function listarCajas(user: UserCtx) {
   if (!user.sucursalActivaId && !user.isSuperAdmin) {
     throw Errors.forbidden('Seleccioná una sucursal activa');
   }
-  const where =
-    user.isSuperAdmin && !user.sucursalActivaId ? {} : { sucursalId: user.sucursalActivaId! };
+  const where: Prisma.CajaWhereInput =
+    user.isSuperAdmin && !user.sucursalActivaId
+      ? {}
+      : { sucursalId: user.sucursalActivaId ?? undefined };
 
   const cajas = await prisma.caja.findMany({
     where: { ...where, activa: true },

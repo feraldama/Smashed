@@ -65,7 +65,9 @@ function UsuariosScreen() {
       toast.error('No podés eliminar tu propio usuario');
       return;
     }
-    if (!confirm(`¿Eliminar a ${u.nombreCompleto}? Esto cierra sus sesiones y le bloquea el login.`)) {
+    if (
+      !confirm(`¿Eliminar a ${u.nombreCompleto}? Esto cierra sus sesiones y le bloquea el login.`)
+    ) {
       return;
     }
     try {
@@ -173,7 +175,9 @@ function UsuariosScreen() {
                   isMe={u.id === me?.id}
                   onEdit={() => setEditando(u)}
                   onResetPassword={() => setReseteando(u)}
-                  onDelete={() => handleEliminar(u)}
+                  onDelete={() => {
+                    void handleEliminar(u);
+                  }}
                 />
               ))}
             </tbody>
@@ -244,8 +248,7 @@ function UsuarioRow({
             'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide',
             usuario.rol === 'SUPER_ADMIN' &&
               'bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200',
-            usuario.rol === 'ADMIN_EMPRESA' &&
-              'bg-primary/15 text-primary',
+            usuario.rol === 'ADMIN_EMPRESA' && 'bg-primary/15 text-primary',
             usuario.rol === 'GERENTE_SUCURSAL' &&
               'bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200',
             (usuario.rol === 'CAJERO' ||

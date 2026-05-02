@@ -99,7 +99,12 @@ export function InsumoFormModal({ insumo, onClose }: InsumoFormModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-5"
+        >
           <div className="grid gap-3 sm:grid-cols-[1fr_140px]">
             <Field label="Nombre" required>
               <Input

@@ -6,11 +6,7 @@ import { useState } from 'react';
 import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
-import {
-  type Sucursal,
-  useActualizarSucursal,
-  useCrearSucursal,
-} from '@/hooks/useSucursales';
+import { type Sucursal, useActualizarSucursal, useCrearSucursal } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 
 interface Props {
@@ -81,9 +77,10 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : null;
       let msg = apiErr?.message ?? 'Error al guardar';
-      const fields = apiErr?.details && typeof apiErr.details === 'object'
-        ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
-        : undefined;
+      const fields =
+        apiErr?.details && typeof apiErr.details === 'object'
+          ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
+          : undefined;
       if (fields) {
         const k = Object.keys(fields)[0];
         if (k && fields[k]?.[0]) msg = `${k}: ${fields[k][0]}`;
@@ -93,15 +90,16 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
       <div
         className="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b p-4">
-          <h2 className="text-lg font-semibold">
-            {isEdit ? 'Editar sucursal' : 'Nueva sucursal'}
-          </h2>
+          <h2 className="text-lg font-semibold">{isEdit ? 'Editar sucursal' : 'Nueva sucursal'}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -112,7 +110,12 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="flex flex-1 flex-col overflow-hidden">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="flex flex-1 flex-col overflow-hidden"
+        >
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
             <div className="grid gap-3 sm:grid-cols-[1fr_140px_120px]">
               <Field label="Nombre" required>
@@ -132,14 +135,12 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
                   maxLength={20}
                 />
               </Field>
-              <Field
-                label="Establecimiento"
-                required
-                hint="3 dígitos SIFEN"
-              >
+              <Field label="Establecimiento" required hint="3 dígitos SIFEN">
                 <Input
                   value={establecimiento}
-                  onChange={(e) => setEstablecimiento(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                  onChange={(e) =>
+                    setEstablecimiento(e.target.value.replace(/\D/g, '').slice(0, 3))
+                  }
                   className="text-center font-mono"
                   placeholder="001"
                   maxLength={3}
@@ -157,7 +158,11 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Ciudad">
-                <Input value={ciudad} onChange={(e) => setCiudad(e.target.value)} placeholder="Asunción" />
+                <Input
+                  value={ciudad}
+                  onChange={(e) => setCiudad(e.target.value)}
+                  placeholder="Asunción"
+                />
               </Field>
               <Field label="Departamento">
                 <Input
@@ -170,7 +175,11 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Teléfono">
-                <Input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+595 21 ..." />
+                <Input
+                  value={telefono}
+                  onChange={(e) => setTelefono(e.target.value)}
+                  placeholder="+595 21 ..."
+                />
               </Field>
               <Field label="Email">
                 <Input
@@ -216,7 +225,11 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
               disabled={isPending}
               className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-60"
             >
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
               Guardar
             </button>
           </div>

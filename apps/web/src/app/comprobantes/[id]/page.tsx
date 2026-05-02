@@ -365,7 +365,9 @@ function SifenAcciones({
       {puedeEnviar && (
         <button
           type="button"
-          onClick={handleEnviar}
+          onClick={() => {
+            void handleEnviar();
+          }}
           disabled={enviar.isPending}
           className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
         >
@@ -380,7 +382,9 @@ function SifenAcciones({
       {puedeConsultar && (
         <button
           type="button"
-          onClick={handleConsultar}
+          onClick={() => {
+            void handleConsultar();
+          }}
           disabled={consultar.isFetching}
           className="flex items-center gap-1.5 rounded-md border border-input px-3 py-2 text-sm hover:bg-accent disabled:opacity-50"
         >

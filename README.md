@@ -30,10 +30,10 @@ Sistema de Gestión de Pedidos y Facturación multi-sucursal para cadena de comi
 ```
 smash/
 ├── apps/
-│   ├── api/         # Express + Prisma + Socket.io (puerto 3001)
-│   ├── web/         # Next.js — panel administrativo (puerto 3000)
-│   ├── pos/         # Next.js — POS optimizado (puerto 3002)
-│   ├── kitchen/     # Next.js — Kitchen Display System (puerto 3003)
+│   ├── api/         # Express + Prisma + Socket.io (puerto 3020)
+│   ├── web/         # Next.js — panel administrativo (puerto 3019)
+│   ├── pos/         # Next.js — POS optimizado (puerto 3021)
+│   ├── kitchen/     # Next.js — Kitchen Display System (puerto 3022)
 │   └── worker/      # BullMQ workers (PedidosYa, reportes, SIFEN)
 ├── packages/
 │   ├── shared-types/     # tipos TS compartidos

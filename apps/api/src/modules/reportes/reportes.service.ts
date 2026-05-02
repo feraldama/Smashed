@@ -67,12 +67,12 @@ export async function resumenVentas(user: UserCtx, q: RangoFechasQuery) {
       ${sucursalFragment(sucursalId)}
   `;
 
-  const r = rows[0]!;
+  const r = rows[0];
   return {
-    total: r.total ?? 0n,
-    cantidad: Number(r.cantidad ?? 0n),
-    ticketPromedio: r.ticket_promedio ?? 0n,
-    ivaTotal: r.iva_total ?? 0n,
+    total: r?.total ?? 0n,
+    cantidad: Number(r?.cantidad ?? 0n),
+    ticketPromedio: r?.ticket_promedio ?? 0n,
+    ivaTotal: r?.iva_total ?? 0n,
   };
 }
 

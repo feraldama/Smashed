@@ -1,5 +1,3 @@
-import type { Request, Response } from 'express';
-
 import { Errors } from '../../lib/errors.js';
 
 import {
@@ -10,6 +8,8 @@ import {
   usuarioIdParam,
 } from './usuario.schemas.js';
 import * as service from './usuario.service.js';
+
+import type { Request, Response } from 'express';
 
 function ctxOrThrow(req: Request) {
   if (!req.context) throw Errors.unauthorized();

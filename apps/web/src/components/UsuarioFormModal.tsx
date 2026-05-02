@@ -57,8 +57,8 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
       else m.set(sucursalId, false);
       // si quedó solo una, marcarla como principal automáticamente
       if (m.size === 1) {
-        const only = m.keys().next().value!;
-        m.set(only, true);
+        const only = m.keys().next().value;
+        if (only) m.set(only, true);
       }
       return m;
     });
@@ -88,7 +88,13 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
     );
 
     // Roles que requieren al menos una sucursal asignada
-    const rolesQueRequierenSucursal: Rol[] = ['CAJERO', 'COCINA', 'MESERO', 'REPARTIDOR', 'GERENTE_SUCURSAL'];
+    const rolesQueRequierenSucursal: Rol[] = [
+      'CAJERO',
+      'COCINA',
+      'MESERO',
+      'REPARTIDOR',
+      'GERENTE_SUCURSAL',
+    ];
     if (rolesQueRequierenSucursal.includes(rol) && sucursales.length === 0) {
       return setError(`El rol ${rol} requiere al menos una sucursal asignada`);
     }
@@ -122,9 +128,10 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : null;
       let msg = apiErr?.message ?? 'Error al guardar';
-      const fields = apiErr?.details && typeof apiErr.details === 'object'
-        ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
-        : undefined;
+      const fields =
+        apiErr?.details && typeof apiErr.details === 'object'
+          ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
+          : undefined;
       if (fields) {
         const k = Object.keys(fields)[0];
         if (k && fields[k]?.[0]) msg = `${k}: ${fields[k][0]}`;
@@ -134,15 +141,16 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
       <div
         className="flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex shrink-0 items-center justify-between border-b p-4">
-          <h2 className="text-lg font-semibold">
-            {isEdit ? 'Editar usuario' : 'Nuevo usuario'}
-          </h2>
+          <h2 className="text-lg font-semibold">{isEdit ? 'Editar usuario' : 'Nuevo usuario'}</h2>
           <button
             type="button"
             onClick={onClose}
@@ -154,7 +162,9 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
         </div>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
           className="flex flex-1 flex-col overflow-hidden"
           id="usuario-form"
         >
@@ -297,7 +307,8 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
                 </div>
               )}
               <p className="mt-1 text-[11px] text-muted-foreground">
-                Marcá la sucursal principal — es la que abre por default cuando el usuario se loguea.
+                Marcá la sucursal principal — es la que abre por default cuando el usuario se
+                loguea.
               </p>
             </div>
 
@@ -322,7 +333,11 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
               disabled={isPending}
               className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              {isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+              {isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="h-4 w-4" />
+              )}
               Guardar
             </button>
           </div>

@@ -12,12 +12,6 @@ import {
 import { cn } from '@/lib/utils';
 
 // Tipos del shape que devuelve /catalogo/productos/:id (más flexible que ProductoDetalle del hook).
-interface Opcion {
-  id: string;
-  nombre: string;
-  precioExtra?: string | number;
-  esDefault?: boolean;
-}
 
 interface ComboGrupo {
   id: string;
@@ -45,23 +39,44 @@ interface ModGrupo {
 
 interface Props {
   productoId: string;
+  /**
+   * Si viene, el modal abre en modo "editar": precarga las selecciones y cantidad
+   * desde el item del carrito y al confirmar reemplaza la línea en vez de crear una nueva.
+   */
+  initialItem?: ItemCarrito;
   onCancel: () => void;
   onConfirm: (item: Omit<ItemCarrito, 'lineId' | 'cantidad'> & { cantidad: number }) => void;
 }
 
-export function ConfigurarItemModal({ productoId, onCancel, onConfirm }: Props) {
+export function ConfigurarItemModal({ productoId, initialItem, onCancel, onConfirm }: Props) {
   const { data: producto, isLoading } = useProductoDetalle(productoId);
+  const isEdit = Boolean(initialItem);
 
-  const [cantidad, setCantidad] = useState(1);
-  const [observaciones, setObservaciones] = useState('');
+  const [cantidad, setCantidad] = useState(initialItem?.cantidad ?? 1);
+  const [observaciones, setObservaciones] = useState(initialItem?.observaciones ?? '');
 
   // Combos: 1 opción por grupo
-  const [comboSel, setComboSel] = useState<Record<string, string>>({});
-  // Modificadores: opcionId → seleccionado
-  const [modSel, setModSel] = useState<Record<string, Set<string>>>({});
+  const [comboSel, setComboSel] = useState<Record<string, string>>(() => {
+    if (!initialItem) return {};
+    const init: Record<string, string> = {};
+    for (const c of initialItem.combosOpcion) init[c.comboGrupoId] = c.comboGrupoOpcionId;
+    return init;
+  });
+  // Modificadores: grupoId → set de opcionIds seleccionadas
+  const [modSel, setModSel] = useState<Record<string, Set<string>>>(() => {
+    if (!initialItem) return {};
+    const init: Record<string, Set<string>> = {};
+    for (const m of initialItem.modificadores) {
+      const set = init[m.modificadorGrupoId] ?? new Set<string>();
+      set.add(m.modificadorOpcionId);
+      init[m.modificadorGrupoId] = set;
+    }
+    return init;
+  });
 
-  // Defaults al cargar
+  // Defaults al cargar (solo si NO estamos editando — si editamos ya tenemos las selecciones)
   useEffect(() => {
+    if (isEdit) return;
     if (!producto) return;
     const combo = producto.combo as { grupos: ComboGrupo[] } | null;
     if (combo?.grupos) {
@@ -72,7 +87,7 @@ export function ConfigurarItemModal({ productoId, onCancel, onConfirm }: Props) 
       }
       setComboSel(init);
     }
-  }, [producto]);
+  }, [producto, isEdit]);
 
   const combo = (producto?.combo as { grupos: ComboGrupo[] } | null) ?? null;
   const modGrupos = (producto?.modificadorGrupos as ModGrupo[] | undefined) ?? [];
@@ -355,7 +370,7 @@ export function ConfigurarItemModal({ productoId, onCancel, onConfirm }: Props) 
             onClick={handleConfirm}
             className="rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
           >
-            Agregar al carrito
+            {isEdit ? 'Guardar cambios' : 'Agregar al carrito'}
           </button>
         </div>
       </div>

@@ -42,7 +42,7 @@ export function useClientes(busqueda?: string) {
 export function useCliente(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'cliente', id],
-    queryFn: () => api<{ cliente: ClienteDetalle }>(`/clientes/${id!}`),
+    queryFn: () => api<{ cliente: ClienteDetalle }>(`/clientes/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.cliente,
   });

@@ -106,9 +106,9 @@ export function verifyRefreshToken(token: string): RefreshTokenPayload {
  */
 export function parseDurationToMs(duration: string): number {
   const match = /^(\d+)([smhd])$/.exec(duration);
-  if (!match) throw new Error(`Duración inválida: ${duration}`);
+  if (!match?.[1] || !match[2]) throw new Error(`Duración inválida: ${duration}`);
   const [, n, unit] = match;
-  const value = Number.parseInt(n!, 10);
+  const value = Number.parseInt(n, 10);
   switch (unit) {
     case 's':
       return value * 1000;

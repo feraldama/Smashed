@@ -21,7 +21,7 @@ export const emitirComprobanteInput = z
     notas: z.string().trim().max(500).optional(),
   })
   .refine(
-    (input) => {
+    () => {
       // Validación cruzada: TICKET sólo para consumidor final
       // (la regla fiscal real puede variar; lo dejamos relajado a nivel schema)
       return true;

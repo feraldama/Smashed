@@ -1,4 +1,4 @@
-import { Prisma, type Rol } from '@prisma/client';
+import { type Prisma, type Rol } from '@prisma/client';
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -49,7 +49,11 @@ export async function listarSucursales(user: UserCtx) {
   const sucursales = await prisma.sucursal.findMany({
     where: {
       deletedAt: null,
-      ...(user.isSuperAdmin && !user.empresaId ? {} : { empresaId: user.empresaId! }),
+      ...(user.isSuperAdmin && !user.empresaId
+        ? {}
+        : user.empresaId
+          ? { empresaId: user.empresaId }
+          : {}),
     },
     select: SELECT_SUCURSAL,
     orderBy: [{ activa: 'desc' }, { nombre: 'asc' }],
@@ -64,7 +68,8 @@ export async function listarSucursales(user: UserCtx) {
 
 export async function obtenerSucursal(user: UserCtx, id: string) {
   const s = await prisma.sucursal.findUnique({ where: { id }, select: SELECT_SUCURSAL });
-  if (!s || (s as { deletedAt?: Date | null }).deletedAt) throw Errors.notFound('Sucursal no encontrada');
+  if (!s || (s as { deletedAt?: Date | null }).deletedAt)
+    throw Errors.notFound('Sucursal no encontrada');
   if (!user.isSuperAdmin && s.empresaId !== user.empresaId) throw Errors.tenantMismatch();
   return s;
 }
@@ -76,11 +81,12 @@ export async function obtenerSucursal(user: UserCtx, id: string) {
 export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
   if (!ROLES_GESTION.includes(user.rol)) throw Errors.forbidden();
   if (!user.empresaId) throw Errors.forbidden('Sin empresa asignada');
+  const empresaId = user.empresaId;
 
   // Código y establecimiento únicos por empresa
   const ya = await prisma.sucursal.findFirst({
     where: {
-      empresaId: user.empresaId,
+      empresaId,
       deletedAt: null,
       OR: [{ codigo: input.codigo }, { establecimiento: input.establecimiento }],
     },
@@ -97,7 +103,7 @@ export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
   return prisma.$transaction(async (tx) => {
     const sucursal = await tx.sucursal.create({
       data: {
-        empresaId: user.empresaId!,
+        empresaId,
         nombre: input.nombre,
         codigo: input.codigo,
         establecimiento: input.establecimiento,
@@ -130,7 +136,11 @@ export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
 //  ACTUALIZAR
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function actualizarSucursal(user: UserCtx, id: string, input: ActualizarSucursalInput) {
+export async function actualizarSucursal(
+  user: UserCtx,
+  id: string,
+  input: ActualizarSucursalInput,
+) {
   if (!ROLES_GESTION.includes(user.rol)) throw Errors.forbidden();
 
   const target = await prisma.sucursal.findUnique({
@@ -164,9 +174,7 @@ export async function actualizarSucursal(user: UserCtx, id: string, input: Actua
       select: { id: true },
     });
     if (ya) {
-      throw Errors.conflict(
-        `Ya existe una sucursal con establecimiento ${input.establecimiento}`,
-      );
+      throw Errors.conflict(`Ya existe una sucursal con establecimiento ${input.establecimiento}`);
     }
   }
 

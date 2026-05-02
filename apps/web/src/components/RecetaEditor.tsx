@@ -94,7 +94,6 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
         })),
       );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [producto.id]);
 
   function agregarItem(tipo: 'INSUMO' | 'SUB') {
@@ -205,7 +204,9 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
         {recetaExistente && (
           <button
             type="button"
-            onClick={handleEliminarReceta}
+            onClick={() => {
+              void handleEliminarReceta();
+            }}
             disabled={eliminarReceta.isPending}
             className="rounded-md border border-destructive/30 px-2.5 py-1 text-xs text-destructive hover:bg-destructive/10"
           >
@@ -270,7 +271,9 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
       <div className="mt-4 flex justify-end">
         <button
           type="button"
-          onClick={handleGuardar}
+          onClick={() => {
+            void handleGuardar();
+          }}
           disabled={setReceta.isPending || items.length === 0}
           className={cn(
             'flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground',

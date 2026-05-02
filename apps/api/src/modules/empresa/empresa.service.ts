@@ -1,12 +1,9 @@
-import { Prisma, type Rol } from '@prisma/client';
+import { type Prisma, type Rol } from '@prisma/client';
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
-import type {
-  ActualizarConfiguracionInput,
-  ActualizarEmpresaInput,
-} from './empresa.schemas.js';
+import type { ActualizarConfiguracionInput, ActualizarEmpresaInput } from './empresa.schemas.js';
 
 interface UserCtx {
   userId: string;

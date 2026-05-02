@@ -50,7 +50,12 @@ export function CancelarSifenModal({ comprobanteId, numeroDocumento, onClose }: 
             <X className="h-4 w-4" />
           </button>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4 p-4">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-4"
+        >
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
             <strong>Atención:</strong> el comprobante{' '}
             <span className="font-mono">{numeroDocumento}</span> quedará anulado en SIFEN y

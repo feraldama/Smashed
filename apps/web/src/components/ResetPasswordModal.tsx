@@ -38,7 +38,10 @@ export function ResetPasswordModal({ usuario, onClose }: Props) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      onClick={onClose}
+    >
       <div
         className="w-full max-w-md overflow-hidden rounded-lg bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
@@ -56,7 +59,12 @@ export function ResetPasswordModal({ usuario, onClose }: Props) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-5"
+        >
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
             <strong>Atención:</strong> al resetear la password de{' '}
             <span className="font-mono">{usuario.email}</span>, se cierran todas sus sesiones

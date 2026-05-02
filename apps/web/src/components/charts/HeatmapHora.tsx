@@ -56,8 +56,8 @@ export function HeatmapHora({ celdas }: HeatmapHoraProps) {
                     className="aspect-square min-w-[20px] rounded-sm transition-transform hover:scale-110 hover:ring-2 hover:ring-primary/30"
                     style={{ backgroundColor: colorFor(cant) }}
                     title={
-                      cant > 0
-                        ? `${dia} ${h}:00 — ${cant} venta${cant !== 1 ? 's' : ''} · ${formatGs(cell!.total)}`
+                      cant > 0 && cell
+                        ? `${dia} ${h}:00 — ${cant} venta${cant !== 1 ? 's' : ''} · ${formatGs(cell.total)}`
                         : `${dia} ${h}:00 — sin ventas`
                     }
                   />

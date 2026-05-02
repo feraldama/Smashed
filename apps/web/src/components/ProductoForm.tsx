@@ -100,7 +100,12 @@ export function ProductoForm({ producto }: ProductoFormProps) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="grid gap-6 lg:grid-cols-[1fr_320px]">
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
+      className="grid gap-6 lg:grid-cols-[1fr_320px]"
+    >
       {/* ═══ Columna izquierda — datos principales ═══ */}
       <div className="space-y-4">
         <Section title="Datos básicos">
@@ -219,7 +224,6 @@ export function ProductoForm({ producto }: ProductoFormProps) {
       <div className="space-y-4">
         <Section title="Imagen">
           {imagenUrl && !imagenError ? (
-            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={imagenUrl}
               alt={nombre || 'Producto'}

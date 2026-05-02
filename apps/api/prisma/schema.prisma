@@ -17,13 +17,12 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions", "fullTextSearch"]
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
   binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {
   provider   = "postgresql"
-  url        = env("DATABASE_URL")
   extensions = [pgcrypto, pgTrgm(map: "pg_trgm"), unaccent, uuidOssp(map: "uuid-ossp")]
 }
 
@@ -1158,6 +1157,8 @@ model ItemPedido {
   // Estado por línea (útil cuando un mismo pedido tiene items en distintos sectores)
   estado          EstadoPedido @default(PENDIENTE)
   sectorComanda   SectorComanda? @map("sector_comanda")
+  enPreparacionEn DateTime? @map("en_preparacion_en")
+  listoEn         DateTime? @map("listo_en")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1200,10 +1201,20 @@ model ItemPedidoComboOpcion {
   // Snapshot del precio extra
   precioExtra BigInt @default(0) @map("precio_extra")
 
+  // Cada opción del combo es una sub-tarea de cocina con su propio sector y estado:
+  // cocina, bar y parrilla marcan independiente sin pisarse. El ItemPedido pasa a
+  // LISTO cuando todas sus opciones lo están.
+  estado          EstadoPedido @default(PENDIENTE)
+  sectorComanda   SectorComanda? @map("sector_comanda")
+  enPreparacionEn DateTime? @map("en_preparacion_en")
+  listoEn         DateTime? @map("listo_en")
+
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   @@unique([itemPedidoId, comboGrupoId])
   @@index([comboGrupoOpcionId])
+  @@index([sectorComanda, estado])
   @@map("item_pedido_combo_opcion")
 }
 

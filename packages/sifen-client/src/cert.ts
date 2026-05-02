@@ -29,9 +29,14 @@ export function cargarP12(p12Bytes: Buffer, password: string): CertCargado {
   const p12Asn1 = forge.asn1.fromDer(p12Der);
   const p12 = forge.pkcs12.pkcs12FromAsn1(p12Asn1, password);
 
-  // Extraer el primer cert + clave privada
-  const certBagOid = forge.pki.oids.certBag!;
-  const keyBagOid = forge.pki.oids.pkcs8ShroudedKeyBag!;
+  // Extraer el primer cert + clave privada. Los OIDs vienen tipados como
+  // `string | undefined` pero forge los define siempre — falla el build de forge
+  // si alguna falta, así que un guard ya cubre el caso degenerado.
+  const certBagOid = forge.pki.oids.certBag;
+  const keyBagOid = forge.pki.oids.pkcs8ShroudedKeyBag;
+  if (!certBagOid || !keyBagOid) {
+    throw new Error('OIDs de forge no disponibles — versión de node-forge corrupta');
+  }
   const certBags = p12.getBags({ bagType: certBagOid });
   const keyBags = p12.getBags({ bagType: keyBagOid });
 

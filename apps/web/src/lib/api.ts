@@ -52,11 +52,10 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const json: unknown = text ? JSON.parse(text) : null;
 
   if (!res.ok) {
-    const errPayload = (
+    const errPayload =
       json && typeof json === 'object' && 'error' in json
         ? (json as { error: ApiErrorPayload }).error
-        : { code: 'UNKNOWN', message: res.statusText }
-    );
+        : { code: 'UNKNOWN', message: res.statusText };
 
     if (res.status === 401 && errPayload.code === 'TOKEN_EXPIRED' && !_retry && !skipAuth) {
       const refreshed = await tryRefresh();
@@ -124,7 +123,12 @@ export async function bootstrapAuth() {
       };
       sucursalActivaId: string | null;
     }>('/auth/me');
-    store.setAuth(useAuthStore.getState().accessToken!, {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      store.clear();
+      return;
+    }
+    store.setAuth(token, {
       ...meResp.user,
       empresaId: meResp.user.empresa?.id ?? null,
       sucursalActivaId: meResp.sucursalActivaId,

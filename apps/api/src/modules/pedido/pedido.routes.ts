@@ -24,7 +24,13 @@ router.post('/:id/confirmar', requireOperativo, asyncH(ctrl.confirmar));
 router.post('/:id/items', requireOperativo, asyncH(ctrl.agregarItems));
 router.patch('/:id/estado', requireKitchen, asyncH(ctrl.transicionar));
 router.patch('/:id/items/:itemId/estado', requireKitchen, asyncH(ctrl.cambiarEstadoItem));
+router.patch(
+  '/:id/combo-opciones/:comboOpcionId/estado',
+  requireKitchen,
+  asyncH(ctrl.cambiarEstadoComboOpcion),
+);
 router.post('/:id/cancelar', requireOperativo, asyncH(ctrl.cancelar));
+router.post('/:id/entregar', requireKitchen, asyncH(ctrl.entregar));
 
 export default router;
 

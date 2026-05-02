@@ -1,4 +1,4 @@
-import { Prisma, type Rol } from '@prisma/client';
+import { type Prisma, type Rol } from '@prisma/client';
 import bcrypt from 'bcrypt';
 
 import { env } from '../../config/env.js';
@@ -63,7 +63,8 @@ const SELECT_USUARIO = {
 // ───────────────────────────────────────────────────────────────────────────
 
 export async function listarUsuarios(user: UserCtx, q: ListarUsuariosQuery) {
-  if (!ROLES_GESTION.includes(user.rol)) throw Errors.forbidden('Sin permiso para gestionar usuarios');
+  if (!ROLES_GESTION.includes(user.rol))
+    throw Errors.forbidden('Sin permiso para gestionar usuarios');
 
   const where: Prisma.UsuarioWhereInput = {
     ...(q.incluirInactivos ? {} : { deletedAt: null }),
@@ -204,7 +205,11 @@ export async function actualizarUsuario(user: UserCtx, id: string, input: Actual
   }
 
   // Solo SUPER_ADMIN cambia rol a/desde SUPER_ADMIN
-  if (input.rol && (input.rol === 'SUPER_ADMIN' || target.rol === 'SUPER_ADMIN') && !user.isSuperAdmin) {
+  if (
+    input.rol &&
+    (input.rol === 'SUPER_ADMIN' || target.rol === 'SUPER_ADMIN') &&
+    !user.isSuperAdmin
+  ) {
     throw Errors.forbidden('Solo SUPER_ADMIN puede modificar el rol SUPER_ADMIN');
   }
 

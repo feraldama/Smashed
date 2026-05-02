@@ -41,7 +41,7 @@ export function AjusteStockModal({
   const [motivo, setMotivo] = useState('');
   const [error, setError] = useState<string | null>(null);
 
-  const tipoActual = TIPOS.find((t) => t.value === tipo)!;
+  const tipoActual = TIPOS.find((t) => t.value === tipo) ?? TIPOS[0];
   const cantNum = Number.parseFloat(cantidad);
   const stockNum = Number(stockActual);
   const stockResultado = !Number.isNaN(cantNum)
@@ -92,7 +92,12 @@ export function AjusteStockModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-5"
+        >
           <div className="rounded-md bg-muted/40 p-3 text-sm">
             <p className="font-semibold">{insumoNombre}</p>
             <p className="text-xs text-muted-foreground">

@@ -178,7 +178,9 @@ function InsumosScreen() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleEliminar(i)}
+                          onClick={() => {
+                            void handleEliminar(i);
+                          }}
                           disabled={eliminar.isPending}
                           className="rounded-md p-1.5 text-destructive hover:bg-destructive/10"
                           aria-label="Eliminar"

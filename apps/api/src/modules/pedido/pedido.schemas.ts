@@ -1,4 +1,4 @@
-import { TipoPedido } from '@prisma/client';
+import { SectorComanda, TipoPedido } from '@prisma/client';
 import { z } from 'zod';
 
 const cantidadEntera = z.number().int().min(1).max(999);
@@ -48,6 +48,15 @@ export const itemEstadoInput = z.object({
 export const itemIdParam = z.object({
   id: z.string().cuid(),
   itemId: z.string().cuid(),
+});
+
+export const comboOpcionIdParam = z.object({
+  id: z.string().cuid(),
+  comboOpcionId: z.string().cuid(),
+});
+
+export const kdsQuery = z.object({
+  sector: z.nativeEnum(SectorComanda).optional(),
 });
 
 export const listarPedidosQuery = z.object({

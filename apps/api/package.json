@@ -20,14 +20,12 @@
     "prisma:seed": "tsx prisma/seed.ts",
     "prisma:reset": "prisma migrate reset --force"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.0.0",
     "@smash/shared-types": "workspace:*",
     "@smash/shared-utils": "workspace:*",
     "@smash/sifen-client": "workspace:*",
-    "@prisma/client": "^5.20.0",
     "bcrypt": "^5.1.1",
     "bullmq": "^5.21.2",
     "cookie-parser": "^1.4.7",
@@ -38,6 +36,7 @@
     "helmet": "^8.0.0",
     "ioredis": "^5.4.1",
     "jsonwebtoken": "^9.0.2",
+    "pg": "^8.20.0",
     "pino": "^9.4.0",
     "pino-http": "^10.3.0",
     "pino-pretty": "^11.2.2",
@@ -51,8 +50,9 @@
     "@types/express": "^4.17.21",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.16.10",
+    "@types/pg": "^8.20.0",
     "@types/supertest": "^6.0.2",
-    "prisma": "^5.20.0",
+    "prisma": "^7.0.0",
     "rimraf": "^6.0.1",
     "supertest": "^7.0.0",
     "tsx": "^4.19.1",

@@ -55,6 +55,7 @@ const ROLES_GESTION: Rol[] = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'
 export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteInput) {
   if (!user.empresaId) throw Errors.forbidden('Usuario sin empresa');
   if (!user.sucursalActivaId) throw Errors.forbidden('Seleccioná una sucursal activa');
+  const empresaId = user.empresaId;
 
   // Apertura de caja activa del usuario (donde se va a asociar la venta)
   const apertura = await prisma.aperturaCaja.findFirst({
@@ -181,7 +182,7 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
         // Crear comprobante
         const comprobante = await tx.comprobante.create({
           data: {
-            empresaId: user.empresaId!,
+            empresaId,
             sucursalId: pedido.sucursalId,
             puntoExpedicionId,
             timbradoId: timbrado.id,

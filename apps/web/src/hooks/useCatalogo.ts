@@ -33,9 +33,59 @@ export interface ProductoListado {
 export interface ProductoDetalle extends ProductoListado {
   tiempoPrepSegundos: number | null;
   esPreparacion: boolean;
-  receta: unknown | null;
-  combo: unknown | null;
+  receta: unknown;
+  combo: ComboConfig | null;
   modificadorGrupos: unknown[];
+}
+
+// ───── Combo (config) ─────
+
+export interface ComboOpcion {
+  id: string;
+  comboGrupoId: string;
+  productoVentaId: string;
+  precioExtra: string;
+  esDefault: boolean;
+  orden: number;
+  productoVenta: {
+    id: string;
+    codigo: string | null;
+    nombre: string;
+    precioBase: string;
+    imagenUrl: string | null;
+  };
+}
+
+export interface ComboGrupoConfig {
+  id: string;
+  comboId: string;
+  nombre: string;
+  orden: number;
+  tipo: 'UNICA' | 'MULTIPLE';
+  obligatorio: boolean;
+  opciones: ComboOpcion[];
+}
+
+export interface ComboConfig {
+  id: string;
+  productoVentaId: string;
+  descripcion: string | null;
+  grupos: ComboGrupoConfig[];
+}
+
+export interface SetComboInput {
+  descripcion?: string;
+  grupos: {
+    nombre: string;
+    orden: number;
+    obligatorio: boolean;
+    opciones: {
+      productoVentaId: string;
+      precioExtra: number;
+      esDefault: boolean;
+      orden: number;
+    }[];
+  }[];
 }
 
 // ───── Categorías ─────
@@ -98,12 +148,14 @@ export function useProductos(
     categoriaId?: string;
     busqueda?: string;
     incluirNoVendibles?: boolean;
+    esCombo?: boolean;
   } = {},
 ) {
   const params = new URLSearchParams();
   if (filtros.categoriaId) params.set('categoriaId', filtros.categoriaId);
   if (filtros.busqueda) params.set('busqueda', filtros.busqueda);
   if (filtros.incluirNoVendibles) params.set('incluirNoVendibles', 'true');
+  if (filtros.esCombo !== undefined) params.set('esCombo', String(filtros.esCombo));
   const qs = params.toString();
   return useQuery({
     queryKey: ['admin', 'productos', filtros],
@@ -116,7 +168,7 @@ export function useProductos(
 export function useProductoDetalle(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'producto', id],
-    queryFn: () => api<{ producto: ProductoDetalle }>(`/catalogo/productos/${id!}`),
+    queryFn: () => api<{ producto: ProductoDetalle }>(`/catalogo/productos/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.producto,
   });
@@ -173,6 +225,32 @@ export function useEliminarProducto() {
     mutationFn: (id: string) => api<void>(`/catalogo/productos/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+    },
+  });
+}
+
+export function useSetCombo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }: { id: string; input: SetComboInput }) =>
+      api<{ combo: ComboConfig }>(`/catalogo/productos/${id}/combo`, {
+        method: 'PUT',
+        body: input,
+      }),
+    onSuccess: (_d, vars) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', vars.id] });
+    },
+  });
+}
+
+export function useEliminarCombo() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/catalogo/productos/${id}/combo`, { method: 'DELETE' }),
+    onSuccess: (_d, id) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', id] });
     },
   });
 }

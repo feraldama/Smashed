@@ -101,7 +101,12 @@ export function ClienteFormModal({ cliente, onClose }: ClienteFormModalProps) {
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-5"
+        >
           <Field label="Tipo de contribuyente">
             <div className="grid gap-2 sm:grid-cols-3">
               {TIPOS.map((t) => (

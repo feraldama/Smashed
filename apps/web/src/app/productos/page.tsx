@@ -191,7 +191,9 @@ function ProductosScreen() {
                       </Link>
                       <button
                         type="button"
-                        onClick={() => handleEliminar(p.id, p.nombre)}
+                        onClick={() => {
+                          void handleEliminar(p.id, p.nombre);
+                        }}
                         disabled={eliminar.isPending}
                         className={cn(
                           'rounded-md p-1.5 text-destructive hover:bg-destructive/10',

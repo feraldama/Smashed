@@ -126,7 +126,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <p className="truncate text-[11px] text-muted-foreground">{user?.email}</p>
           <button
             type="button"
-            onClick={logout}
+            onClick={() => {
+              void logout();
+            }}
             className="mt-2 flex w-full items-center gap-1.5 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <LogOut className="h-3.5 w-3.5" /> Cerrar sesión
@@ -143,7 +145,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </h1>
           <button
             type="button"
-            onClick={logout}
+            onClick={() => {
+              void logout();
+            }}
             className="rounded-md border border-input p-2"
             aria-label="Logout"
           >

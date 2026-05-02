@@ -65,7 +65,7 @@ export function useInsumos(
 export function useInsumo(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'insumo', id],
-    queryFn: () => api<{ insumo: InsumoDetalle }>(`/inventario/${id!}`),
+    queryFn: () => api<{ insumo: InsumoDetalle }>(`/inventario/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.insumo,
   });

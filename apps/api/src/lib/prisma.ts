@@ -1,6 +1,7 @@
+import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 
-import { isDev } from '../config/env.js';
+import { env, isDev } from '../config/env.js';
 import { logger } from '../config/logger.js';
 
 /**
@@ -24,13 +25,15 @@ const logConfig = [
 ] as const;
 
 function createPrismaClient() {
-  return new PrismaClient({ log: [...logConfig] });
+  // Prisma 7 ya no acepta `url` en el datasource del schema; el cliente recibe
+  // la conexión vía driver adapter (pg para PostgreSQL).
+  const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });
+  return new PrismaClient({ adapter, log: [...logConfig] });
 }
 
 type AppPrismaClient = ReturnType<typeof createPrismaClient>;
 
 declare global {
-   
   var __prisma: AppPrismaClient | undefined;
 }
 

@@ -127,7 +127,9 @@ function ProveedoresScreen() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleEliminar(p)}
+                        onClick={() => {
+                          void handleEliminar(p);
+                        }}
                         disabled={eliminar.isPending}
                         className="rounded-md p-1.5 text-destructive hover:bg-destructive/10"
                         aria-label="Eliminar"

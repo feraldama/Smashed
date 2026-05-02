@@ -31,7 +31,7 @@ export function useProveedores(busqueda?: string) {
 export function useProveedor(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'proveedor', id],
-    queryFn: () => api<{ proveedor: ProveedorDetalle }>(`/proveedores/${id!}`),
+    queryFn: () => api<{ proveedor: ProveedorDetalle }>(`/proveedores/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.proveedor,
   });

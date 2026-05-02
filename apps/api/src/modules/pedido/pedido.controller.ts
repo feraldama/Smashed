@@ -1,12 +1,13 @@
-
 import { Errors } from '../../lib/errors.js';
 
 import {
   agregarItemsInput,
   cancelarPedidoInput,
+  comboOpcionIdParam,
   crearPedidoInput,
   itemEstadoInput,
   itemIdParam,
+  kdsQuery,
   listarPedidosQuery,
   pedidoIdParam,
   transicionEstadoInput,
@@ -72,9 +73,18 @@ export async function cambiarEstadoItem(req: Request, res: Response) {
   res.json(result);
 }
 
+export async function cambiarEstadoComboOpcion(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id, comboOpcionId } = comboOpcionIdParam.parse(req.params);
+  const { estado } = itemEstadoInput.parse(req.body);
+  const result = await service.cambiarEstadoComboOpcion(ctx, id, comboOpcionId, estado);
+  res.json(result);
+}
+
 export async function listarKds(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
-  const result = await service.listarPedidosParaKds(ctx);
+  const { sector } = kdsQuery.parse(req.query);
+  const result = await service.listarPedidosParaKds(ctx, sector);
   res.json(result);
 }
 
@@ -83,5 +93,12 @@ export async function agregarItems(req: Request, res: Response) {
   const { id } = pedidoIdParam.parse(req.params);
   const input = agregarItemsInput.parse(req.body);
   const pedido = await service.agregarItemsAPedido(ctx, id, input);
+  res.json({ pedido });
+}
+
+export async function entregar(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = pedidoIdParam.parse(req.params);
+  const pedido = await service.entregarPedido(ctx, id);
   res.json({ pedido });
 }

@@ -67,8 +67,8 @@ export function firmarXmlSifen(input: FirmarXmlInput): FirmarXmlResult {
 
   // 1. Encontrar el Id del nodo DE
   const idMatch = /<DE\s+Id="([^"]+)">/.exec(xml);
-  if (!idMatch) throw new Error('No se encontró atributo Id en el nodo <DE>');
-  const idDe = idMatch[1]!;
+  const idDe = idMatch?.[1];
+  if (!idDe) throw new Error('No se encontró atributo Id en el nodo <DE>');
 
   // 2. Extraer el nodo DE como string (entre <DE Id="..."> y </DE>)
   const deOpen = xml.indexOf(`<DE Id="${idDe}">`);
@@ -128,13 +128,13 @@ export function verificarFirma(xmlFirmado: string): { valid: boolean; error?: st
 
     // Extraer SignatureValue
     const svMatch = /<ds:SignatureValue>([\s\S]*?)<\/ds:SignatureValue>/.exec(sigBlock);
-    if (!svMatch) return { valid: false, error: 'No se encontró SignatureValue' };
-    const signatureValue = svMatch[1]!.trim();
+    if (!svMatch?.[1]) return { valid: false, error: 'No se encontró SignatureValue' };
+    const signatureValue = svMatch[1].trim();
 
     // Extraer cert
     const certMatch = /<ds:X509Certificate>([\s\S]*?)<\/ds:X509Certificate>/.exec(sigBlock);
-    if (!certMatch) return { valid: false, error: 'No se encontró X509Certificate' };
-    const certBase64 = certMatch[1]!.trim().replace(/\s+/g, '');
+    if (!certMatch?.[1]) return { valid: false, error: 'No se encontró X509Certificate' };
+    const certBase64 = certMatch[1].trim().replace(/\s+/g, '');
 
     // Reconstruir public key del cert
     const certDer = forge.util.decode64(certBase64);

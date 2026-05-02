@@ -1,5 +1,3 @@
-import type { Request, Response } from 'express';
-
 import { Errors } from '../../lib/errors.js';
 
 import {
@@ -8,6 +6,8 @@ import {
   sucursalIdParam,
 } from './sucursal.schemas.js';
 import * as service from './sucursal.service.js';
+
+import type { Request, Response } from 'express';
 
 function ctxOrThrow(req: Request) {
   if (!req.context) throw Errors.unauthorized();

@@ -21,7 +21,9 @@ export function LogoutButton({ compact = false }: { compact?: boolean }) {
   return (
     <button
       type="button"
-      onClick={logout}
+      onClick={() => {
+        void logout();
+      }}
       className="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       aria-label="Cerrar sesión"
     >

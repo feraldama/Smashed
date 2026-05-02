@@ -140,7 +140,7 @@ export function useComprobantes(filtros: ComprobantesFiltros = {}) {
 export function useComprobante(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'comprobante', id],
-    queryFn: () => api<{ comprobante: ComprobanteDetalle }>(`/comprobantes/${id!}`),
+    queryFn: () => api<{ comprobante: ComprobanteDetalle }>(`/comprobantes/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.comprobante,
   });
@@ -242,7 +242,7 @@ export interface EstadoSifenResponse {
 export function useConsultarEstadoSifen(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'comprobante', id, 'sifen-estado'],
-    queryFn: () => api<EstadoSifenResponse>(`/comprobantes/${id!}/sifen/estado`),
+    queryFn: () => api<EstadoSifenResponse>(`/comprobantes/${id ?? ''}/sifen/estado`),
     enabled: false, // sólo se dispara con refetch() manual
     retry: false,
   });

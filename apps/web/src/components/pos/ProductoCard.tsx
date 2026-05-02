@@ -26,7 +26,6 @@ export function ProductoCard({ producto, onClick }: Props) {
     >
       <div className="relative aspect-square w-full overflow-hidden bg-muted">
         {producto.imagenUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
           <img
             src={producto.imagenUrl}
             alt={producto.nombre}

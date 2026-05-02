@@ -8,7 +8,6 @@ import {
   Minus,
   Plus,
   Search,
-  Search as SearchIcon,
   ShoppingCart,
   Store,
   Trash2,
@@ -23,13 +22,13 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useReducer, useState } from 'react';
 
 import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
-import { LogoutButton } from '@/components/ui/LogoutButton';
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
 import { MesaSelector } from '@/components/pos/MesaSelector';
 import { ProductoCard } from '@/components/pos/ProductoCard';
 import { toast } from '@/components/Toast';
+import { LogoutButton } from '@/components/ui/LogoutButton';
 import { useMiAperturaActiva } from '@/hooks/useCaja';
 import {
   type Categoria,
@@ -84,6 +83,7 @@ function POSScreen() {
 
   const [cart, dispatch] = useReducer(cartReducer, cartInitial);
   const [configProductoId, setConfigProductoId] = useState<string | null>(null);
+  const [editandoItem, setEditandoItem] = useState<ItemCarrito | null>(null);
   const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; total: number } | null>(
     null,
   );
@@ -168,7 +168,7 @@ function POSScreen() {
           pedidoId: pedidoExistenteId,
           items: aPayloadPedidoItems(cart),
         });
-        toast.success(`+${cantidadTotal(cart)} ítems a la cuenta de Mesa ${mesa!.numero}`);
+        toast.success(`+${cantidadTotal(cart)} ítems a la cuenta de Mesa ${mesa?.numero ?? ''}`);
         dispatch({ type: 'CLEAR' });
         setMesa(null);
         setTipo('MOSTRADOR');
@@ -409,6 +409,7 @@ function POSScreen() {
                     onInc={() => dispatch({ type: 'INC', lineId: it.lineId })}
                     onDec={() => dispatch({ type: 'DEC', lineId: it.lineId })}
                     onRemove={() => dispatch({ type: 'REMOVE', lineId: it.lineId })}
+                    onEdit={() => setEditandoItem(it)}
                   />
                 ))}
               </ul>
@@ -425,7 +426,9 @@ function POSScreen() {
             </div>
             <button
               type="button"
-              onClick={handleConfirmarPedido}
+              onClick={() => {
+                void handleConfirmarPedido();
+              }}
               disabled={
                 cart.items.length === 0 ||
                 crearPedido.isPending ||
@@ -438,7 +441,7 @@ function POSScreen() {
                 <Loader2 className="h-5 w-5 animate-spin" />
               ) : pedidoExistenteId ? (
                 <>
-                  <Plus className="h-5 w-5" /> Agregar a Mesa {mesa!.numero} (#
+                  <Plus className="h-5 w-5" /> Agregar a Mesa {mesa?.numero} (#
                   {pedidoExistenteNumero})
                 </>
               ) : tipo === 'MESA' ? (
@@ -474,6 +477,18 @@ function POSScreen() {
               dispatch({ type: 'ADD', item });
               setConfigProductoId(null);
               toast.success(`+ ${item.nombre}`);
+            }}
+          />
+        )}
+        {editandoItem && (
+          <ConfigurarItemModal
+            productoId={editandoItem.productoVentaId}
+            initialItem={editandoItem}
+            onCancel={() => setEditandoItem(null)}
+            onConfirm={(item) => {
+              dispatch({ type: 'REPLACE', lineId: editandoItem.lineId, item });
+              setEditandoItem(null);
+              toast.success(`${item.nombre} actualizado`);
             }}
           />
         )}
@@ -588,19 +603,60 @@ function CartItemRow({
   onInc,
   onDec,
   onRemove,
+  onEdit,
 }: {
   item: ItemCarrito;
   onInc: () => void;
   onDec: () => void;
   onRemove: () => void;
+  onEdit: () => void;
 }) {
   const subtotal = precioLinea(item);
+  // El item es editable si tiene algo configurable: combo, modificadores u observaciones.
+  // Para un producto simple sin nada de eso, los botones +/-/x ya alcanzan.
+  const editable =
+    item.combosOpcion.length > 0 || item.modificadores.length > 0 || Boolean(item.observaciones);
   return (
     <li className="p-3">
       <div className="flex items-start gap-3">
         <div className="flex-1">
           <div className="flex items-start justify-between gap-2">
-            <p className="line-clamp-2 text-sm font-semibold">{item.nombre}</p>
+            {editable ? (
+              <button
+                type="button"
+                onClick={onEdit}
+                className="flex-1 cursor-pointer rounded-sm text-left hover:bg-accent/40"
+                aria-label={`Editar ${item.nombre}`}
+              >
+                <p className="line-clamp-2 text-sm font-semibold">{item.nombre}</p>
+                {item.combosOpcion.length > 0 && (
+                  <ul className="mt-0.5 text-[11px] text-muted-foreground">
+                    {item.combosOpcion.map((c) => (
+                      <li key={c.comboGrupoOpcionId}>
+                        · {c.grupoNombre}: {c.opcionNombre}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {item.modificadores.length > 0 && (
+                  <ul className="mt-0.5 text-[11px] text-muted-foreground">
+                    {item.modificadores.map((m) => (
+                      <li key={m.modificadorOpcionId}>+ {m.nombre}</li>
+                    ))}
+                  </ul>
+                )}
+                {item.observaciones && (
+                  <p className="mt-0.5 text-[11px] italic text-muted-foreground">
+                    · {item.observaciones}
+                  </p>
+                )}
+                <p className="mt-0.5 text-[10px] uppercase tracking-wide text-primary/70">
+                  Tocá para editar
+                </p>
+              </button>
+            ) : (
+              <p className="line-clamp-2 flex-1 text-sm font-semibold">{item.nombre}</p>
+            )}
             <button
               type="button"
               onClick={onRemove}
@@ -610,27 +666,6 @@ function CartItemRow({
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          {item.combosOpcion.length > 0 && (
-            <ul className="mt-0.5 text-[11px] text-muted-foreground">
-              {item.combosOpcion.map((c) => (
-                <li key={c.comboGrupoOpcionId}>
-                  · {c.grupoNombre}: {c.opcionNombre}
-                </li>
-              ))}
-            </ul>
-          )}
-          {item.modificadores.length > 0 && (
-            <ul className="mt-0.5 text-[11px] text-muted-foreground">
-              {item.modificadores.map((m) => (
-                <li key={m.modificadorOpcionId}>+ {m.nombre}</li>
-              ))}
-            </ul>
-          )}
-          {item.observaciones && (
-            <p className="mt-0.5 text-[11px] italic text-muted-foreground">
-              · {item.observaciones}
-            </p>
-          )}
           <div className="mt-2 flex items-center justify-between">
             <div className="flex items-center gap-1">
               <button

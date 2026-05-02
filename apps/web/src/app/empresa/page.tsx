@@ -1,6 +1,12 @@
 'use client';
 
-import { Building2, Image as ImageIcon, Loader2, Save, Settings as SettingsIcon } from 'lucide-react';
+import {
+  Building2,
+  Image as ImageIcon,
+  Loader2,
+  Save,
+  Settings as SettingsIcon,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
@@ -128,9 +134,10 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : null;
       let msg = apiErr?.message ?? 'Error al guardar';
-      const fields = apiErr?.details && typeof apiErr.details === 'object'
-        ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
-        : undefined;
+      const fields =
+        apiErr?.details && typeof apiErr.details === 'object'
+          ? (apiErr.details as { fieldErrors?: Record<string, string[]> }).fieldErrors
+          : undefined;
       if (fields) {
         const k = Object.keys(fields)[0];
         if (k && fields[k]?.[0]) msg = `${k}: ${fields[k][0]}`;
@@ -141,7 +148,9 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
 
   return (
     <form
-      onSubmit={handleSubmit}
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
       className="rounded-lg border bg-card p-5"
     >
       <h2 className="mb-4 text-sm font-bold uppercase tracking-wide text-muted-foreground">
@@ -192,7 +201,11 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
 
         <div className="grid gap-3 sm:grid-cols-2">
           <Field label="Teléfono">
-            <Input value={telefono} onChange={(e) => setTelefono(e.target.value)} placeholder="+595 ..." />
+            <Input
+              value={telefono}
+              onChange={(e) => setTelefono(e.target.value)}
+              placeholder="+595 ..."
+            />
           </Field>
           <Field label="Email">
             <Input
@@ -214,7 +227,6 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
         </Field>
         {logoUrl && (
           <div className="flex items-center gap-3 rounded-md border bg-muted/20 p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={logoUrl}
               alt="Logo preview"
@@ -229,7 +241,11 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
 
         <div className="grid gap-3 sm:grid-cols-2">
           <ColorField label="Color primario" value={colorPrimario} onChange={setColorPrimario} />
-          <ColorField label="Color secundario" value={colorSecundario} onChange={setColorSecundario} />
+          <ColorField
+            label="Color secundario"
+            value={colorSecundario}
+            onChange={setColorSecundario}
+          />
         </div>
 
         <Field label="Zona horaria" hint="ej: America/Asuncion">
@@ -320,28 +336,36 @@ function ConfiguracionCard({ empresa }: { empresa: Empresa }) {
           label="Permitir stock negativo"
           description="Si está activo, se permiten ventas aunque no haya stock suficiente. Útil para pre-venta o ajuste posterior."
           checked={empresa.configuracion.permitirStockNegativo}
-          onCheckedChange={(v) => update({ permitirStockNegativo: v })}
+          onCheckedChange={(v) => {
+            void update({ permitirStockNegativo: v });
+          }}
           disabled={actualizar.isPending}
         />
         <SwitchField
           label="Redondear totales"
           description="Redondea totales a unidades de Gs. 50 o 100 al emitir comprobantes."
           checked={empresa.configuracion.redondearTotales}
-          onCheckedChange={(v) => update({ redondearTotales: v })}
+          onCheckedChange={(v) => {
+            void update({ redondearTotales: v });
+          }}
           disabled={actualizar.isPending}
         />
         <SwitchField
           label="IVA incluido en el precio"
           description="Los precios mostrados ya incluyen IVA. Standard en Paraguay."
           checked={empresa.configuracion.ivaIncluidoEnPrecio}
-          onCheckedChange={(v) => update({ ivaIncluidoEnPrecio: v })}
+          onCheckedChange={(v) => {
+            void update({ ivaIncluidoEnPrecio: v });
+          }}
           disabled={actualizar.isPending}
         />
         <SwitchField
           label="Emitir TICKET por default"
           description="En el POS, modo MOSTRADOR emite TICKET salvo que se elija FACTURA explícitamente."
           checked={empresa.configuracion.emitirTicketPorDefecto}
-          onCheckedChange={(v) => update({ emitirTicketPorDefecto: v })}
+          onCheckedChange={(v) => {
+            void update({ emitirTicketPorDefecto: v });
+          }}
           disabled={actualizar.isPending}
         />
       </div>

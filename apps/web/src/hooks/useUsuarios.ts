@@ -59,7 +59,7 @@ export function useUsuarios(filtros: UsuariosFiltros = {}) {
 export function useUsuario(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'usuario', id],
-    queryFn: () => api<{ usuario: Usuario }>(`/usuarios/${id!}`),
+    queryFn: () => api<{ usuario: Usuario }>(`/usuarios/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.usuario,
   });
@@ -126,8 +126,7 @@ export function useResetPassword() {
 export function useEliminarUsuario() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<{ ok: true }>(`/usuarios/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => api<{ ok: true }>(`/usuarios/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'usuarios'] }),
   });
 }
@@ -135,9 +134,21 @@ export function useEliminarUsuario() {
 // ───── Helpers ─────
 
 export const ROLES_DISPONIBLES: { value: Rol; label: string; description: string }[] = [
-  { value: 'ADMIN_EMPRESA', label: 'Administrador', description: 'Gestiona empresa, usuarios y configuración' },
-  { value: 'GERENTE_SUCURSAL', label: 'Gerente de sucursal', description: 'Gestiona productos, caja y reportes' },
-  { value: 'CAJERO', label: 'Cajero/a', description: 'Vende, abre/cierra caja y emite comprobantes' },
+  {
+    value: 'ADMIN_EMPRESA',
+    label: 'Administrador',
+    description: 'Gestiona empresa, usuarios y configuración',
+  },
+  {
+    value: 'GERENTE_SUCURSAL',
+    label: 'Gerente de sucursal',
+    description: 'Gestiona productos, caja y reportes',
+  },
+  {
+    value: 'CAJERO',
+    label: 'Cajero/a',
+    description: 'Vende, abre/cierra caja y emite comprobantes',
+  },
   { value: 'MESERO', label: 'Mesero/a', description: 'Toma pedidos y entrega' },
   { value: 'COCINA', label: 'Cocinero/a', description: 'Acceso al KDS y preparación' },
   { value: 'REPARTIDOR', label: 'Repartidor/a', description: 'Entrega de delivery' },

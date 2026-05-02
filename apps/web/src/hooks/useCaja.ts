@@ -66,7 +66,7 @@ export interface AperturaActivaSlim {
 export interface AperturaDetalle extends AperturaActivaSlim {
   notas: string | null;
   usuario: { id: string; nombreCompleto: string };
-  cierre: unknown | null;
+  cierre: unknown;
   movimientos: MovimientoApertura[];
   totales: {
     totalVentas: string;
@@ -96,7 +96,7 @@ export function useMiAperturaActiva() {
 export function useApertura(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'apertura', id],
-    queryFn: () => api<{ apertura: AperturaDetalle }>(`/cajas/aperturas/${id!}`),
+    queryFn: () => api<{ apertura: AperturaDetalle }>(`/cajas/aperturas/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.apertura,
     refetchInterval: 10_000, // refresh cada 10s para ver ventas que se van sumando

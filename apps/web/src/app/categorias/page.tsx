@@ -45,7 +45,7 @@ export default function CategoriasPage() {
 
 function CategoriasScreen() {
   const { data: categorias = [], isLoading } = useCategorias();
-  const [editingId, setEditingId] = useState<string | 'NEW' | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   return (
     <div>
@@ -160,7 +160,9 @@ function CategoriaRow({
           </button>
           <button
             type="button"
-            onClick={handleEliminar}
+            onClick={() => {
+              void handleEliminar();
+            }}
             disabled={eliminar.isPending}
             className="rounded-md p-1.5 text-destructive hover:bg-destructive/10 disabled:opacity-50"
             aria-label="Eliminar"
@@ -212,7 +214,9 @@ function CategoriaFormCard({ categoria, onClose }: { categoria?: Categoria; onCl
 
   return (
     <form
-      onSubmit={handleSubmit}
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
       className="grid gap-3 rounded-md border bg-card p-3 sm:grid-cols-[1fr,200px,100px,auto]"
     >
       <div>

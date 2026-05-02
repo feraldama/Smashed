@@ -17,10 +17,10 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { AuthGate, ROLES_ENTREGAS } from '@/components/AuthGate';
-import { LogoutButton } from '@/components/ui/LogoutButton';
 import { Cronometro } from '@/components/kds/Cronometro';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { toast } from '@/components/Toast';
+import { LogoutButton } from '@/components/ui/LogoutButton';
 import { useMiAperturaActiva } from '@/hooks/useCaja';
 import {
   type PedidoListItem,
@@ -126,7 +126,9 @@ function EntregasScreen() {
               accion={(p) => (
                 <button
                   type="button"
-                  onClick={() => handleEntregar(p)}
+                  onClick={() => {
+                    void handleEntregar(p);
+                  }}
                   disabled={transicion.isPending}
                   className="flex w-full items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
                 >

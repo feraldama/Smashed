@@ -1,8 +1,8 @@
 /**
  * Tests del módulo usuarios.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { createApp } from '../../app.js';
 import { prisma } from '../../lib/prisma.js';
@@ -29,9 +29,7 @@ async function cleanup() {
 describe('GET /usuarios', () => {
   it('admin lista usuarios de su empresa', async () => {
     const token = await login(ADMIN);
-    const res = await request(app)
-      .get('/usuarios')
-      .set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/usuarios').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.usuarios)).toBe(true);
     expect(res.body.usuarios.length).toBeGreaterThan(0);
@@ -43,9 +41,7 @@ describe('GET /usuarios', () => {
 
   it('super_admin ve todos', async () => {
     const token = await login(SUPER);
-    const res = await request(app)
-      .get('/usuarios')
-      .set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/usuarios').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     const correos = res.body.usuarios.map((u: { email: string }) => u.email);
     expect(correos).toContain('superadmin@smash.local');
@@ -54,9 +50,7 @@ describe('GET /usuarios', () => {
 
   it('cajero NO puede listar → 403', async () => {
     const token = await login(CAJERO);
-    const res = await request(app)
-      .get('/usuarios')
-      .set('Authorization', `Bearer ${token}`);
+    const res = await request(app).get('/usuarios').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(403);
   });
 
@@ -108,16 +102,13 @@ describe('POST /usuarios', () => {
 
   it('rechaza password débil → 400', async () => {
     const token = await login(ADMIN);
-    const res = await request(app)
-      .post('/usuarios')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        email: 'debil+test-1@smash.com.py',
-        password: 'corta',
-        nombreCompleto: 'X',
-        rol: 'CAJERO',
-        sucursales: [],
-      });
+    const res = await request(app).post('/usuarios').set('Authorization', `Bearer ${token}`).send({
+      email: 'debil+test-1@smash.com.py',
+      password: 'corta',
+      nombreCompleto: 'X',
+      rol: 'CAJERO',
+      sucursales: [],
+    });
     expect(res.status).toBe(400);
   });
 
@@ -132,22 +123,22 @@ describe('POST /usuarios', () => {
       sucursales: [],
     };
     await request(app).post('/usuarios').set('Authorization', `Bearer ${token}`).send(body);
-    const res = await request(app).post('/usuarios').set('Authorization', `Bearer ${token}`).send(body);
+    const res = await request(app)
+      .post('/usuarios')
+      .set('Authorization', `Bearer ${token}`)
+      .send(body);
     expect(res.status).toBe(409);
   });
 
   it('admin NO puede crear SUPER_ADMIN → 403', async () => {
     const token = await login(ADMIN);
-    const res = await request(app)
-      .post('/usuarios')
-      .set('Authorization', `Bearer ${token}`)
-      .send({
-        email: 'super+test-1@smash.com.py',
-        password: 'Smash999X',
-        nombreCompleto: 'Wannabe Super',
-        rol: 'SUPER_ADMIN',
-        sucursales: [],
-      });
+    const res = await request(app).post('/usuarios').set('Authorization', `Bearer ${token}`).send({
+      email: 'super+test-1@smash.com.py',
+      password: 'Smash999X',
+      nombreCompleto: 'Wannabe Super',
+      rol: 'SUPER_ADMIN',
+      sucursales: [],
+    });
     expect(res.status).toBe(403);
   });
 
@@ -329,9 +320,7 @@ describe('DELETE /usuarios/:id', () => {
     expect(res.status).toBe(200);
 
     // Soft-deleted: no aparece en listado por default
-    const list = await request(app)
-      .get('/usuarios')
-      .set('Authorization', `Bearer ${token}`);
+    const list = await request(app).get('/usuarios').set('Authorization', `Bearer ${token}`);
     const ids = list.body.usuarios.map((u: { id: string }) => u.id);
     expect(ids).not.toContain(id);
 

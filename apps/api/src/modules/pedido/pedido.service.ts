@@ -3,6 +3,7 @@ import {
   EstadoPedido,
   Prisma,
   type Rol,
+  type SectorComanda,
   TasaIva,
   TipoMovimientoStock,
   TipoPedido,
@@ -86,10 +87,12 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
   if (!user.sucursalActivaId) {
     throw Errors.forbidden('Seleccioná una sucursal activa antes de crear pedidos');
   }
+  const empresaId = user.empresaId;
+  const sucursalId = user.sucursalActivaId;
 
   const { itemsParaCrear, subtotal, totalIva } = await construirItemsPedido({
-    empresaId: user.empresaId,
-    sucursalId: user.sucursalActivaId,
+    empresaId,
+    sucursalId,
     items: input.items,
   });
   const total = subtotal + totalIva;
@@ -112,20 +115,20 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
   //    `UPDATE ... RETURNING` atómico sobre Sucursal.ultimoNumeroPedido — Postgres
   //    toma un row-lock exclusivo, así que las concurrentes hacen cola sin perder ni duplicar.
   return prisma.$transaction(async (tx) => {
-    const sucursalId = user.sucursalActivaId!;
     const rows = await tx.$queryRaw<{ ultimo_numero_pedido: number }[]>`
       UPDATE "sucursal"
       SET "ultimo_numero_pedido" = "ultimo_numero_pedido" + 1
       WHERE "id" = ${sucursalId}
       RETURNING "ultimo_numero_pedido"
     `;
-    if (rows.length === 0) throw Errors.notFound('Sucursal no encontrada');
-    const numero = rows[0]!.ultimo_numero_pedido;
+    const fila = rows[0];
+    if (!fila) throw Errors.notFound('Sucursal no encontrada');
+    const numero = fila.ultimo_numero_pedido;
 
     return tx.pedido.create({
       data: {
-        empresaId: user.empresaId!,
-        sucursalId: user.sucursalActivaId!,
+        empresaId,
+        sucursalId,
         numero,
         tipo: input.tipo,
         estado: EstadoPedido.PENDIENTE,
@@ -518,6 +521,7 @@ export async function cambiarEstadoItem(
         where: { id: itemId },
         include: {
           pedido: { select: { id: true, sucursalId: true, empresaId: true, estado: true } },
+          combosOpcion: { select: { id: true } },
         },
       });
       if (!item || item.pedidoId !== pedidoId) throw Errors.notFound('Item no encontrado');
@@ -527,34 +531,26 @@ export async function cambiarEstadoItem(
       if (item.pedido.estado === EstadoPedido.CANCELADO) {
         throw Errors.conflict('Pedido cancelado');
       }
-
-      await tx.itemPedido.update({
-        where: { id: itemId },
-        data: { estado: nuevoEstado },
-      });
-
-      let pedidoEstadoNuevo: EstadoPedido | null = null;
-      if (nuevoEstado === 'LISTO') {
-        const pendientes = await tx.itemPedido.count({
-          where: { pedidoId, estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] } },
-        });
-        if (pendientes === 0 && item.pedido.estado !== EstadoPedido.LISTO) {
-          await tx.pedido.update({
-            where: { id: pedidoId },
-            data: { estado: EstadoPedido.LISTO, listoEn: new Date() },
-          });
-          pedidoEstadoNuevo = EstadoPedido.LISTO;
-        }
-      } else if (
-        nuevoEstado === 'EN_PREPARACION' &&
-        item.pedido.estado === EstadoPedido.CONFIRMADO
-      ) {
-        await tx.pedido.update({
-          where: { id: pedidoId },
-          data: { estado: EstadoPedido.EN_PREPARACION, enPreparacionEn: new Date() },
-        });
-        pedidoEstadoNuevo = EstadoPedido.EN_PREPARACION;
+      if (item.combosOpcion.length > 0) {
+        // Items combo se transicionan a través de sus opciones para que cada sector
+        // (cocina, bar, parrilla) marque sólo lo suyo.
+        throw Errors.conflict(
+          'Item combo: usá el endpoint de opciones del combo para marcar listo',
+        );
       }
+
+      const ahora = new Date();
+      const itemUpdateData: Prisma.ItemPedidoUpdateInput = { estado: nuevoEstado };
+      if (nuevoEstado === 'LISTO') itemUpdateData.listoEn = ahora;
+      if (nuevoEstado === 'EN_PREPARACION') itemUpdateData.enPreparacionEn = ahora;
+      await tx.itemPedido.update({ where: { id: itemId }, data: itemUpdateData });
+
+      const pedidoEstadoNuevo = await recalcularEstadoPedido(
+        tx,
+        pedidoId,
+        item.pedido.estado,
+        ahora,
+      );
 
       return {
         itemId,
@@ -576,21 +572,245 @@ export async function cambiarEstadoItem(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+//  COMBO OPCION ESTADO — cocina/bar marca su parte del combo
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Marca una opción del combo como EN_PREPARACION o LISTO. Cada sector trabaja
+ * independiente: la cocina marca la hamburguesa, el barman la cerveza. Cuando
+ * todas las opciones del combo están LISTO, el ItemPedido pasa a LISTO también
+ * (y cascadea al Pedido si todos los items están listos).
+ */
+export async function cambiarEstadoComboOpcion(
+  user: UserCtx,
+  pedidoId: string,
+  comboOpcionId: string,
+  nuevoEstado: 'EN_PREPARACION' | 'LISTO',
+) {
+  return prisma
+    .$transaction(async (tx) => {
+      const opcion = await tx.itemPedidoComboOpcion.findUnique({
+        where: { id: comboOpcionId },
+        include: {
+          itemPedido: {
+            select: {
+              id: true,
+              pedidoId: true,
+              estado: true,
+              pedido: {
+                select: { id: true, sucursalId: true, empresaId: true, estado: true },
+              },
+            },
+          },
+        },
+      });
+      if (!opcion || opcion.itemPedido.pedidoId !== pedidoId) {
+        throw Errors.notFound('Opción del combo no encontrada');
+      }
+      if (!user.isSuperAdmin && opcion.itemPedido.pedido.empresaId !== user.empresaId) {
+        throw Errors.tenantMismatch();
+      }
+      if (opcion.itemPedido.pedido.estado === EstadoPedido.CANCELADO) {
+        throw Errors.conflict('Pedido cancelado');
+      }
+
+      const ahora = new Date();
+      const opcionUpdate: Prisma.ItemPedidoComboOpcionUpdateInput = { estado: nuevoEstado };
+      if (nuevoEstado === 'LISTO') opcionUpdate.listoEn = ahora;
+      if (nuevoEstado === 'EN_PREPARACION') opcionUpdate.enPreparacionEn = ahora;
+      await tx.itemPedidoComboOpcion.update({
+        where: { id: comboOpcionId },
+        data: opcionUpdate,
+      });
+
+      const itemEstadoNuevo = await recalcularEstadoItemDesdeOpciones(
+        tx,
+        opcion.itemPedido.id,
+        opcion.itemPedido.estado,
+        ahora,
+      );
+
+      const pedidoEstadoNuevo = await recalcularEstadoPedido(
+        tx,
+        pedidoId,
+        opcion.itemPedido.pedido.estado,
+        ahora,
+      );
+
+      return {
+        comboOpcionId,
+        itemId: opcion.itemPedido.id,
+        pedidoId,
+        sucursalId: opcion.itemPedido.pedido.sucursalId,
+        nuevoEstado,
+        itemEstadoNuevo,
+        pedidoEstadoNuevo,
+      };
+    })
+    .then((result) => {
+      emitPedido('pedido.combo-opcion.estado', result.sucursalId, {
+        pedidoId: result.pedidoId,
+        itemId: result.itemId,
+        comboOpcionId: result.comboOpcionId,
+        estado: result.nuevoEstado,
+        itemEstado: result.itemEstadoNuevo,
+        pedidoEstado: result.pedidoEstadoNuevo,
+      });
+      return result;
+    });
+}
+
+/**
+ * Para items tipo combo: recalcula el estado del ItemPedido a partir del estado
+ * de sus opciones. Si todas están LISTO, el item se marca LISTO. Si alguna ya
+ * arrancó preparación, el item pasa a EN_PREPARACION.
+ */
+async function recalcularEstadoItemDesdeOpciones(
+  tx: Prisma.TransactionClient,
+  itemId: string,
+  estadoActual: EstadoPedido,
+  ahora: Date,
+): Promise<EstadoPedido | null> {
+  const opciones = await tx.itemPedidoComboOpcion.findMany({
+    where: { itemPedidoId: itemId },
+    select: { estado: true },
+  });
+  if (opciones.length === 0) return null;
+
+  const todasListas = opciones.every(
+    (o) => o.estado === EstadoPedido.LISTO || o.estado === EstadoPedido.CANCELADO,
+  );
+  const algunaEnMarcha = opciones.some(
+    (o) => o.estado !== EstadoPedido.PENDIENTE && o.estado !== EstadoPedido.CANCELADO,
+  );
+
+  if (todasListas && estadoActual !== EstadoPedido.LISTO) {
+    await tx.itemPedido.update({
+      where: { id: itemId },
+      data: { estado: EstadoPedido.LISTO, listoEn: ahora },
+    });
+    return EstadoPedido.LISTO;
+  }
+  if (
+    algunaEnMarcha &&
+    (estadoActual === EstadoPedido.PENDIENTE || estadoActual === EstadoPedido.CONFIRMADO)
+  ) {
+    await tx.itemPedido.update({
+      where: { id: itemId },
+      data: { estado: EstadoPedido.EN_PREPARACION, enPreparacionEn: ahora },
+    });
+    return EstadoPedido.EN_PREPARACION;
+  }
+  return null;
+}
+
+/**
+ * Si todos los items del pedido están LISTO, marca el pedido LISTO. Si algún item
+ * arrancó preparación y el pedido estaba CONFIRMADO, lo pasa a EN_PREPARACION.
+ *
+ * No hace downgrade: si el pedido ya está FACTURADO/ENTREGADO/etc., los items siguen
+ * su ciclo de preparación pero el pedido conserva su estado.
+ */
+async function recalcularEstadoPedido(
+  tx: Prisma.TransactionClient,
+  pedidoId: string,
+  estadoActual: EstadoPedido,
+  ahora: Date,
+): Promise<EstadoPedido | null> {
+  const enCocina =
+    estadoActual === EstadoPedido.CONFIRMADO || estadoActual === EstadoPedido.EN_PREPARACION;
+  if (!enCocina) return null;
+
+  const items = await tx.itemPedido.findMany({
+    where: { pedidoId },
+    select: { estado: true },
+  });
+  if (items.length === 0) return null;
+
+  const todosListos = items.every(
+    (i) => i.estado === EstadoPedido.LISTO || i.estado === EstadoPedido.CANCELADO,
+  );
+  if (todosListos) {
+    await tx.pedido.update({
+      where: { id: pedidoId },
+      data: { estado: EstadoPedido.LISTO, listoEn: ahora },
+    });
+    return EstadoPedido.LISTO;
+  }
+  if (estadoActual === EstadoPedido.CONFIRMADO) {
+    const algunoEnMarcha = items.some(
+      (i) => i.estado !== EstadoPedido.PENDIENTE && i.estado !== EstadoPedido.CANCELADO,
+    );
+    if (algunoEnMarcha) {
+      await tx.pedido.update({
+        where: { id: pedidoId },
+        data: { estado: EstadoPedido.EN_PREPARACION, enPreparacionEn: ahora },
+      });
+      return EstadoPedido.EN_PREPARACION;
+    }
+  }
+  return null;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  KDS — pedidos relevantes para cocina
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function listarPedidosParaKds(user: UserCtx) {
+export async function listarPedidosParaKds(user: UserCtx, sector?: SectorComanda) {
   if (!user.empresaId || !user.sucursalActivaId) {
     if (!user.isSuperAdmin) throw Errors.forbidden('Seleccioná una sucursal');
     return { pedidos: [] };
   }
 
+  // Reglas del KDS:
+  //  - Con `sector`: sólo pedidos con al menos una sub-tarea de ese sector aún no lista.
+  //    Apenas cocina/bar/etc. terminan lo suyo, el pedido cae de su tab.
+  //  - Sin sector (Mostrador): cualquier pedido aún no entregado al cliente. Mostrador
+  //    sigue viendo el pedido aún cuando todas las sub-tareas están listas, hasta
+  //    que el cajero apriete "Entregar al cliente" (entregadoEn = now).
+  const filtroBase: Prisma.PedidoWhereInput = {
+    sucursalId: user.sucursalActivaId,
+    deletedAt: null,
+    estado: { notIn: [EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO] },
+  };
+
+  const filtroVista: Prisma.PedidoWhereInput = sector
+    ? {
+        OR: [
+          {
+            // Items no-combo del sector aún no listos. Excluimos combos (combosOpcion.none)
+            // porque el item-combo hereda un sectorComanda del producto padre que NO refleja
+            // la realidad — lo que importa para el sector es el sector de cada opción elegida.
+            items: {
+              some: {
+                combosOpcion: { none: {} },
+                sectorComanda: sector,
+                estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] },
+              },
+            },
+          },
+          {
+            // Combo opciones del sector aún no listas
+            items: {
+              some: {
+                combosOpcion: {
+                  some: {
+                    sectorComanda: sector,
+                    estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] },
+                  },
+                },
+              },
+            },
+          },
+        ],
+      }
+    : {
+        entregadoEn: null,
+        items: { some: { estado: { not: EstadoPedido.CANCELADO } } },
+      };
+
   const pedidos = await prisma.pedido.findMany({
-    where: {
-      sucursalId: user.sucursalActivaId,
-      estado: { in: [EstadoPedido.CONFIRMADO, EstadoPedido.EN_PREPARACION] },
-      deletedAt: null,
-    },
+    where: { ...filtroBase, ...filtroVista },
     orderBy: { confirmadoEn: 'asc' },
     take: 100,
     include: kdsInclude,
@@ -599,9 +819,66 @@ export async function listarPedidosParaKds(user: UserCtx) {
   return { pedidos };
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+//  ENTREGAR — Mostrador cierra el pedido (le da al cliente)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Marca un pedido como entregado al cliente. Setea `entregadoEn = now` para que
+ * caiga del KDS de Mostrador. No cambia el estado del pedido — para pedidos
+ * MOSTRADOR/DELIVERY el estado típicamente ya está en FACTURADO (cobro inmediato),
+ * y el state machine no permite transicionar desde ahí.
+ *
+ * Para pedidos en estado LISTO (mesa con cuenta abierta que recién terminó cocina),
+ * además avanza el estado a ENTREGADO siguiendo la matriz normal.
+ */
+export async function entregarPedido(user: UserCtx, pedidoId: string) {
+  return prisma.$transaction(async (tx) => {
+    const pedido = await tx.pedido.findUnique({ where: { id: pedidoId } });
+    if (!pedido) throw Errors.notFound('Pedido no encontrado');
+    assertTenant(user, pedido);
+    if (pedido.estado === EstadoPedido.CANCELADO) {
+      throw Errors.conflict('Pedido cancelado');
+    }
+    if (pedido.entregadoEn) {
+      throw Errors.conflict('Pedido ya entregado');
+    }
+
+    const ahora = new Date();
+    const data: Prisma.PedidoUpdateInput = { entregadoEn: ahora };
+    // Si el flujo del state machine permite avanzar a ENTREGADO, lo hacemos.
+    // (Caso típico: mesa con cuenta abierta que terminó cocina — pedido en LISTO.)
+    if (transicionPermitida(pedido.estado, EstadoPedido.ENTREGADO)) {
+      data.estado = EstadoPedido.ENTREGADO;
+    }
+
+    const actualizado = await tx.pedido.update({ where: { id: pedidoId }, data });
+
+    await tx.auditLog.create({
+      data: {
+        empresaId: pedido.empresaId,
+        sucursalId: pedido.sucursalId,
+        usuarioId: user.userId,
+        accion: 'ACTUALIZAR',
+        entidad: 'Pedido',
+        entidadId: pedido.id,
+        metadata: { operacion: 'ENTREGAR_KDS', estadoPrev: pedido.estado },
+      },
+    });
+
+    emitPedido('pedido.actualizado', actualizado.sucursalId, {
+      id: actualizado.id,
+      numero: actualizado.numero,
+      estado: actualizado.estado,
+    });
+
+    return actualizado;
+  });
+}
+
 const kdsInclude = {
   items: {
-    where: { estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] } },
+    where: { estado: { not: EstadoPedido.CANCELADO } },
     include: {
       productoVenta: {
         select: { id: true, nombre: true, sectorComanda: true, tiempoPrepSegundos: true },
@@ -612,7 +889,11 @@ const kdsInclude = {
       combosOpcion: {
         include: {
           comboGrupo: { select: { nombre: true } },
-          comboGrupoOpcion: { include: { productoVenta: { select: { nombre: true } } } },
+          comboGrupoOpcion: {
+            include: {
+              productoVenta: { select: { nombre: true, sectorComanda: true } },
+            },
+          },
         },
       },
     },
@@ -844,7 +1125,15 @@ async function construirItemsPedido(args: {
             select: {
               id: true,
               obligatorio: true,
-              opciones: { select: { id: true, precioExtra: true } },
+              opciones: {
+                select: {
+                  id: true,
+                  precioExtra: true,
+                  // Necesitamos el sector del producto elegido para que cada opción
+                  // del combo se enrute al sector correcto en el KDS (cocina/bar/...).
+                  productoVenta: { select: { sectorComanda: true } },
+                },
+              },
             },
           },
         },
@@ -947,14 +1236,17 @@ async function construirItemsPedido(args: {
         : undefined,
       combosOpcion: it.combosOpcion?.length
         ? {
-            create: it.combosOpcion.map((co) => ({
-              comboGrupo: { connect: { id: co.comboGrupoId } },
-              comboGrupoOpcion: { connect: { id: co.comboGrupoOpcionId } },
-              precioExtra:
-                prod.combo?.grupos
-                  .find((g) => g.id === co.comboGrupoId)
-                  ?.opciones.find((o) => o.id === co.comboGrupoOpcionId)?.precioExtra ?? 0n,
-            })),
+            create: it.combosOpcion.map((co) => {
+              const opcion = prod.combo?.grupos
+                .find((g) => g.id === co.comboGrupoId)
+                ?.opciones.find((o) => o.id === co.comboGrupoOpcionId);
+              return {
+                comboGrupo: { connect: { id: co.comboGrupoId } },
+                comboGrupoOpcion: { connect: { id: co.comboGrupoOpcionId } },
+                precioExtra: opcion?.precioExtra ?? 0n,
+                sectorComanda: opcion?.productoVenta.sectorComanda ?? prod.sectorComanda,
+              };
+            }),
           }
         : undefined,
     });

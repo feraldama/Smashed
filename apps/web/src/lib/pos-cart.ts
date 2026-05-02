@@ -53,6 +53,11 @@ export type CartAction =
   | { type: 'INC'; lineId: string }
   | { type: 'DEC'; lineId: string }
   | { type: 'SET_QTY'; lineId: string; cantidad: number }
+  | {
+      type: 'REPLACE';
+      lineId: string;
+      item: Omit<ItemCarrito, 'lineId' | 'cantidad'> & { cantidad?: number };
+    }
   | { type: 'REMOVE'; lineId: string }
   | { type: 'CLEAR' };
 
@@ -88,6 +93,14 @@ export function cartReducer(state: CartState, action: CartAction): CartState {
             it.lineId === action.lineId ? { ...it, cantidad: Math.max(0, action.cantidad) } : it,
           )
           .filter((it) => it.cantidad > 0),
+      };
+    case 'REPLACE':
+      return {
+        items: state.items.map((it) =>
+          it.lineId === action.lineId
+            ? { ...action.item, lineId: it.lineId, cantidad: action.item.cantidad ?? it.cantidad }
+            : it,
+        ),
       };
     case 'REMOVE':
       return { items: state.items.filter((it) => it.lineId !== action.lineId) };

@@ -86,7 +86,9 @@ export function CerrarCajaModal({ apertura, onClose }: Props) {
         </div>
 
         <form
-          onSubmit={handleSubmit}
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
           className="max-h-[calc(90vh-130px)] space-y-4 overflow-y-auto p-4"
         >
           {/* Resumen totales */}
@@ -239,7 +241,9 @@ export function CerrarCajaModal({ apertura, onClose }: Props) {
           </button>
           <button
             type="button"
-            onClick={(e) => handleSubmit(e)}
+            onClick={(e) => {
+              void handleSubmit(e);
+            }}
             disabled={cerrar.isPending}
             className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
           >

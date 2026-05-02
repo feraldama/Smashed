@@ -146,7 +146,9 @@ function ClientesScreen() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleEliminar(c)}
+                        onClick={() => {
+                          void handleEliminar(c);
+                        }}
                         disabled={c.esConsumidorFinal || eliminar.isPending}
                         className="rounded-md p-1.5 text-destructive hover:bg-destructive/10 disabled:opacity-30 disabled:cursor-not-allowed"
                         aria-label="Eliminar"

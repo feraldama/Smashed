@@ -79,7 +79,7 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
   const totalPagado = useMemo(() => pagos.reduce((acc, p) => acc + parseGs(p.monto), 0), [pagos]);
   const diferencia = totalPagado - total;
   const completo = diferencia >= 0;
-  const esEfectivoFinal = pagos.length === 1 && pagos[0]!.metodo === 'EFECTIVO';
+  const esEfectivoFinal = pagos.length === 1 && pagos[0]?.metodo === 'EFECTIVO';
   const vuelto = esEfectivoFinal ? Math.max(0, diferencia) : 0;
   const insuficiente = totalPagado > 0 && totalPagado < total;
 
@@ -125,8 +125,10 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
         referencia: p.referencia.trim() || undefined,
       }));
     if (vuelto > 0) {
-      const last = pagosPayload[pagosPayload.length - 1]!;
-      pagosPayload[pagosPayload.length - 1] = { ...last, monto: last.monto - vuelto };
+      const last = pagosPayload[pagosPayload.length - 1];
+      if (last) {
+        pagosPayload[pagosPayload.length - 1] = { ...last, monto: last.monto - vuelto };
+      }
     }
 
     if (pagosPayload.length === 0 || pagosPayload.reduce((a, p) => a + p.monto, 0) !== total) {
@@ -305,7 +307,9 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
             </button>
             <button
               type="button"
-              onClick={handleSubmit}
+              onClick={() => {
+                void handleSubmit();
+              }}
               disabled={emitir.isPending || !completo || (diferencia > 0 && !esEfectivoFinal)}
               className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
             >
@@ -381,7 +385,7 @@ function PagoRow({
   onChange: (patch: Partial<Pago>) => void;
   onDelete: () => void;
 }) {
-  const metodoConfig = METODOS.find((m) => m.value === pago.metodo)!;
+  const metodoConfig = METODOS.find((m) => m.value === pago.metodo) ?? METODOS[0];
   const restante = Math.max(0, total - (pagado - parseGs(pago.monto)));
 
   function quickAmount(monto: number) {
@@ -449,7 +453,7 @@ function PagoRow({
         </div>
       )}
 
-      {metodoConfig.requiereReferencia && (
+      {metodoConfig?.requiereReferencia && (
         <input
           type="text"
           value={pago.referencia}

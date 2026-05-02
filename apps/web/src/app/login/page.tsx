@@ -107,19 +107,18 @@ export default function LoginPage() {
           <h1 className="text-3xl font-bold tracking-tight">
             Smash <span className="text-primary">POS</span>
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Iniciá sesión con tu usuario
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Iniciá sesión con tu usuario</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(onSubmit)(e);
+          }}
+          className="space-y-3"
+          noValidate
+        >
           <Field label="Email" required error={errors.email?.message}>
-            <Input
-              type="email"
-              autoComplete="username"
-              autoFocus
-              {...register('email')}
-            />
+            <Input type="email" autoComplete="username" autoFocus {...register('email')} />
           </Field>
 
           <Field label="Contraseña" required error={errors.password?.message}>

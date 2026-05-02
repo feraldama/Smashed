@@ -36,14 +36,8 @@ router.post('/seleccionar-sucursal', authRequired, asyncH(ctrl.seleccionarSucurs
 export default router;
 
 /** Wrapper para handlers async — pasa errores al error handler de Express. */
-function asyncH<
-  T extends (req: import('express').Request, res: import('express').Response) => Promise<unknown>,
->(fn: T) {
-  return (
-    req: import('express').Request,
-    res: import('express').Response,
-    next: import('express').NextFunction,
-  ) => {
+function asyncH<T extends (req: Request, res: Response) => Promise<unknown>>(fn: T) {
+  return (req: Request, res: Response, next: NextFunction) => {
     fn(req, res).catch(next);
   };
 }

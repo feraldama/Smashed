@@ -1,7 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(curl -s -X POST http://localhost:3001/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"admin@smash.com.py\\\\\",\\\\\"password\\\\\":\\\\\"Smash123!\\\\\"}\")"
+      "Bash(curl -s -X POST http://localhost:3020/auth/login -H \"Content-Type: application/json\" -d \"{\\\\\"email\\\\\":\\\\\"admin@smash.com.py\\\\\",\\\\\"password\\\\\":\\\\\"Smash123!\\\\\"}\")"
     ]
   }
 }

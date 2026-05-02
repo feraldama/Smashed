@@ -23,6 +23,8 @@ export default tseslint.config(
       '**/tailwind.config.{js,mjs,ts}',
       'commitlint.config.{js,cjs,mjs}',
       'eslint.config.{js,mjs}',
+      // prisma.config.ts (Prisma 7) vive en apps/api/ pero no está en su tsconfig.
+      'apps/api/prisma.config.ts',
       // Scripts one-shot de prisma — no están en tsconfig de @smash/api.
       'apps/api/prisma/*.ts',
       // Tests de packages compartidos — vitest los corre desde su propio entorno.

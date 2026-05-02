@@ -1,4 +1,3 @@
-
 import { Server as SocketServer, type Socket } from 'socket.io';
 
 import { allowedOrigins, isDev } from '../config/env.js';
@@ -92,7 +91,12 @@ export function getIo(): SocketServer {
 
 /** Helper para emitir eventos de pedido a la room de la sucursal correspondiente. */
 export function emitPedido(
-  evento: 'pedido.confirmado' | 'pedido.actualizado' | 'pedido.cancelado' | 'pedido.item.estado',
+  evento:
+    | 'pedido.confirmado'
+    | 'pedido.actualizado'
+    | 'pedido.cancelado'
+    | 'pedido.item.estado'
+    | 'pedido.combo-opcion.estado',
   sucursalId: string,
   payload: unknown,
 ) {

@@ -81,7 +81,12 @@ export function ProveedorFormModal({ proveedor, onClose }: ProveedorFormModalPro
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4 p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-4 p-5"
+        >
           <Field label="Razón social" required>
             <Input
               autoFocus

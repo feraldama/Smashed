@@ -1,5 +1,4 @@
-
-import { env, isProd } from '../../config/env.js';
+import { isProd } from '../../config/env.js';
 import { Errors } from '../../lib/errors.js';
 
 import { loginSchema, refreshSchema, seleccionarSucursalSchema } from './auth.schemas.js';

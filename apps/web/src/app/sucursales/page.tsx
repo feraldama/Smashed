@@ -7,11 +7,7 @@ import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { SucursalFormModal } from '@/components/SucursalFormModal';
 import { toast } from '@/components/Toast';
-import {
-  type Sucursal,
-  useEliminarSucursal,
-  useSucursales,
-} from '@/hooks/useSucursales';
+import { type Sucursal, useEliminarSucursal, useSucursales } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -33,7 +29,9 @@ function SucursalesScreen() {
   const eliminar = useEliminarSucursal();
 
   async function handleEliminar(s: Sucursal) {
-    if (!confirm(`¿Eliminar la sucursal "${s.nombre}"? Esta acción es lógica (no toca histórico).`)) {
+    if (
+      !confirm(`¿Eliminar la sucursal "${s.nombre}"? Esta acción es lógica (no toca histórico).`)
+    ) {
       return;
     }
     try {
@@ -84,7 +82,9 @@ function SucursalesScreen() {
               key={s.id}
               sucursal={s}
               onEdit={() => setEditando(s)}
-              onDelete={() => handleEliminar(s)}
+              onDelete={() => {
+                void handleEliminar(s);
+              }}
             />
           ))}
         </div>

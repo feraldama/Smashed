@@ -1,7 +1,5 @@
 import { createHash } from 'node:crypto';
 
-import { parsearCdc } from './cdc.js';
-
 import type { AmbienteSifen, DocumentoElectronicoInput } from './types.js';
 
 /**

@@ -1,4 +1,3 @@
-
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -500,11 +499,7 @@ export async function eliminarReceta(empresaId: string, productoVentaId: string)
  *  - Si el producto no tenía esCombo=true, lo marca en la misma transacción
  *  - Operación atómica: borra combo previo (cascada) y crea nuevo
  */
-export async function setCombo(
-  empresaId: string,
-  productoVentaId: string,
-  input: SetComboInput,
-) {
+export async function setCombo(empresaId: string, productoVentaId: string, input: SetComboInput) {
   const producto = await prisma.productoVenta.findFirst({
     where: { id: productoVentaId, empresaId, deletedAt: null },
     select: { id: true, esCombo: true },
@@ -596,7 +591,13 @@ export async function setCombo(
               orderBy: { orden: 'asc' },
               include: {
                 productoVenta: {
-                  select: { id: true, codigo: true, nombre: true, precioBase: true, imagenUrl: true },
+                  select: {
+                    id: true,
+                    codigo: true,
+                    nombre: true,
+                    precioBase: true,
+                    imagenUrl: true,
+                  },
                 },
               },
             },
@@ -638,7 +639,8 @@ async function assertSinCiclos(
   const cola = [...subProductosACheckear];
 
   while (cola.length > 0) {
-    const actual = cola.shift()!;
+    const actual = cola.shift();
+    if (!actual) break;
     if (visitados.has(actual)) continue;
     visitados.add(actual);
 
