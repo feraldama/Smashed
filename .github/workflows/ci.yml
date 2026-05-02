@@ -10,6 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Las actions JavaScript (checkout, setup-node, pnpm/action-setup) corren en
+# Node 24 también — silencia la deprecación de Node 20 que GitHub está
+# fasing-out (forzado en junio 2026, removido en septiembre 2026).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
 jobs:
   lint-and-test:
     name: Lint, typecheck & test
@@ -51,8 +57,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          # Prisma 7 trae deps que exigen Node >= 22 (@prisma/streams-local).
-          node-version: 22
+          # Node 24 = última LTS (Active hasta abr 2027). Prisma 7 requiere >= 22
+          # (@prisma/streams-local), 24 lo cumple.
+          node-version: 24
           cache: 'pnpm'
 
       - name: Install dependencies
