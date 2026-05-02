@@ -1,0 +1,40 @@
+import { z } from 'zod';
+
+const guaraniEntero = z
+  .union([z.number().int().nonnegative(), z.string().regex(/^\d+$/)])
+  .transform((v) => BigInt(v));
+
+const guaraniSigned = z
+  .union([z.number().int(), z.string().regex(/^-?\d+$/)])
+  .transform((v) => BigInt(v));
+
+export const abrirCajaSchema = z.object({
+  montoInicial: guaraniEntero,
+  notas: z.string().trim().max(500).optional(),
+});
+
+export const cerrarCajaSchema = z.object({
+  totalContadoEfectivo: guaraniEntero,
+  // jsonb: { "100000": 5, "50000": 10, ... } — denominación → cantidad
+  conteoEfectivo: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  notas: z.string().trim().max(1000).optional(),
+});
+
+export const movimientoCajaSchema = z.object({
+  tipo: z.enum(['INGRESO_EXTRA', 'EGRESO', 'RETIRO_PARCIAL']),
+  monto: guaraniEntero,
+  // Por simplicidad los movimientos manuales son siempre en efectivo;
+  // los pagos por otros métodos vienen de comprobantes.
+  metodoPago: z.literal('EFECTIVO').default('EFECTIVO'),
+  concepto: z.string().trim().min(1).max(200),
+});
+
+export const cajaIdParam = z.object({ cajaId: z.string().cuid() });
+export const aperturaIdParam = z.object({ aperturaId: z.string().cuid() });
+
+// helpers tipados
+void guaraniSigned;
+
+export type AbrirCajaInput = z.infer<typeof abrirCajaSchema>;
+export type CerrarCajaInput = z.infer<typeof cerrarCajaSchema>;
+export type MovimientoCajaInput = z.infer<typeof movimientoCajaSchema>;

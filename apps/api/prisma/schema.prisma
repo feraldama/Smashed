@@ -1,0 +1,1536 @@
+// ═══════════════════════════════════════════════════════════════════════════
+//  Smash — Schema Prisma
+//  Sistema POS multi-sucursal para cadena de comida rápida en Paraguay.
+//
+//  Convenciones:
+//   - Modelos: PascalCase español (dominio).
+//   - Tablas:  snake_case español (vía @@map).
+//   - IDs:     cuid() por default.
+//   - Dinero:  BigInt en guaraníes (entero, sin decimales).
+//   - Stock:   Decimal(15,3) — soporta gramos/mililitros.
+//   - Soft delete: campo `deletedAt` en entidades históricas.
+//   - Multi-tenant: empresa_id en toda entidad de negocio + middleware tenant.
+//
+//  Campos preparados para SIFEN (Fase 4) — quedan nulos hasta integración:
+//   cdc, xml_firmado, estado_sifen, fecha_envio_sifen, fecha_aprobacion_sifen.
+// ═══════════════════════════════════════════════════════════════════════════
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearch"]
+  binaryTargets   = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgcrypto, pgTrgm(map: "pg_trgm"), unaccent, uuidOssp(map: "uuid-ossp")]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  ENUMS
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum Rol {
+  SUPER_ADMIN
+  ADMIN_EMPRESA
+  GERENTE_SUCURSAL
+  CAJERO
+  COCINA
+  MESERO
+  REPARTIDOR
+}
+
+enum TipoContribuyente {
+  PERSONA_FISICA
+  PERSONA_JURIDICA
+  EXTRANJERO
+  CONSUMIDOR_FINAL
+}
+
+enum UnidadMedida {
+  UNIDAD
+  KILOGRAMO
+  GRAMO
+  LITRO
+  MILILITRO
+  PORCION
+  DOCENA
+}
+
+enum TasaIva {
+  IVA_10
+  IVA_5
+  IVA_0
+  EXENTO
+}
+
+enum CategoriaProducto {
+  HAMBURGUESA
+  LOMITO
+  PIZZA
+  EMPANADA
+  MILANESA
+  CHIPA
+  ENTRADA
+  ACOMPANAMIENTO
+  POSTRE
+  BEBIDA_FRIA
+  BEBIDA_CALIENTE
+  CERVEZA
+  COMBO
+  OTRO
+}
+
+enum SectorComanda {
+  COCINA_CALIENTE
+  COCINA_FRIA
+  PARRILLA
+  BAR
+  CAFETERIA
+  POSTRES
+}
+
+enum TipoMovimientoStock {
+  ENTRADA_COMPRA
+  ENTRADA_TRANSFERENCIA
+  ENTRADA_AJUSTE
+  ENTRADA_PRODUCCION
+  SALIDA_VENTA
+  SALIDA_TRANSFERENCIA
+  SALIDA_MERMA
+  SALIDA_AJUSTE
+  SALIDA_CONSUMO_INTERNO
+}
+
+enum EstadoTransferencia {
+  PENDIENTE
+  APROBADA
+  EN_TRANSITO
+  RECIBIDA
+  RECHAZADA
+  CANCELADA
+}
+
+enum TipoPedido {
+  MOSTRADOR
+  MESA
+  DELIVERY_PROPIO
+  DELIVERY_PEDIDOSYA
+  RETIRO_LOCAL
+}
+
+enum EstadoPedido {
+  PENDIENTE
+  CONFIRMADO
+  EN_PREPARACION
+  LISTO
+  EN_CAMINO
+  ENTREGADO
+  FACTURADO
+  CANCELADO
+}
+
+enum TipoModificadorGrupo {
+  UNICA           // radio: el cliente elige una opción
+  MULTIPLE        // checkbox: el cliente puede elegir varias
+}
+
+enum EstadoMesa {
+  LIBRE
+  OCUPADA
+  RESERVADA
+  PRECUENTA
+  LIMPIEZA
+  FUERA_DE_SERVICIO
+}
+
+enum TipoDocumentoFiscal {
+  TICKET
+  FACTURA
+  NOTA_CREDITO
+  NOTA_DEBITO
+  AUTOFACTURA
+  NOTA_REMISION
+}
+
+enum CondicionVenta {
+  CONTADO
+  CREDITO
+}
+
+enum EstadoComprobante {
+  EMITIDO
+  ANULADO
+}
+
+enum EstadoSifen {
+  NO_ENVIADO
+  PENDIENTE
+  APROBADO
+  RECHAZADO
+  CANCELADO
+  INUTILIZADO
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TARJETA_DEBITO
+  TARJETA_CREDITO
+  TRANSFERENCIA
+  CHEQUE
+  BANCARD
+  INFONET
+  ZIMPLE
+  TIGO_MONEY
+  PERSONAL_PAY
+}
+
+enum EstadoCaja {
+  ABIERTA
+  CERRADA
+}
+
+enum TipoMovimientoCaja {
+  APERTURA
+  VENTA
+  COBRANZA
+  INGRESO_EXTRA
+  EGRESO
+  RETIRO_PARCIAL
+  CIERRE
+}
+
+enum AccionAuditable {
+  LOGIN
+  LOGOUT
+  LOGIN_FALLIDO
+  CREAR
+  ACTUALIZAR
+  ELIMINAR
+  ANULAR_COMPROBANTE
+  AJUSTAR_STOCK
+  TRANSFERENCIA_STOCK
+  CAMBIO_PRECIO
+  APERTURA_CAJA
+  CIERRE_CAJA
+  CAMBIO_PERMISO
+}
+
+enum EstadoPedidosYa {
+  RECIBIDO
+  ACEPTADO
+  RECHAZADO
+  EN_PREPARACION
+  LISTO
+  EN_CAMINO
+  ENTREGADO
+  CANCELADO
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TENANT — Empresa, Sucursal, PuntoExpedicion, Timbrado
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Empresa {
+  id              String   @id @default(cuid())
+  nombreFantasia  String   @map("nombre_fantasia")
+  razonSocial     String   @map("razon_social")
+  ruc             String   @unique
+  dv              String   @db.Char(1)
+  direccion       String?
+  telefono        String?
+  email           String?
+  logoUrl         String?  @map("logo_url")
+  colorPrimario   String?  @map("color_primario")   // hex
+  colorSecundario String?  @map("color_secundario") // hex
+  zonaHoraria     String   @default("America/Asuncion") @map("zona_horaria")
+  activa          Boolean  @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  sucursales       Sucursal[]
+  usuarios         Usuario[]
+  clientes         Cliente[]
+  proveedores      Proveedor[]
+  categorias       CategoriaProductoEmpresa[]
+  productosInv     ProductoInventario[]
+  productosVenta   ProductoVenta[]
+  recetas          Receta[]
+  combos           Combo[]
+  modificadorGrupos ModificadorGrupo[]
+  pedidos          Pedido[]
+  comprobantes     Comprobante[]
+  auditLogs        AuditLog[]
+  configuracion    ConfiguracionEmpresa?
+
+  @@index([deletedAt])
+  @@map("empresa")
+}
+
+model ConfiguracionEmpresa {
+  id        String   @id @default(cuid())
+  empresaId String   @unique @map("empresa_id")
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  // Operativo
+  permitirStockNegativo  Boolean @default(true) @map("permitir_stock_negativo")
+  redondearTotales       Boolean @default(true) @map("redondear_totales")
+
+  // Facturación
+  ivaIncluidoEnPrecio    Boolean @default(true) @map("iva_incluido_en_precio")
+  emitirTicketPorDefecto Boolean @default(true) @map("emitir_ticket_por_defecto")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("configuracion_empresa")
+}
+
+model Sucursal {
+  id              String   @id @default(cuid())
+  empresaId       String   @map("empresa_id")
+  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nombre          String
+  codigo          String   // código interno corto: "CEN", "SLO"
+  // Establecimiento SIFEN: ej "001", "002" — formato XXX según DNIT.
+  establecimiento String   @db.Char(3)
+  direccion       String
+  ciudad          String?
+  departamento    String?
+  telefono        String?
+  email           String?
+  zonaHoraria     String?  @map("zona_horaria") // override de empresa.zonaHoraria
+  // Horarios (jsonb con estructura semanal)
+  horarios        Json?    @db.JsonB
+  activa          Boolean  @default(true)
+
+  // Contador correlativo de pedidos por sucursal — usado con optimistic lock
+  // (updateMany con check de versión) para garantizar numeración race-free.
+  ultimoNumeroPedido Int   @default(0) @map("ultimo_numero_pedido")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  puntosExpedicion PuntoExpedicion[]
+  cajas            Caja[]
+  stockSucursal    StockSucursal[]
+  movimientosStock MovimientoStock[]
+  pedidos          Pedido[]
+  comprobantes     Comprobante[]
+  usuariosSucursal UsuarioSucursal[]
+  zonasMesa        ZonaMesa[]
+  preciosSucursal  PrecioPorSucursal[]
+  transferenciasOrigen TransferenciaStock[] @relation("TransferenciaOrigen")
+  transferenciasDestino TransferenciaStock[] @relation("TransferenciaDestino")
+  compras          Compra[]
+  auditLogs        AuditLog[]
+
+  @@unique([empresaId, codigo])
+  @@unique([empresaId, establecimiento])
+  @@index([empresaId, deletedAt])
+  @@map("sucursal")
+}
+
+model PuntoExpedicion {
+  id          String    @id @default(cuid())
+  sucursalId  String    @map("sucursal_id")
+  sucursal    Sucursal  @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  // Punto de expedición SIFEN: ej "001", "002" — formato XXX.
+  codigo      String    @db.Char(3)
+  descripcion String?
+  activo      Boolean   @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  timbrados    Timbrado[]
+  cajas        Caja[]
+  comprobantes Comprobante[]
+
+  @@unique([sucursalId, codigo])
+  @@index([sucursalId, deletedAt])
+  @@map("punto_expedicion")
+}
+
+model Timbrado {
+  id                 String          @id @default(cuid())
+  puntoExpedicionId  String          @map("punto_expedicion_id")
+  puntoExpedicion    PuntoExpedicion @relation(fields: [puntoExpedicionId], references: [id], onDelete: Restrict)
+
+  numero             String          // número de timbrado SET (8 dígitos)
+  fechaInicioVigencia DateTime       @map("fecha_inicio_vigencia") @db.Date
+  fechaFinVigencia   DateTime        @map("fecha_fin_vigencia") @db.Date
+  rangoDesde         Int             @map("rango_desde")     // ej 1
+  rangoHasta         Int             @map("rango_hasta")     // ej 9999999
+  ultimoNumeroUsado  Int             @default(0) @map("ultimo_numero_usado")
+  tipoDocumento      TipoDocumentoFiscal @map("tipo_documento")
+  activo             Boolean         @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  comprobantes Comprobante[]
+
+  @@unique([puntoExpedicionId, numero, tipoDocumento])
+  @@index([puntoExpedicionId, activo, fechaFinVigencia])
+  @@map("timbrado")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  AUTH — Usuario, RefreshToken, Permisos
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Usuario {
+  id              String  @id @default(cuid())
+  empresaId       String? @map("empresa_id")  // null sólo para SUPER_ADMIN
+  empresa         Empresa? @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  email           String
+  passwordHash    String  @map("password_hash")
+  nombreCompleto  String  @map("nombre_completo")
+  documento       String? // CI o RUC
+  telefono        String?
+  rol             Rol
+  activo          Boolean @default(true)
+  ultimoLogin     DateTime? @map("ultimo_login")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  sucursales       UsuarioSucursal[]
+  refreshTokens    RefreshToken[]
+  permisos         UsuarioPermiso[]
+  pedidosTomados   Pedido[]            @relation("PedidoTomadoPor")
+  movimientosStock MovimientoStock[]
+  cajasAbiertas    AperturaCaja[]
+  cajasCerradas    CierreCaja[]
+  comprobantesEmitidos Comprobante[]    @relation("ComprobanteEmitidoPor")
+  auditLogs        AuditLog[]
+
+  @@unique([empresaId, email])
+  @@index([empresaId, deletedAt])
+  @@index([rol])
+  @@map("usuario")
+}
+
+model UsuarioSucursal {
+  usuarioId   String   @map("usuario_id")
+  sucursalId  String   @map("sucursal_id")
+  esPrincipal Boolean  @default(false) @map("es_principal")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario  Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  sucursal Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, sucursalId])
+  @@index([sucursalId])
+  @@map("usuario_sucursal")
+}
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  usuarioId   String   @map("usuario_id")
+  usuario     Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  // Token hasheado (sha256). Nunca guardamos el token raw.
+  tokenHash   String   @unique @map("token_hash")
+  expiraEn    DateTime @map("expira_en")
+  revocadoEn  DateTime? @map("revocado_en")
+  // Cuando se rota, apuntamos al sucesor para detectar reutilización.
+  reemplazadoPorId String? @map("reemplazado_por_id")
+  ip          String?
+  userAgent   String?  @map("user_agent")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([usuarioId, revocadoEn])
+  @@index([expiraEn])
+  @@map("refresh_token")
+}
+
+model Permiso {
+  id          String  @id @default(cuid())
+  codigo      String  @unique // ej "productos.editar", "comprobantes.anular"
+  descripcion String
+
+  usuarios UsuarioPermiso[]
+
+  @@map("permiso")
+}
+
+model UsuarioPermiso {
+  usuarioId String   @map("usuario_id")
+  permisoId String   @map("permiso_id")
+  concedido Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  permiso Permiso @relation(fields: [permisoId], references: [id], onDelete: Cascade)
+
+  @@id([usuarioId, permisoId])
+  @@index([permisoId])
+  @@map("usuario_permiso")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CLIENTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Cliente {
+  id              String  @id @default(cuid())
+  empresaId       String  @map("empresa_id")
+  empresa         Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  tipoContribuyente TipoContribuyente @map("tipo_contribuyente")
+  // RUC y DV separados (paraguayo). Para personas físicas usamos `documento` (CI).
+  ruc             String? // sin DV
+  dv              String? @db.Char(1)
+  documento       String? // CI o pasaporte
+  razonSocial     String  @map("razon_social")
+  nombreFantasia  String? @map("nombre_fantasia")
+  email           String?
+  telefono        String?
+  // Cliente "consumidor final" / "SIN NOMBRE" usa este flag para id estable y filtro.
+  esConsumidorFinal Boolean @default(false) @map("es_consumidor_final")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  direcciones  DireccionCliente[]
+  pedidos      Pedido[]
+  comprobantes Comprobante[]
+
+  @@unique([empresaId, ruc, dv])
+  @@unique([empresaId, documento])
+  @@index([empresaId, esConsumidorFinal])
+  @@index([empresaId, razonSocial])
+  @@index([empresaId, telefono])
+  @@index([empresaId, deletedAt])
+  @@map("cliente")
+}
+
+model DireccionCliente {
+  id        String  @id @default(cuid())
+  clienteId String  @map("cliente_id")
+  cliente   Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  alias        String? // "Casa", "Oficina"
+  direccion    String
+  ciudad       String?
+  departamento String?
+  referencias  String?
+  latitud      Decimal? @db.Decimal(10, 7)
+  longitud     Decimal? @db.Decimal(10, 7)
+  esPrincipal  Boolean  @default(false) @map("es_principal")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pedidos Pedido[]
+
+  @@index([clienteId])
+  @@map("direccion_cliente")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CONTINÚA EN sección 2: INVENTARIO + RECETAS + COMBOS + MODIFICADORES
+//  Por legibilidad el archivo sigue abajo sin separar — Prisma requiere uno solo.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CATÁLOGO — Categorías, Proveedores
+// ═══════════════════════════════════════════════════════════════════════════
+
+model CategoriaProductoEmpresa {
+  id        String  @id @default(cuid())
+  empresaId String  @map("empresa_id")
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nombre    String
+  codigo    String?
+  // Categoría base predefinida para reportes rápidos
+  categoriaBase CategoriaProducto @default(OTRO) @map("categoria_base")
+  ordenMenu Int     @default(0) @map("orden_menu")
+  iconoUrl  String? @map("icono_url")
+  activa    Boolean @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  productosVenta ProductoVenta[]
+
+  @@unique([empresaId, nombre])
+  @@index([empresaId, deletedAt])
+  @@map("categoria_producto_empresa")
+}
+
+model Proveedor {
+  id          String  @id @default(cuid())
+  empresaId   String  @map("empresa_id")
+  empresa     Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  razonSocial String  @map("razon_social")
+  ruc         String?
+  dv          String? @db.Char(1)
+  email       String?
+  telefono    String?
+  direccion   String?
+  contacto    String?
+  notas       String?
+  activo      Boolean @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  productosInv ProductoInventario[]
+  compras      Compra[]
+
+  @@unique([empresaId, ruc, dv])
+  @@index([empresaId, deletedAt])
+  @@map("proveedor")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INVENTARIO — Productos de inventario (insumos) + Stock por sucursal
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ProductoInventario {
+  id            String       @id @default(cuid())
+  empresaId     String       @map("empresa_id")
+  empresa       Empresa      @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  proveedorId   String?      @map("proveedor_id")
+  proveedor     Proveedor?   @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
+
+  codigo        String?      // SKU interno
+  codigoBarras  String?      @map("codigo_barras")
+  nombre        String
+  descripcion   String?
+  unidadMedida  UnidadMedida @map("unidad_medida")
+  costoUnitario BigInt       @default(0) @map("costo_unitario") // guaraníes
+  // Categoría libre para agrupar insumos: "Carnes", "Lácteos", etc.
+  categoria     String?
+
+  activo        Boolean      @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  stockSucursal      StockSucursal[]
+  itemsReceta        ItemReceta[]      @relation("InsumoReceta")
+  movimientosStock   MovimientoStock[]
+  itemsTransferencia ItemTransferencia[]
+  itemsCompra        ItemCompra[]
+
+  @@unique([empresaId, codigoBarras])
+  @@unique([empresaId, codigo])
+  @@index([empresaId, nombre])
+  @@index([empresaId, deletedAt])
+  @@map("producto_inventario")
+}
+
+model StockSucursal {
+  id                    String   @id @default(cuid())
+  productoInventarioId  String   @map("producto_inventario_id")
+  producto              ProductoInventario @relation(fields: [productoInventarioId], references: [id], onDelete: Cascade)
+  sucursalId            String   @map("sucursal_id")
+  sucursal              Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  stockActual  Decimal  @default(0) @map("stock_actual") @db.Decimal(15, 3)
+  stockMinimo  Decimal  @default(0) @map("stock_minimo") @db.Decimal(15, 3)
+  stockMaximo  Decimal? @map("stock_maximo") @db.Decimal(15, 3)
+  // Snapshot del costo promedio ponderado en esta sucursal (para valuación)
+  costoPromedio BigInt  @default(0) @map("costo_promedio")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productoInventarioId, sucursalId])
+  @@index([sucursalId])
+  @@map("stock_sucursal")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PRODUCTOS DE VENTA — items vendibles (con receta opcional)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ProductoVenta {
+  id            String   @id @default(cuid())
+  empresaId     String   @map("empresa_id")
+  empresa       Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  categoriaId   String?  @map("categoria_id")
+  categoria     CategoriaProductoEmpresa? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+
+  codigo        String?  // SKU interno
+  codigoBarras  String?  @map("codigo_barras")
+  nombre        String
+  descripcion   String?
+  precioBase    BigInt   @map("precio_base")  // precio default (con IVA incluido si así lo configura empresa)
+  tasaIva       TasaIva  @default(IVA_10) @map("tasa_iva")
+  imagenUrl     String?  @map("imagen_url")
+  // Sector al que se manda la comanda (cocina caliente, fría, bar)
+  sectorComanda SectorComanda? @map("sector_comanda")
+  // Tiempo estimado de preparación (segundos)
+  tiempoPrepSegundos Int? @map("tiempo_prep_segundos")
+  esCombo       Boolean  @default(false) @map("es_combo")
+  esVendible    Boolean  @default(true)  @map("es_vendible")
+  // Flag para sub-preparaciones que no se venden directamente (salsas, masas).
+  esPreparacion Boolean  @default(false) @map("es_preparacion")
+  activo        Boolean  @default(true)
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  receta             Receta?
+  combo              Combo?
+  modificadorGrupos  ProductoVentaModificadorGrupo[]
+  preciosSucursal    PrecioPorSucursal[]
+  itemsPedido        ItemPedido[]
+  itemsComboOpcion   ComboGrupoOpcion[]
+  // Si este producto es una sub-preparación, aparece como insumo en otras recetas
+  itemsRecetaSubProd ItemReceta[] @relation("SubProductoReceta")
+
+  @@unique([empresaId, codigo])
+  @@unique([empresaId, codigoBarras])
+  @@index([empresaId, categoriaId, activo, deletedAt])
+  @@index([empresaId, nombre])
+  @@map("producto_venta")
+}
+
+model PrecioPorSucursal {
+  id              String   @id @default(cuid())
+  productoVentaId String   @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+  sucursalId      String   @map("sucursal_id")
+  sucursal        Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  precio          BigInt
+  vigenteDesde    DateTime @default(now()) @map("vigente_desde")
+  vigenteHasta    DateTime? @map("vigente_hasta")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productoVentaId, sucursalId, vigenteDesde])
+  @@index([sucursalId, productoVentaId, vigenteHasta])
+  @@map("precio_por_sucursal")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  RECETAS — anidadas (BOM recursivo). Una receta de un ProductoVenta tiene N
+//  ItemReceta que pueden referenciar:
+//    (a) un ProductoInventario (insumo crudo), o
+//    (b) otro ProductoVenta marcado como `esPreparacion` (sub-receta).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Receta {
+  id              String   @id @default(cuid())
+  empresaId       String   @map("empresa_id")
+  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productoVentaId String   @unique @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+
+  // Rinde: cuántas porciones da la receta (default 1, útil para sub-preparaciones).
+  rinde           Decimal  @default(1) @db.Decimal(10, 3)
+  notas           String?
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  items ItemReceta[]
+
+  @@index([empresaId, deletedAt])
+  @@map("receta")
+}
+
+model ItemReceta {
+  id        String  @id @default(cuid())
+  recetaId  String  @map("receta_id")
+  receta    Receta  @relation(fields: [recetaId], references: [id], onDelete: Cascade)
+
+  // XOR: o un insumo o una sub-preparación. Validado a nivel app.
+  productoInventarioId String?  @map("producto_inventario_id")
+  insumo               ProductoInventario? @relation("InsumoReceta", fields: [productoInventarioId], references: [id], onDelete: Restrict)
+  subProductoVentaId   String?  @map("sub_producto_venta_id")
+  subProducto          ProductoVenta? @relation("SubProductoReceta", fields: [subProductoVentaId], references: [id], onDelete: Restrict)
+
+  cantidad     Decimal @db.Decimal(15, 3)
+  unidadMedida UnidadMedida @map("unidad_medida")
+  // Permite que un insumo opcional no se descuente si está agotado (ej. lechuga decorativa)
+  esOpcional   Boolean @default(false) @map("es_opcional")
+  notas        String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([recetaId])
+  @@index([productoInventarioId])
+  @@index([subProductoVentaId])
+  @@map("item_receta")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COMBOS — un ProductoVenta `esCombo=true` define grupos de elección.
+//  Cada grupo tiene N opciones; el cliente elige una opción por grupo al armar el pedido.
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Combo {
+  id              String   @id @default(cuid())
+  empresaId       String   @map("empresa_id")
+  empresa         Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  productoVentaId String   @unique @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+
+  descripcion String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  grupos ComboGrupo[]
+
+  @@map("combo")
+}
+
+model ComboGrupo {
+  id       String  @id @default(cuid())
+  comboId  String  @map("combo_id")
+  combo    Combo   @relation(fields: [comboId], references: [id], onDelete: Cascade)
+
+  nombre   String  // "Hamburguesa", "Acompañamiento", "Bebida"
+  orden    Int     @default(0)
+  // Para combos siempre es UNICA (elegís UNA opción por grupo).
+  // Lo guardamos enum por si en el futuro queremos múltiples.
+  tipo     TipoModificadorGrupo @default(UNICA)
+  obligatorio Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  opciones        ComboGrupoOpcion[]
+  itemsPedidoSel  ItemPedidoComboOpcion[]
+
+  @@index([comboId])
+  @@map("combo_grupo")
+}
+
+model ComboGrupoOpcion {
+  id              String   @id @default(cuid())
+  comboGrupoId    String   @map("combo_grupo_id")
+  comboGrupo      ComboGrupo @relation(fields: [comboGrupoId], references: [id], onDelete: Cascade)
+  productoVentaId String   @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Restrict)
+
+  // Precio adicional al precio base del combo. 0 si la opción está incluida sin upgrade.
+  precioExtra     BigInt   @default(0) @map("precio_extra")
+  esDefault       Boolean  @default(false) @map("es_default")
+  orden           Int      @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  itemsPedidoSel ItemPedidoComboOpcion[]
+
+  @@unique([comboGrupoId, productoVentaId])
+  @@index([comboGrupoId])
+  @@map("combo_grupo_opcion")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MODIFICADORES — grupos de modificadores aplicables a productos.
+//  Ej: "Punto de cocción" (UNICA, obligatorio, sin precio)
+//      "Extras" (MULTIPLE, opcional, con precio_extra por opción)
+//      "Sin..." (MULTIPLE, opcional, sin precio)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ModificadorGrupo {
+  id        String  @id @default(cuid())
+  empresaId String  @map("empresa_id")
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nombre        String
+  tipo          TipoModificadorGrupo @default(MULTIPLE)
+  obligatorio   Boolean @default(false)
+  minSeleccion  Int     @default(0) @map("min_seleccion")
+  maxSeleccion  Int?    @map("max_seleccion")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  opciones                ModificadorOpcion[]
+  productosVentaAplicados ProductoVentaModificadorGrupo[]
+
+  @@unique([empresaId, nombre])
+  @@index([empresaId, deletedAt])
+  @@map("modificador_grupo")
+}
+
+model ModificadorOpcion {
+  id                 String           @id @default(cuid())
+  modificadorGrupoId String           @map("modificador_grupo_id")
+  modificadorGrupo   ModificadorGrupo @relation(fields: [modificadorGrupoId], references: [id], onDelete: Cascade)
+
+  nombre      String
+  precioExtra BigInt  @default(0) @map("precio_extra")
+  orden       Int     @default(0)
+  activo      Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  itemsPedidoMod ItemPedidoModificador[]
+
+  @@index([modificadorGrupoId])
+  @@map("modificador_opcion")
+}
+
+// Relación M:N — qué grupos de modificadores aplican a qué productos.
+model ProductoVentaModificadorGrupo {
+  productoVentaId    String           @map("producto_venta_id")
+  modificadorGrupoId String           @map("modificador_grupo_id")
+  ordenEnProducto    Int              @default(0) @map("orden_en_producto")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  productoVenta    ProductoVenta    @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+  modificadorGrupo ModificadorGrupo @relation(fields: [modificadorGrupoId], references: [id], onDelete: Cascade)
+
+  @@id([productoVentaId, modificadorGrupoId])
+  @@index([modificadorGrupoId])
+  @@map("producto_venta_modificador_grupo")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MOVIMIENTOS DE STOCK — entradas, salidas, transferencias, mermas, ajustes
+// ═══════════════════════════════════════════════════════════════════════════
+
+model MovimientoStock {
+  id                   String   @id @default(cuid())
+  productoInventarioId String   @map("producto_inventario_id")
+  producto             ProductoInventario @relation(fields: [productoInventarioId], references: [id], onDelete: Restrict)
+  sucursalId           String   @map("sucursal_id")
+  sucursal             Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+  usuarioId            String?  @map("usuario_id")
+  usuario              Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  tipo         TipoMovimientoStock
+  cantidad     Decimal  @db.Decimal(15, 3)
+  // Cantidad signada efectiva (positiva entrada, negativa salida) — útil para reportes.
+  cantidadSigned Decimal @map("cantidad_signed") @db.Decimal(15, 3)
+  costoUnitario BigInt  @default(0) @map("costo_unitario")
+  motivo       String?
+  // Referencias polimórficas opcionales (auditoría)
+  pedidoId           String? @map("pedido_id")
+  transferenciaId    String? @map("transferencia_id")
+  compraId           String? @map("compra_id")
+  itemRecetaId       String? @map("item_receta_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([productoInventarioId, sucursalId, createdAt])
+  @@index([sucursalId, createdAt])
+  @@index([pedidoId])
+  @@index([transferenciaId])
+  @@index([compraId])
+  @@map("movimiento_stock")
+}
+
+model TransferenciaStock {
+  id              String   @id @default(cuid())
+  // Una transferencia es entre dos sucursales de la misma empresa
+  sucursalOrigenId  String  @map("sucursal_origen_id")
+  sucursalOrigen    Sucursal @relation("TransferenciaOrigen", fields: [sucursalOrigenId], references: [id], onDelete: Restrict)
+  sucursalDestinoId String  @map("sucursal_destino_id")
+  sucursalDestino   Sucursal @relation("TransferenciaDestino", fields: [sucursalDestinoId], references: [id], onDelete: Restrict)
+
+  numero        Int
+  estado        EstadoTransferencia @default(PENDIENTE)
+  solicitadoPor String   @map("solicitado_por")
+  aprobadoPor   String?  @map("aprobado_por")
+  recibidoPor   String?  @map("recibido_por")
+  fechaSolicitud DateTime @default(now()) @map("fecha_solicitud")
+  fechaAprobacion DateTime? @map("fecha_aprobacion")
+  fechaRecepcion  DateTime? @map("fecha_recepcion")
+  notas         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items ItemTransferencia[]
+
+  @@unique([sucursalOrigenId, numero])
+  @@index([sucursalOrigenId, estado])
+  @@index([sucursalDestinoId, estado])
+  @@map("transferencia_stock")
+}
+
+model ItemTransferencia {
+  id              String   @id @default(cuid())
+  transferenciaId String   @map("transferencia_id")
+  transferencia   TransferenciaStock @relation(fields: [transferenciaId], references: [id], onDelete: Cascade)
+  productoInventarioId String  @map("producto_inventario_id")
+  producto             ProductoInventario @relation(fields: [productoInventarioId], references: [id], onDelete: Restrict)
+
+  cantidadSolicitada Decimal @map("cantidad_solicitada") @db.Decimal(15, 3)
+  cantidadEnviada    Decimal? @map("cantidad_enviada") @db.Decimal(15, 3)
+  cantidadRecibida   Decimal? @map("cantidad_recibida") @db.Decimal(15, 3)
+  notas              String?
+
+  @@unique([transferenciaId, productoInventarioId])
+  @@map("item_transferencia")
+}
+
+model Compra {
+  id           String   @id @default(cuid())
+  proveedorId  String   @map("proveedor_id")
+  proveedor    Proveedor @relation(fields: [proveedorId], references: [id], onDelete: Restrict)
+  sucursalId   String   @map("sucursal_id")
+  sucursal     Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+
+  numero       Int
+  fecha        DateTime @default(now())
+  // Comprobante del proveedor (N° factura)
+  numeroFactura String?  @map("numero_factura")
+  total        BigInt   @default(0)
+  notas        String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items ItemCompra[]
+
+  @@unique([sucursalId, numero])
+  @@index([proveedorId, fecha])
+  @@index([sucursalId, fecha])
+  @@map("compra")
+}
+
+model ItemCompra {
+  id        String   @id @default(cuid())
+  compraId  String   @map("compra_id")
+  compra    Compra   @relation(fields: [compraId], references: [id], onDelete: Cascade)
+  productoInventarioId String  @map("producto_inventario_id")
+  producto             ProductoInventario @relation(fields: [productoInventarioId], references: [id], onDelete: Restrict)
+
+  cantidad      Decimal @db.Decimal(15, 3)
+  costoUnitario BigInt  @map("costo_unitario")
+  subtotal      BigInt
+
+  @@index([compraId])
+  @@map("item_compra")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  MESAS / ZONAS
+// ═══════════════════════════════════════════════════════════════════════════
+
+model ZonaMesa {
+  id         String   @id @default(cuid())
+  sucursalId String   @map("sucursal_id")
+  sucursal   Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  nombre     String
+  orden      Int      @default(0)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  mesas Mesa[]
+
+  @@unique([sucursalId, nombre])
+  @@map("zona_mesa")
+}
+
+model Mesa {
+  id         String   @id @default(cuid())
+  zonaMesaId String   @map("zona_mesa_id")
+  zona       ZonaMesa @relation(fields: [zonaMesaId], references: [id], onDelete: Cascade)
+  numero     Int
+  capacidad  Int      @default(4)
+  estado     EstadoMesa @default(LIBRE)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  pedidos Pedido[]
+
+  @@unique([zonaMesaId, numero])
+  @@index([estado])
+  @@map("mesa")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PEDIDOS — toda transacción de venta es un Pedido (mostrador, mesa, delivery)
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Pedido {
+  id          String   @id @default(cuid())
+  empresaId   String   @map("empresa_id")
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+  sucursalId  String   @map("sucursal_id")
+  sucursal    Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+
+  numero      Int       // correlativo por sucursal (no fiscal — eso va en Comprobante)
+  tipo        TipoPedido
+  estado      EstadoPedido @default(PENDIENTE)
+
+  // Cliente (opcional para mostrador rápido — usa cliente "SIN NOMBRE" si no hay)
+  clienteId   String?   @map("cliente_id")
+  cliente     Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  direccionEntregaId String? @map("direccion_entrega_id")
+  direccionEntrega   DireccionCliente? @relation(fields: [direccionEntregaId], references: [id], onDelete: SetNull)
+
+  // Mesa (sólo si tipo = MESA)
+  mesaId      String?   @map("mesa_id")
+  mesa        Mesa?     @relation(fields: [mesaId], references: [id], onDelete: SetNull)
+
+  // Quien tomó el pedido (mozo o cajero)
+  tomadoPorId String?   @map("tomado_por_id")
+  tomadoPor   Usuario?  @relation("PedidoTomadoPor", fields: [tomadoPorId], references: [id], onDelete: SetNull)
+
+  // Observaciones libres (ej "delivery — entregar antes de las 21hs")
+  observaciones String?
+
+  // Totales (calculados al confirmar)
+  subtotal      BigInt   @default(0)
+  totalDescuento BigInt  @default(0) @map("total_descuento")
+  totalIva      BigInt   @default(0) @map("total_iva")
+  total         BigInt   @default(0)
+
+  // Tiempos para métricas KDS / SLA
+  tomadoEn        DateTime? @map("tomado_en")
+  confirmadoEn    DateTime? @map("confirmado_en")
+  enPreparacionEn DateTime? @map("en_preparacion_en")
+  listoEn         DateTime? @map("listo_en")
+  enCaminoEn      DateTime? @map("en_camino_en")
+  entregadoEn     DateTime? @map("entregado_en")
+
+  // Cancelación
+  canceladoEn   DateTime? @map("cancelado_en")
+  motivoCancel  String?   @map("motivo_cancel")
+
+  // Origen (PedidosYa marca esto)
+  pedidosYaPedidoId String? @unique @map("pedidos_ya_pedido_id")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  items         ItemPedido[]
+  comprobantes  Comprobante[]
+  pedidosYa     PedidosYaPedido?
+
+  @@unique([sucursalId, numero])
+  @@index([empresaId, estado, createdAt])
+  @@index([sucursalId, estado, createdAt])
+  @@index([sucursalId, tipo, estado])
+  @@index([clienteId])
+  @@index([mesaId])
+  @@map("pedido")
+}
+
+model ItemPedido {
+  id              String   @id @default(cuid())
+  pedidoId        String   @map("pedido_id")
+  pedido          Pedido   @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  productoVentaId String   @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Restrict)
+
+  cantidad        Int      @default(1)
+  precioUnitario  BigInt   @map("precio_unitario") // snapshot al momento de tomar
+  precioModificadores BigInt @default(0) @map("precio_modificadores")
+  subtotal        BigInt
+  observaciones   String?
+
+  // Estado por línea (útil cuando un mismo pedido tiene items en distintos sectores)
+  estado          EstadoPedido @default(PENDIENTE)
+  sectorComanda   SectorComanda? @map("sector_comanda")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  modificadores ItemPedidoModificador[]
+  combosOpcion  ItemPedidoComboOpcion[]
+
+  @@index([pedidoId])
+  @@index([productoVentaId])
+  @@index([sectorComanda, estado])
+  @@map("item_pedido")
+}
+
+model ItemPedidoModificador {
+  id                  String   @id @default(cuid())
+  itemPedidoId        String   @map("item_pedido_id")
+  itemPedido          ItemPedido @relation(fields: [itemPedidoId], references: [id], onDelete: Cascade)
+  modificadorOpcionId String   @map("modificador_opcion_id")
+  modificadorOpcion   ModificadorOpcion @relation(fields: [modificadorOpcionId], references: [id], onDelete: Restrict)
+
+  // Snapshot del precio extra al momento del pedido
+  precioExtra BigInt @default(0) @map("precio_extra")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([itemPedidoId, modificadorOpcionId])
+  @@index([modificadorOpcionId])
+  @@map("item_pedido_modificador")
+}
+
+model ItemPedidoComboOpcion {
+  id              String   @id @default(cuid())
+  itemPedidoId    String   @map("item_pedido_id")
+  itemPedido      ItemPedido @relation(fields: [itemPedidoId], references: [id], onDelete: Cascade)
+  comboGrupoId    String   @map("combo_grupo_id")
+  comboGrupo      ComboGrupo @relation(fields: [comboGrupoId], references: [id], onDelete: Restrict)
+  comboGrupoOpcionId String  @map("combo_grupo_opcion_id")
+  comboGrupoOpcion   ComboGrupoOpcion @relation(fields: [comboGrupoOpcionId], references: [id], onDelete: Restrict)
+
+  // Snapshot del precio extra
+  precioExtra BigInt @default(0) @map("precio_extra")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([itemPedidoId, comboGrupoId])
+  @@index([comboGrupoOpcionId])
+  @@map("item_pedido_combo_opcion")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CAJA — apertura, movimientos, cierre Z
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Caja {
+  id                String   @id @default(cuid())
+  sucursalId        String   @map("sucursal_id")
+  sucursal          Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+  // Caja típicamente está asociada a un punto de expedición fiscal
+  puntoExpedicionId String?  @map("punto_expedicion_id")
+  puntoExpedicion   PuntoExpedicion? @relation(fields: [puntoExpedicionId], references: [id], onDelete: SetNull)
+
+  nombre  String   // "Caja 1", "Caja Express"
+  estado  EstadoCaja @default(CERRADA)
+  activa  Boolean  @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  aperturas    AperturaCaja[]
+  cierres      CierreCaja[]
+  movimientos  MovimientoCaja[]
+  comprobantes Comprobante[]
+
+  @@unique([sucursalId, nombre])
+  @@index([sucursalId, estado])
+  @@map("caja")
+}
+
+model AperturaCaja {
+  id        String   @id @default(cuid())
+  cajaId    String   @map("caja_id")
+  caja      Caja     @relation(fields: [cajaId], references: [id], onDelete: Restrict)
+  usuarioId String   @map("usuario_id")
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  montoInicial BigInt   @map("monto_inicial")
+  notas        String?
+  abiertaEn    DateTime @default(now()) @map("abierta_en")
+
+  cierre       CierreCaja?
+  movimientos  MovimientoCaja[]
+  comprobantes Comprobante[]
+
+  @@index([cajaId, abiertaEn])
+  @@index([usuarioId])
+  @@map("apertura_caja")
+}
+
+model CierreCaja {
+  id              String       @id @default(cuid())
+  cajaId          String       @map("caja_id")
+  caja            Caja         @relation(fields: [cajaId], references: [id], onDelete: Restrict)
+  aperturaCajaId  String       @unique @map("apertura_caja_id")
+  apertura        AperturaCaja @relation(fields: [aperturaCajaId], references: [id], onDelete: Restrict)
+  usuarioId       String       @map("usuario_id")
+  usuario         Usuario      @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  // Totales calculados al cierre Z
+  totalEsperadoEfectivo  BigInt  @map("total_esperado_efectivo")
+  totalContadoEfectivo   BigInt  @map("total_contado_efectivo")
+  diferenciaEfectivo     BigInt  @map("diferencia_efectivo") // signed
+  totalVentas            BigInt  @map("total_ventas")
+  // Detalle por método de pago (jsonb con estructura: { EFECTIVO: 1234, BANCARD: 5678, ... })
+  totalesPorMetodo       Json    @map("totales_por_metodo") @db.JsonB
+  // Conteo por denominación (jsonb: { "100000": 5, "50000": 10, ... })
+  conteoEfectivo         Json?   @map("conteo_efectivo") @db.JsonB
+  notas                  String?
+  cerradaEn              DateTime @default(now()) @map("cerrada_en")
+
+  @@index([cajaId, cerradaEn])
+  @@map("cierre_caja")
+}
+
+model MovimientoCaja {
+  id        String   @id @default(cuid())
+  cajaId    String   @map("caja_id")
+  caja      Caja     @relation(fields: [cajaId], references: [id], onDelete: Restrict)
+  aperturaCajaId String? @map("apertura_caja_id")
+  aperturaCaja   AperturaCaja? @relation(fields: [aperturaCajaId], references: [id], onDelete: SetNull)
+
+  tipo        TipoMovimientoCaja
+  metodoPago  MetodoPago?  @map("metodo_pago")
+  monto       BigInt
+  concepto    String?
+  comprobanteId String? @map("comprobante_id")
+  comprobante   Comprobante? @relation(fields: [comprobanteId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([cajaId, createdAt])
+  @@index([aperturaCajaId])
+  @@map("movimiento_caja")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  COMPROBANTES — fiscal. Diseñado SIFEN-ready (campos cdc/xml/estado_sifen).
+// ═══════════════════════════════════════════════════════════════════════════
+
+model Comprobante {
+  id                String   @id @default(cuid())
+  empresaId         String   @map("empresa_id")
+  empresa           Empresa  @relation(fields: [empresaId], references: [id], onDelete: Restrict)
+  sucursalId        String   @map("sucursal_id")
+  sucursal          Sucursal @relation(fields: [sucursalId], references: [id], onDelete: Restrict)
+  puntoExpedicionId String   @map("punto_expedicion_id")
+  puntoExpedicion   PuntoExpedicion @relation(fields: [puntoExpedicionId], references: [id], onDelete: Restrict)
+  timbradoId        String   @map("timbrado_id")
+  timbrado          Timbrado @relation(fields: [timbradoId], references: [id], onDelete: Restrict)
+  cajaId            String?  @map("caja_id")
+  caja              Caja?    @relation(fields: [cajaId], references: [id], onDelete: SetNull)
+  aperturaCajaId    String?  @map("apertura_caja_id")
+  aperturaCaja      AperturaCaja? @relation(fields: [aperturaCajaId], references: [id], onDelete: SetNull)
+  pedidoId          String?  @map("pedido_id")
+  pedido            Pedido?  @relation(fields: [pedidoId], references: [id], onDelete: SetNull)
+  clienteId         String   @map("cliente_id")
+  cliente           Cliente  @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  emitidoPorId      String   @map("emitido_por_id")
+  emitidoPor        Usuario  @relation("ComprobanteEmitidoPor", fields: [emitidoPorId], references: [id], onDelete: Restrict)
+
+  tipoDocumento   TipoDocumentoFiscal @map("tipo_documento")
+  // Numeración fiscal: establecimiento-puntoExp-correlativo (snapshot del timbrado al emitir).
+  // Guardamos el código snapshot porque el código del PuntoExpedicion podría cambiar luego.
+  establecimiento String   @db.Char(3)
+  puntoExpedicionCodigo String  @map("punto_expedicion_codigo") @db.Char(3)
+  numero          Int
+  numeroDocumento String   @map("numero_documento") // formato 001-001-0000001 redundante para búsqueda
+
+  fechaEmision    DateTime @map("fecha_emision")
+  condicionVenta  CondicionVenta @default(CONTADO) @map("condicion_venta")
+  estado          EstadoComprobante @default(EMITIDO)
+
+  // Snapshot de datos del receptor (no FK porque cliente puede cambiar)
+  receptorTipoContribuyente TipoContribuyente @map("receptor_tipo_contribuyente")
+  receptorRuc      String? @map("receptor_ruc")
+  receptorDv       String? @map("receptor_dv") @db.Char(1)
+  receptorDocumento String? @map("receptor_documento")
+  receptorRazonSocial String @map("receptor_razon_social")
+  receptorEmail    String? @map("receptor_email")
+  receptorDireccion String? @map("receptor_direccion")
+
+  // Totales
+  subtotalExentas BigInt @default(0) @map("subtotal_exentas")
+  subtotalIva5   BigInt @default(0) @map("subtotal_iva_5")
+  subtotalIva10  BigInt @default(0) @map("subtotal_iva_10")
+  totalIva5      BigInt @default(0) @map("total_iva_5")
+  totalIva10     BigInt @default(0) @map("total_iva_10")
+  totalDescuento BigInt @default(0) @map("total_descuento")
+  total          BigInt
+
+  // Si es nota de crédito/débito, referencia al original
+  comprobanteOriginalId String? @map("comprobante_original_id")
+  comprobanteOriginal   Comprobante? @relation("NotasReferencia", fields: [comprobanteOriginalId], references: [id], onDelete: Restrict)
+  notasRelacionadas     Comprobante[] @relation("NotasReferencia")
+
+  // Anulación
+  anuladoEn      DateTime? @map("anulado_en")
+  motivoAnulacion String?  @map("motivo_anulacion")
+
+  // ───── Campos SIFEN (Fase 4) — quedan nulos hasta integración ─────
+  cdc              String? @unique @db.Char(44) // Código de Control SIFEN
+  xmlFirmado       String? @map("xml_firmado") @db.Text
+  estadoSifen      EstadoSifen @default(NO_ENVIADO) @map("estado_sifen")
+  fechaEnvioSifen  DateTime? @map("fecha_envio_sifen")
+  fechaAprobacionSifen DateTime? @map("fecha_aprobacion_sifen")
+  motivoRechazoSifen String?  @map("motivo_rechazo_sifen")
+  qrUrl            String? @map("qr_url")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  items          ItemComprobante[]
+  pagos          PagoComprobante[]
+  movimientosCaja MovimientoCaja[]
+  eventosSifen   EventoSifen[]
+
+  @@unique([sucursalId, tipoDocumento, establecimiento, puntoExpedicionCodigo, numero])
+  @@index([empresaId, fechaEmision])
+  @@index([sucursalId, fechaEmision])
+  @@index([clienteId])
+  @@index([estado, estadoSifen])
+  @@index([numeroDocumento])
+  @@map("comprobante")
+}
+
+model ItemComprobante {
+  id              String   @id @default(cuid())
+  comprobanteId   String   @map("comprobante_id")
+  comprobante     Comprobante @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+
+  // Snapshot — no FK al producto porque el producto podría borrarse después.
+  productoVentaId String?  @map("producto_venta_id")
+  codigo          String?
+  descripcion     String
+  cantidad        Int
+  precioUnitario  BigInt   @map("precio_unitario")
+  descuentoUnitario BigInt @default(0) @map("descuento_unitario")
+  tasaIva         TasaIva  @map("tasa_iva")
+  subtotal        BigInt
+
+  @@index([comprobanteId])
+  @@map("item_comprobante")
+}
+
+model PagoComprobante {
+  id            String   @id @default(cuid())
+  comprobanteId String   @map("comprobante_id")
+  comprobante   Comprobante @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+
+  metodo        MetodoPago
+  monto         BigInt
+  // Para tarjetas: últimos 4, autorización, lote
+  referencia    String?
+  notas         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([comprobanteId])
+  @@index([metodo])
+  @@map("pago_comprobante")
+}
+
+// Eventos SIFEN (Fase 4): cancelación, inutilización, conformidad
+model EventoSifen {
+  id            String   @id @default(cuid())
+  comprobanteId String   @map("comprobante_id")
+  comprobante   Comprobante @relation(fields: [comprobanteId], references: [id], onDelete: Cascade)
+
+  tipo          String   // CANCELACION | INUTILIZACION | CONFORMIDAD | DISCONFORMIDAD
+  motivo        String?
+  xmlEnviado    String?  @map("xml_enviado") @db.Text
+  xmlRespuesta  String?  @map("xml_respuesta") @db.Text
+  estado        String   // ENVIADO | APROBADO | RECHAZADO
+  enviadoEn     DateTime @default(now()) @map("enviado_en")
+  respondidoEn  DateTime? @map("respondido_en")
+
+  @@index([comprobanteId, tipo])
+  @@map("evento_sifen")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PEDIDOS YA — recepción de pedidos de delivery
+// ═══════════════════════════════════════════════════════════════════════════
+
+model PedidosYaPedido {
+  id              String   @id @default(cuid())
+  pedidoId        String?  @unique @map("pedido_id")
+  pedido          Pedido?  @relation(fields: [pedidoId], references: [id], onDelete: SetNull)
+
+  externalId      String   @unique @map("external_id") // ID del pedido en PedidosYa
+  estado          EstadoPedidosYa
+  payloadOriginal Json     @map("payload_original") @db.JsonB
+  totalEnviado    BigInt   @map("total_enviado")
+  notas           String?
+
+  recibidoEn      DateTime @default(now()) @map("recibido_en")
+  aceptadoEn      DateTime? @map("aceptado_en")
+  rechazadoEn     DateTime? @map("rechazado_en")
+  motivoRechazo   String?  @map("motivo_rechazo")
+
+  logs PedidosYaLog[]
+
+  @@index([estado])
+  @@map("pedidos_ya_pedido")
+}
+
+model PedidosYaLog {
+  id                 String   @id @default(cuid())
+  pedidosYaPedidoId  String?  @map("pedidos_ya_pedido_id")
+  pedidosYaPedido    PedidosYaPedido? @relation(fields: [pedidosYaPedidoId], references: [id], onDelete: SetNull)
+
+  direccion          String   // INBOUND | OUTBOUND
+  endpoint           String?
+  payload            Json     @db.JsonB
+  statusHttp         Int?     @map("status_http")
+  errorMensaje       String?  @map("error_mensaje")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([pedidosYaPedidoId, createdAt])
+  @@index([createdAt])
+  @@map("pedidos_ya_log")
+}
+
+model PedidosYaProductoMapping {
+  id                String   @id @default(cuid())
+  externalProductId String   @map("external_product_id")
+  productoVentaId   String   @map("producto_venta_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@unique([externalProductId, productoVentaId])
+  @@map("pedidos_ya_producto_mapping")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  AUDITORÍA — log central de acciones críticas
+// ═══════════════════════════════════════════════════════════════════════════
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  empresaId   String?  @map("empresa_id")
+  empresa     Empresa? @relation(fields: [empresaId], references: [id], onDelete: SetNull)
+  sucursalId  String?  @map("sucursal_id")
+  sucursal    Sucursal? @relation(fields: [sucursalId], references: [id], onDelete: SetNull)
+  usuarioId   String?  @map("usuario_id")
+  usuario     Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  accion      AccionAuditable
+  entidad     String?  // "Comprobante", "Pedido", "Stock", etc.
+  entidadId   String?  @map("entidad_id")
+  // Diff: { before: {...}, after: {...} }
+  diff        Json?    @db.JsonB
+  ip          String?
+  userAgent   String?  @map("user_agent")
+  metadata    Json?    @db.JsonB
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([empresaId, createdAt])
+  @@index([sucursalId, createdAt])
+  @@index([usuarioId, createdAt])
+  @@index([entidad, entidadId])
+  @@index([accion, createdAt])
+  @@map("audit_log")
+}

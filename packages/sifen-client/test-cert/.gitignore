@@ -1,0 +1,4 @@
+# Cert auto-firmado para tests — generado por `pnpm generar-cert-test`.
+# El cert NO debería estar en git (cada dev/CI lo genera al setear el proyecto).
+*.p12
+*.pem

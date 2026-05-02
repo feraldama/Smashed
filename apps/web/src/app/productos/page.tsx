@@ -1,0 +1,214 @@
+'use client';
+
+import { Loader2, Pencil, Plus, Search, Trash2, Utensils, X } from 'lucide-react';
+import Image from 'next/image';
+import Link from 'next/link';
+import { useState } from 'react';
+
+import { AdminShell } from '@/components/AdminShell';
+import { AuthGate } from '@/components/AuthGate';
+import { toast } from '@/components/Toast';
+import { useCategorias, useEliminarProducto, useProductos } from '@/hooks/useCatalogo';
+import { ApiError } from '@/lib/api';
+import { cn, formatGs } from '@/lib/utils';
+
+export default function ProductosPage() {
+  return (
+    <AuthGate>
+      <AdminShell>
+        <ProductosScreen />
+      </AdminShell>
+    </AuthGate>
+  );
+}
+
+function ProductosScreen() {
+  const [busqueda, setBusqueda] = useState('');
+  const [categoriaId, setCategoriaId] = useState<string | undefined>(undefined);
+  const [incluirNoVendibles, setIncluirNoVendibles] = useState(false);
+
+  const { data: categorias = [] } = useCategorias();
+  const { data: productos = [], isLoading } = useProductos({
+    busqueda: busqueda.trim() || undefined,
+    categoriaId,
+    incluirNoVendibles,
+  });
+
+  const eliminar = useEliminarProducto();
+
+  async function handleEliminar(id: string, nombre: string) {
+    if (!confirm(`Eliminar "${nombre}"? Quedará oculto pero el histórico se preserva.`)) return;
+    try {
+      await eliminar.mutateAsync(id);
+      toast.success(`"${nombre}" eliminado`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error');
+    }
+  }
+
+  return (
+    <div>
+      <header className="mb-6 flex items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Productos</h1>
+          <p className="text-sm text-muted-foreground">
+            {productos.length} producto{productos.length !== 1 ? 's' : ''}
+          </p>
+        </div>
+        <Link
+          href="/productos/nuevo"
+          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+        >
+          <Plus className="h-4 w-4" /> Nuevo
+        </Link>
+      </header>
+
+      {/* Filtros */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar por nombre, código o código de barras..."
+            className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-9 text-sm"
+          />
+          {busqueda && (
+            <button
+              type="button"
+              onClick={() => setBusqueda('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-muted"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <select
+          value={categoriaId ?? ''}
+          onChange={(e) => setCategoriaId(e.target.value || undefined)}
+          className="rounded-md border border-input bg-background px-2 py-2 text-sm"
+        >
+          <option value="">Todas las categorías</option>
+          {categorias.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.nombre}
+            </option>
+          ))}
+        </select>
+
+        <label className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-2 text-xs">
+          <input
+            type="checkbox"
+            checked={incluirNoVendibles}
+            onChange={(e) => setIncluirNoVendibles(e.target.checked)}
+            className="h-3.5 w-3.5 accent-primary"
+          />
+          Mostrar no vendibles
+        </label>
+      </div>
+
+      {/* Tabla */}
+      {isLoading ? (
+        <div className="flex h-32 items-center justify-center">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : productos.length === 0 ? (
+        <div className="rounded-md border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+          <Utensils className="mx-auto mb-2 h-8 w-8 opacity-30" />
+          No hay productos que coincidan con los filtros.
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="w-12 px-4 py-2"></th>
+                <th className="px-4 py-2 text-left">Código</th>
+                <th className="px-4 py-2 text-left">Nombre</th>
+                <th className="px-4 py-2 text-left">Categoría</th>
+                <th className="px-4 py-2 text-right">Precio</th>
+                <th className="px-4 py-2 text-center">IVA</th>
+                <th className="px-4 py-2 text-center">Estado</th>
+                <th className="px-4 py-2 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {productos.map((p) => (
+                <tr key={p.id} className="hover:bg-muted/20">
+                  <td className="px-4 py-2">
+                    {p.imagenUrl ? (
+                      <Image
+                        src={p.imagenUrl}
+                        alt=""
+                        width={32}
+                        height={32}
+                        className="h-8 w-8 rounded-md object-cover"
+                      />
+                    ) : (
+                      <div className="h-8 w-8 rounded-md bg-muted" />
+                    )}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-[11px] text-muted-foreground">
+                    {p.codigo ?? '—'}
+                  </td>
+                  <td className="px-4 py-2">
+                    <p className="font-medium">{p.nombre}</p>
+                    {p.descripcion && (
+                      <p className="line-clamp-1 text-[11px] text-muted-foreground">
+                        {p.descripcion}
+                      </p>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground">
+                    {p.categoria?.nombre ?? '—'}
+                  </td>
+                  <td className="px-4 py-2 text-right font-mono">{formatGs(p.precioBase)}</td>
+                  <td className="px-4 py-2 text-center text-xs">
+                    {p.tasaIva.replace('IVA_', '') + '%'}
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    {p.esCombo && (
+                      <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                        COMBO
+                      </span>
+                    )}
+                    {!p.esVendible && (
+                      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                        oculto
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Link
+                        href={`/productos/${p.id}`}
+                        className="rounded-md p-1.5 text-muted-foreground hover:bg-accent"
+                        aria-label="Editar"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => handleEliminar(p.id, p.nombre)}
+                        disabled={eliminar.isPending}
+                        className={cn(
+                          'rounded-md p-1.5 text-destructive hover:bg-destructive/10',
+                          eliminar.isPending && 'opacity-50',
+                        )}
+                        aria-label="Eliminar"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
