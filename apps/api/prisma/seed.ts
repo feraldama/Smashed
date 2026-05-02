@@ -21,6 +21,8 @@
  * En dev borra todo antes de re-sembrar (idempotente).
  */
 
+import 'dotenv/config';
+import { PrismaPg } from '@prisma/adapter-pg';
 import {
   PrismaClient,
   Rol,
@@ -37,8 +39,11 @@ import {
 import { calcularDvRuc } from '@smash/shared-utils';
 import bcrypt from 'bcrypt';
 
-
-const prisma = new PrismaClient();
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL no está seteada');
+}
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
+const prisma = new PrismaClient({ adapter });
 
 const SEED_PASSWORD = 'Smash123!';
 const BCRYPT_ROUNDS = 10; // menor que prod (12) para que el seed sea rápido
