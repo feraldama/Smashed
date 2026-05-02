@@ -58,6 +58,16 @@ export const ROLES_OPERATIVOS = [
   'SUPER_ADMIN',
 ] as const;
 
+/** Roles permitidos en /entregas — incluye REPARTIDOR (entrega delivery). */
+export const ROLES_ENTREGAS = [
+  'CAJERO',
+  'MESERO',
+  'REPARTIDOR',
+  'GERENTE_SUCURSAL',
+  'ADMIN_EMPRESA',
+  'SUPER_ADMIN',
+] as const;
+
 /** Roles permitidos en KDS (cocina). */
 export const ROLES_KITCHEN = [
   'COCINA',

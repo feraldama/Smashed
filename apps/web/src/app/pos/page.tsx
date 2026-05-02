@@ -23,6 +23,7 @@ import { useRouter } from 'next/navigation';
 import { useMemo, useReducer, useState } from 'react';
 
 import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
+import { LogoutButton } from '@/components/ui/LogoutButton';
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
@@ -66,8 +67,11 @@ export default function POSPage() {
   );
 }
 
+const ROLES_ADMIN_FE = new Set(['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN']);
+
 function POSScreen() {
   const user = useAuthStore((s) => s.user);
+  const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
   const { data: apertura, isLoading: cajaLoading } = useMiAperturaActiva();
   const { data: categorias = [] } = useCategorias();
   const [categoriaId, setCategoriaId] = useState<string | null>(null);
@@ -228,17 +232,26 @@ function POSScreen() {
     <div className="flex h-screen flex-col bg-background">
       {/* Mini header POS */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-4">
-        <Link
-          href="/"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" /> Admin
-        </Link>
-        <div className="h-6 w-px bg-border" />
+        {esAdmin && (
+          <>
+            <Link
+              href="/"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" /> Admin
+            </Link>
+            <div className="h-6 w-px bg-border" />
+          </>
+        )}
         <p className="text-sm font-bold">
           POS <span className="font-normal text-muted-foreground">· {apertura.caja.nombre}</span>
         </p>
-        <div className="ml-auto text-xs text-muted-foreground">{user?.nombreCompleto}</div>
+        <div className="ml-auto flex items-center gap-3">
+          <span className="hidden text-xs text-muted-foreground sm:inline">
+            {user?.nombreCompleto}
+          </span>
+          <LogoutButton />
+        </div>
       </header>
 
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">

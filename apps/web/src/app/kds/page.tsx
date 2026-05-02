@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import { AuthGate, ROLES_KITCHEN } from '@/components/AuthGate';
+import { LogoutButton } from '@/components/ui/LogoutButton';
 import { PedidoCard } from '@/components/kds/PedidoCard';
 import { useKds } from '@/hooks/useKds';
 import { useAuthStore } from '@/lib/auth-store';
@@ -18,8 +19,11 @@ export default function KdsPage() {
   );
 }
 
+const ROLES_ADMIN_FE = new Set(['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN']);
+
 function KdsScreen() {
   const user = useAuthStore((s) => s.user);
+  const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
   const { data: pedidos = [], isLoading, isFetching, refetch } = useKds();
   const [sectorFiltro, setSectorFiltro] = useState<string | null>(null);
 
@@ -53,13 +57,17 @@ function KdsScreen() {
     <div className="flex h-screen flex-col bg-background">
       {/* Mini header */}
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-4">
-        <Link
-          href="/"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" /> Admin
-        </Link>
-        <div className="h-6 w-px bg-border" />
+        {esAdmin && (
+          <>
+            <Link
+              href="/"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" /> Admin
+            </Link>
+            <div className="h-6 w-px bg-border" />
+          </>
+        )}
         <h1 className="flex items-center gap-1.5 text-sm font-bold">
           <ChefHat className="h-4 w-4" /> Cocina · KDS
         </h1>
@@ -81,6 +89,7 @@ function KdsScreen() {
             <span className="hidden sm:inline">Refrescar</span>
           </button>
           <span className="hidden text-[11px] sm:inline">{user?.nombreCompleto}</span>
+          <LogoutButton compact />
         </div>
       </header>
 

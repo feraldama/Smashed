@@ -16,7 +16,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
+import { AuthGate, ROLES_ENTREGAS } from '@/components/AuthGate';
+import { LogoutButton } from '@/components/ui/LogoutButton';
 import { Cronometro } from '@/components/kds/Cronometro';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { toast } from '@/components/Toast';
@@ -38,14 +39,17 @@ const TIPO_ICON = {
 
 export default function EntregasPage() {
   return (
-    <AuthGate roles={ROLES_OPERATIVOS}>
+    <AuthGate roles={ROLES_ENTREGAS}>
       <EntregasScreen />
     </AuthGate>
   );
 }
 
+const ROLES_ADMIN_FE = new Set(['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN']);
+
 function EntregasScreen() {
   const user = useAuthStore((s) => s.user);
+  const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
   const { data: apertura } = useMiAperturaActiva();
 
   const { data: listos = [], isLoading: lLoading } = usePedidosPorEstado('LISTO');
@@ -81,13 +85,17 @@ function EntregasScreen() {
   return (
     <div className="flex h-screen flex-col bg-background">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card px-4">
-        <Link
-          href="/"
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ChevronLeft className="h-4 w-4" /> Admin
-        </Link>
-        <div className="h-6 w-px bg-border" />
+        {esAdmin && (
+          <>
+            <Link
+              href="/"
+              className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" /> Admin
+            </Link>
+            <div className="h-6 w-px bg-border" />
+          </>
+        )}
         <h1 className="flex items-center gap-1.5 text-sm font-bold">
           <PackageCheck className="h-4 w-4" /> Entregas
         </h1>
@@ -99,6 +107,7 @@ function EntregasScreen() {
             <strong className="text-foreground">{entregados.length}</strong> por cobrar
           </span>
           <span className="hidden sm:inline">{user?.nombreCompleto}</span>
+          <LogoutButton compact />
         </div>
       </header>
 

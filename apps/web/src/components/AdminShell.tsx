@@ -14,6 +14,7 @@ import {
   ScanLine,
   Settings,
   Tags,
+  UserCog,
   Users,
   Utensils,
   Wallet,
@@ -45,8 +46,8 @@ const NAV: NavItem[] = [
   { href: '/clientes', label: 'Clientes', icon: Users, group: 'Ventas' },
   { href: '/comprobantes', label: 'Comprobantes', icon: FileText, group: 'Ventas' },
   { href: '/reportes', label: 'Reportes', icon: BarChart3, group: 'Análisis' },
+  { href: '/usuarios', label: 'Usuarios', icon: UserCog, group: 'Configuración' },
   { href: '/sucursales', label: 'Sucursales', icon: Building2, group: 'Configuración' },
-  { href: '/cocina', label: 'Sectores', icon: ChefHat, group: 'Configuración' },
   { href: '/empresa', label: 'Empresa', icon: Settings, group: 'Configuración' },
 ];
 
@@ -69,10 +70,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex min-h-screen bg-background">
-      {/* Sidebar */}
-      <aside className="hidden w-60 shrink-0 border-r bg-card lg:flex lg:flex-col">
-        <div className="flex h-14 items-center gap-2 border-b px-4">
+    // En desktop: viewport fijo en altura (h-screen) y los hijos manejan su propio scroll.
+    // En mobile: layout en bloque que scrollea como página normal.
+    <div className="min-h-screen bg-background lg:flex lg:h-screen lg:overflow-hidden">
+      {/* Sidebar — header/footer fijos, nav scrolleable */}
+      <aside className="hidden w-60 shrink-0 border-r bg-card lg:flex lg:h-screen lg:flex-col">
+        {/* Header fijo */}
+        <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
             <span className="text-lg font-bold">S</span>
           </div>
@@ -82,7 +86,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto p-3 text-sm">
+        {/* Nav scrolleable */}
+        <nav className="min-h-0 flex-1 overflow-y-auto p-3 text-sm">
           {Object.entries(grupos).map(([grupo, items]) => (
             <div key={grupo} className="mb-4">
               <p className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -115,20 +120,22 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           ))}
         </nav>
 
-        <div className="border-t p-3">
+        {/* Footer fijo */}
+        <div className="shrink-0 border-t p-3">
           <p className="truncate text-xs font-semibold">{user?.nombreCompleto}</p>
           <p className="truncate text-[11px] text-muted-foreground">{user?.email}</p>
           <button
             type="button"
             onClick={logout}
-            className="mt-2 flex w-full items-center gap-1.5 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent"
+            className="mt-2 flex w-full items-center gap-1.5 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <LogOut className="h-3.5 w-3.5" /> Cerrar sesión
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 overflow-x-hidden">
+      {/* Contenido — scroll propio en desktop, scroll de página en mobile */}
+      <main className="flex-1 overflow-x-hidden lg:h-screen lg:overflow-y-auto">
         {/* Topbar mobile */}
         <header className="flex h-14 items-center justify-between border-b bg-card px-4 lg:hidden">
           <h1 className="text-lg font-bold">

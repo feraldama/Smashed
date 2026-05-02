@@ -1,15 +1,15 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, LogIn, Settings } from 'lucide-react';
+import { Loader2, LogIn } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { Field, Input } from '@/components/ui/Input';
 import { ApiError, api } from '@/lib/api';
 import { type SesionUsuario, useAuthStore } from '@/lib/auth-store';
-import { cn } from '@/lib/utils';
 
 const loginSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -23,7 +23,26 @@ interface LoginResponse {
   user: Omit<SesionUsuario, 'sucursalActivaId'> & { sucursalActivaId: string | null };
 }
 
-const ROLES_PERMITIDOS = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'];
+/**
+ * Mapeo de rol → ruta inicial al loguearse.
+ * - Admin/gerente: panel administrativo (/).
+ * - Cajero/mesero: POS para vender directo.
+ * - Cocina: KDS para ver pedidos.
+ * - Repartidor: pantalla de entregas.
+ */
+const ROL_REDIRECT: Record<string, string> = {
+  SUPER_ADMIN: '/',
+  ADMIN_EMPRESA: '/',
+  GERENTE_SUCURSAL: '/',
+  CAJERO: '/pos',
+  MESERO: '/pos',
+  COCINA: '/kds',
+  REPARTIDOR: '/entregas',
+};
+
+function rutaInicial(rol: string): string {
+  return ROL_REDIRECT[rol] ?? '/';
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -34,17 +53,25 @@ export default function LoginPage() {
   const bootstrapping = useAuthStore((s) => s.bootstrapping);
   const [serverError, setServerError] = useState<string | null>(null);
 
+  // Mensaje desde otra página (ej: AuthGate redirigió por rol no autorizado)
   useEffect(() => {
-    if (searchParams.get('error') === 'role') {
-      setServerError('Tu rol no tiene acceso al panel administrativo.');
+    const err = searchParams.get('error');
+    if (err === 'role') {
+      setServerError('Tu rol no tiene acceso a esa pantalla.');
+    } else if (err === 'session') {
+      setServerError('Tu sesión expiró — volvé a entrar.');
     }
   }, [searchParams]);
 
+  // Si ya hay sesión activa, redirigir según rol — pero NO si la URL trae
+  // ?error=role (significa que la pantalla destino rechazó al usuario, y un
+  // redirect automático generaría un loop infinito).
   useEffect(() => {
-    if (!bootstrapping && accessToken && user && ROLES_PERMITIDOS.includes(user.rol)) {
-      router.replace('/');
+    if (searchParams.get('error') === 'role') return;
+    if (!bootstrapping && accessToken && user) {
+      router.replace(rutaInicial(user.rol));
     }
-  }, [accessToken, bootstrapping, user, router]);
+  }, [accessToken, bootstrapping, user, router, searchParams]);
 
   const {
     register,
@@ -63,12 +90,8 @@ export default function LoginPage() {
         body: data,
         skipAuth: true,
       });
-      if (!ROLES_PERMITIDOS.includes(resp.user.rol)) {
-        setServerError('Tu rol no tiene acceso al panel administrativo.');
-        return;
-      }
       setAuth(resp.accessToken, resp.user);
-      router.replace('/');
+      router.replace(rutaInicial(resp.user.rol));
     } catch (err) {
       setServerError(err instanceof ApiError ? err.message : 'Error de conexión');
     }
@@ -78,54 +101,30 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background to-muted px-4">
       <div className="w-full max-w-sm rounded-xl border bg-card p-8 shadow-lg">
         <div className="mb-6 text-center">
-          <Settings className="mx-auto mb-2 h-10 w-10 text-primary" />
+          <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <span className="text-2xl font-bold">S</span>
+          </div>
           <h1 className="text-3xl font-bold tracking-tight">
-            Smash <span className="text-primary">Admin</span>
+            Smash <span className="text-primary">POS</span>
           </h1>
-          <p className="mt-1 text-sm text-muted-foreground">Panel administrativo</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Iniciá sesión con tu usuario
+          </p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
-          <div>
-            <label htmlFor="email" className="text-sm font-medium">
-              Email
-            </label>
-            <input
-              id="email"
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-3" noValidate>
+          <Field label="Email" required error={errors.email?.message}>
+            <Input
               type="email"
               autoComplete="username"
               autoFocus
               {...register('email')}
-              className={cn(
-                'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                errors.email && 'border-destructive',
-              )}
             />
-            {errors.email && (
-              <p className="mt-1 text-xs text-destructive">{errors.email.message}</p>
-            )}
-          </div>
+          </Field>
 
-          <div>
-            <label htmlFor="password" className="text-sm font-medium">
-              Contraseña
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              {...register('password')}
-              className={cn(
-                'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                errors.password && 'border-destructive',
-              )}
-            />
-            {errors.password && (
-              <p className="mt-1 text-xs text-destructive">{errors.password.message}</p>
-            )}
-          </div>
+          <Field label="Contraseña" required error={errors.password?.message}>
+            <Input type="password" autoComplete="current-password" {...register('password')} />
+          </Field>
 
           {serverError && (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -136,7 +135,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-60"
+            className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90 disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             {isSubmitting ? (
               <>
@@ -151,12 +150,25 @@ export default function LoginPage() {
         </form>
 
         <div className="mt-6 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-          <p className="font-semibold">
-            Cuentas con acceso (password <span className="font-mono">Smash123!</span>):
+          <p className="mb-1 font-semibold">
+            Cuentas de prueba <span className="font-mono">(password Smash123!)</span>:
           </p>
-          <ul className="mt-1 space-y-0.5 font-mono">
-            <li>admin@smash.com.py — ADMIN_EMPRESA</li>
-            <li>gerente.centro@smash.com.py — GERENTE</li>
+          <ul className="space-y-0.5 font-mono">
+            <li>
+              <span className="font-bold">admin@smash.com.py</span> · admin
+            </li>
+            <li>
+              <span className="font-bold">gerente.centro@smash.com.py</span> · gerente
+            </li>
+            <li>
+              <span className="font-bold">cajero1@smash.com.py</span> · cajero → POS
+            </li>
+            <li>
+              <span className="font-bold">cocina1@smash.com.py</span> · cocina → KDS
+            </li>
+            <li>
+              <span className="font-bold">mesero1@smash.com.py</span> · mesero → POS
+            </li>
           </ul>
         </div>
       </div>
