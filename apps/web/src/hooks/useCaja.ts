@@ -31,13 +31,18 @@ export interface CajaListItem {
   id: string;
   nombre: string;
   estado: EstadoCaja;
-  puntoExpedicion: { codigo: string; descripcion: string | null } | null;
+  activa: boolean;
+  sucursalId: string;
+  sucursal: { id: string; codigo: string; nombre: string };
+  puntoExpedicionId: string | null;
+  puntoExpedicion: { id: string; codigo: string; descripcion: string | null } | null;
   sesionActiva: {
     aperturaId: string;
     abiertaEn: string;
     montoInicial: string;
     usuario: { id: string; nombreCompleto: string };
   } | null;
+  _count: { comprobantes: number; aperturas: number };
 }
 
 export interface MovimientoApertura {
@@ -77,10 +82,11 @@ export interface AperturaDetalle extends AperturaActivaSlim {
 
 // ───── Hooks ─────
 
-export function useCajas() {
+export function useCajas(opts: { incluirInactivas?: boolean } = {}) {
+  const qs = opts.incluirInactivas ? '?incluirInactivas=true' : '';
   return useQuery({
-    queryKey: ['admin', 'cajas'],
-    queryFn: () => api<{ cajas: CajaListItem[] }>('/cajas'),
+    queryKey: ['admin', 'cajas', opts.incluirInactivas ?? false],
+    queryFn: () => api<{ cajas: CajaListItem[] }>(`/cajas${qs}`),
     select: (d) => d.cajas,
   });
 }
@@ -178,6 +184,52 @@ export function useRegistrarMovimiento() {
       }),
     onSuccess: (_d, vars) => {
       void qc.invalidateQueries({ queryKey: ['admin', 'apertura', vars.aperturaId] });
+    },
+  });
+}
+
+// ───── CRUD admin de cajas ─────
+
+export interface CrearCajaInput {
+  sucursalId: string;
+  nombre: string;
+  puntoExpedicionId?: string | null;
+}
+
+export interface ActualizarCajaInput {
+  nombre?: string;
+  puntoExpedicionId?: string | null;
+  activa?: boolean;
+}
+
+export function useCrearCaja() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CrearCajaInput) =>
+      api<{ caja: CajaListItem }>('/cajas', { method: 'POST', body: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'cajas'] });
+    },
+  });
+}
+
+export function useActualizarCaja() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string } & ActualizarCajaInput) =>
+      api<{ caja: CajaListItem }>(`/cajas/${id}`, { method: 'PATCH', body: input }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'cajas'] });
+    },
+  });
+}
+
+export function useEliminarCaja() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<undefined>(`/cajas/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'cajas'] });
     },
   });
 }

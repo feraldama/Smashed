@@ -260,3 +260,22 @@ export async function eliminarSucursal(user: UserCtx, id: string) {
 
   return { ok: true };
 }
+
+export async function listarPuntosExpedicion(user: UserCtx, sucursalId: string) {
+  const sucursal = await prisma.sucursal.findUnique({
+    where: { id: sucursalId },
+    select: { empresaId: true, deletedAt: true },
+  });
+  if (!sucursal || sucursal.deletedAt) throw Errors.notFound('Sucursal no encontrada');
+  if (!user.isSuperAdmin && sucursal.empresaId !== user.empresaId) throw Errors.tenantMismatch();
+
+  return prisma.puntoExpedicion.findMany({
+    where: { sucursalId, activo: true },
+    select: {
+      id: true,
+      codigo: true,
+      descripcion: true,
+    },
+    orderBy: { codigo: 'asc' },
+  });
+}

@@ -74,11 +74,26 @@ export function useActualizarSucursal() {
   });
 }
 
+export interface PuntoExpedicion {
+  id: string;
+  codigo: string;
+  descripcion: string | null;
+}
+
+export function usePuntosExpedicion(sucursalId: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'puntos-expedicion', sucursalId],
+    queryFn: () =>
+      api<{ puntos: PuntoExpedicion[] }>(`/sucursales/${sucursalId ?? ''}/puntos-expedicion`),
+    select: (d) => d.puntos,
+    enabled: Boolean(sucursalId),
+  });
+}
+
 export function useEliminarSucursal() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: string) =>
-      api<{ ok: true }>(`/sucursales/${id}`, { method: 'DELETE' }),
+    mutationFn: (id: string) => api<{ ok: true }>(`/sucursales/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'sucursales'] }),
   });
 }

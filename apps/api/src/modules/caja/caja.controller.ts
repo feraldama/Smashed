@@ -1,11 +1,14 @@
-
 import { Errors } from '../../lib/errors.js';
 
 import {
   abrirCajaSchema,
+  actualizarCajaInput,
   aperturaIdParam,
+  cajaAdminIdParam,
   cajaIdParam,
   cerrarCajaSchema,
+  crearCajaInput,
+  listarCajasQuery,
   movimientoCajaSchema,
 } from './caja.schemas.js';
 import * as service from './caja.service.js';
@@ -19,8 +22,31 @@ function ctxOrThrow(req: Request) {
 
 export async function listarCajas(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
-  const cajas = await service.listarCajas(ctx);
+  const q = listarCajasQuery.parse(req.query);
+  const cajas = await service.listarCajas(ctx, { incluirInactivas: q.incluirInactivas });
   res.json({ cajas });
+}
+
+export async function crearCaja(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const input = crearCajaInput.parse(req.body);
+  const caja = await service.crearCaja(ctx, input);
+  res.status(201).json({ caja });
+}
+
+export async function actualizarCaja(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = cajaAdminIdParam.parse(req.params);
+  const input = actualizarCajaInput.parse(req.body);
+  const caja = await service.actualizarCaja(ctx, id, input);
+  res.json({ caja });
+}
+
+export async function eliminarCaja(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = cajaAdminIdParam.parse(req.params);
+  await service.eliminarCaja(ctx, id);
+  res.status(204).send();
 }
 
 export async function aperturaActiva(req: Request, res: Response) {

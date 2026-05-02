@@ -12,6 +12,7 @@ const requireGestion = requireRol('ADMIN_EMPRESA', 'SUPER_ADMIN');
 // Listar es público para cualquier rol auteneticado (los selectores lo necesitan)
 router.get('/', asyncH(ctrl.listar));
 router.get('/:id', asyncH(ctrl.detalle));
+router.get('/:id/puntos-expedicion', asyncH(ctrl.puntosExpedicion));
 router.post('/', requireGestion, asyncH(ctrl.crear));
 router.patch('/:id', requireGestion, asyncH(ctrl.actualizar));
 router.delete('/:id', requireGestion, asyncH(ctrl.eliminar));

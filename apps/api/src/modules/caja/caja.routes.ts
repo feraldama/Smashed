@@ -8,13 +8,19 @@ const router = Router();
 router.use(authRequired);
 
 const requireOperativo = requireRol('CAJERO', 'GERENTE_SUCURSAL', 'ADMIN_EMPRESA');
+const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
 
 // Listado y consultas
 router.get('/cajas', asyncH(ctrl.listarCajas));
 router.get('/cajas/aperturas/activa', asyncH(ctrl.aperturaActiva));
 router.get('/cajas/aperturas/:aperturaId', asyncH(ctrl.obtenerApertura));
 
-// Mutaciones
+// CRUD admin (gestión de cajas físicas)
+router.post('/cajas', requireAdmin, asyncH(ctrl.crearCaja));
+router.patch('/cajas/:id', requireAdmin, asyncH(ctrl.actualizarCaja));
+router.delete('/cajas/:id', requireAdmin, asyncH(ctrl.eliminarCaja));
+
+// Operativas (apertura, cierre, movimientos)
 router.post('/cajas/:cajaId/abrir', requireOperativo, asyncH(ctrl.abrirCaja));
 router.post('/cajas/aperturas/:aperturaId/cerrar', requireOperativo, asyncH(ctrl.cerrarCaja));
 router.post('/cajas/aperturas/:aperturaId/movimientos', requireOperativo, asyncH(ctrl.movimiento));

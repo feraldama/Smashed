@@ -48,3 +48,10 @@ export async function eliminar(req: Request, res: Response) {
   const result = await service.eliminarSucursal(ctx, id);
   res.json(result);
 }
+
+export async function puntosExpedicion(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = sucursalIdParam.parse(req.params);
+  const puntos = await service.listarPuntosExpedicion(ctx, id);
+  res.json({ puntos });
+}

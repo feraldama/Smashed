@@ -3,7 +3,13 @@ import { EstadoCaja, MetodoPago, type Prisma, type Rol, TipoMovimientoCaja } fro
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
-import type { AbrirCajaInput, CerrarCajaInput, MovimientoCajaInput } from './caja.schemas.js';
+import type {
+  AbrirCajaInput,
+  ActualizarCajaInput,
+  CerrarCajaInput,
+  CrearCajaInput,
+  MovimientoCajaInput,
+} from './caja.schemas.js';
 
 /**
  * Servicio de caja.
@@ -30,7 +36,7 @@ interface UserCtx {
 //  LIST
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function listarCajas(user: UserCtx) {
+export async function listarCajas(user: UserCtx, opts: { incluirInactivas?: boolean } = {}) {
   if (!user.sucursalActivaId && !user.isSuperAdmin) {
     throw Errors.forbidden('Seleccioná una sucursal activa');
   }
@@ -40,14 +46,16 @@ export async function listarCajas(user: UserCtx) {
       : { sucursalId: user.sucursalActivaId ?? undefined };
 
   const cajas = await prisma.caja.findMany({
-    where: { ...where, activa: true },
+    where: { ...where, ...(opts.incluirInactivas ? {} : { activa: true }) },
     select: {
       id: true,
       nombre: true,
       estado: true,
+      activa: true,
       sucursalId: true,
       puntoExpedicionId: true,
-      puntoExpedicion: { select: { codigo: true, descripcion: true } },
+      puntoExpedicion: { select: { id: true, codigo: true, descripcion: true } },
+      sucursal: { select: { id: true, codigo: true, nombre: true } },
       // sesión abierta actual (si la hay)
       aperturas: {
         where: { cierre: null },
@@ -60,6 +68,7 @@ export async function listarCajas(user: UserCtx) {
           usuario: { select: { id: true, nombreCompleto: true } },
         },
       },
+      _count: { select: { comprobantes: true, aperturas: true } },
     },
     orderBy: { nombre: 'asc' },
   });
@@ -70,8 +79,16 @@ export async function listarCajas(user: UserCtx) {
       id: c.id,
       nombre: c.nombre,
       estado: c.estado,
+      activa: c.activa,
+      sucursalId: c.sucursalId,
+      sucursal: c.sucursal,
+      puntoExpedicionId: c.puntoExpedicionId,
       puntoExpedicion: c.puntoExpedicion
-        ? { codigo: c.puntoExpedicion.codigo, descripcion: c.puntoExpedicion.descripcion }
+        ? {
+            id: c.puntoExpedicion.id,
+            codigo: c.puntoExpedicion.codigo,
+            descripcion: c.puntoExpedicion.descripcion,
+          }
         : null,
       sesionActiva: sesion
         ? {
@@ -81,7 +98,110 @@ export async function listarCajas(user: UserCtx) {
             usuario: sesion.usuario,
           }
         : null,
+      _count: c._count,
     };
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+//  CRUD ADMIN
+// ═════════════════════════════════════════════════════════════════════════
+
+async function assertSucursalEnEmpresa(user: UserCtx, sucursalId: string) {
+  if (!user.empresaId) throw Errors.unauthorized();
+  const suc = await prisma.sucursal.findUnique({
+    where: { id: sucursalId },
+    select: { empresaId: true },
+  });
+  if (!suc) throw Errors.notFound('Sucursal no encontrada');
+  if (!user.isSuperAdmin && suc.empresaId !== user.empresaId) throw Errors.tenantMismatch();
+}
+
+async function getCajaOwned(user: UserCtx, id: string) {
+  if (!user.empresaId) throw Errors.unauthorized();
+  const caja = await prisma.caja.findUnique({
+    where: { id },
+    include: { sucursal: { select: { empresaId: true } } },
+  });
+  if (!caja) throw Errors.notFound('Caja no encontrada');
+  if (!user.isSuperAdmin && caja.sucursal.empresaId !== user.empresaId) {
+    throw Errors.tenantMismatch();
+  }
+  return caja;
+}
+
+async function assertPuntoExpedicionEnSucursal(puntoExpedicionId: string, sucursalId: string) {
+  const pe = await prisma.puntoExpedicion.findUnique({
+    where: { id: puntoExpedicionId },
+    select: { sucursalId: true },
+  });
+  if (!pe) throw Errors.notFound('Punto de expedición no encontrado');
+  if (pe.sucursalId !== sucursalId) {
+    throw Errors.conflict('El punto de expedición no pertenece a esa sucursal');
+  }
+}
+
+export async function crearCaja(user: UserCtx, input: CrearCajaInput) {
+  await assertSucursalEnEmpresa(user, input.sucursalId);
+
+  const dup = await prisma.caja.findUnique({
+    where: { sucursalId_nombre: { sucursalId: input.sucursalId, nombre: input.nombre } },
+  });
+  if (dup) throw Errors.conflict(`Ya existe una caja "${input.nombre}" en esa sucursal`);
+
+  if (input.puntoExpedicionId) {
+    await assertPuntoExpedicionEnSucursal(input.puntoExpedicionId, input.sucursalId);
+  }
+
+  return prisma.caja.create({
+    data: {
+      sucursalId: input.sucursalId,
+      nombre: input.nombre,
+      puntoExpedicionId: input.puntoExpedicionId ?? null,
+    },
+  });
+}
+
+export async function actualizarCaja(user: UserCtx, id: string, input: ActualizarCajaInput) {
+  const caja = await getCajaOwned(user, id);
+
+  if (input.nombre && input.nombre !== caja.nombre) {
+    const dup = await prisma.caja.findUnique({
+      where: { sucursalId_nombre: { sucursalId: caja.sucursalId, nombre: input.nombre } },
+    });
+    if (dup && dup.id !== id) {
+      throw Errors.conflict(`Ya existe una caja "${input.nombre}" en esa sucursal`);
+    }
+  }
+
+  if (input.puntoExpedicionId) {
+    await assertPuntoExpedicionEnSucursal(input.puntoExpedicionId, caja.sucursalId);
+  }
+
+  return prisma.caja.update({ where: { id }, data: input });
+}
+
+export async function eliminarCaja(user: UserCtx, id: string) {
+  const caja = await getCajaOwned(user, id);
+
+  if (caja.estado === EstadoCaja.ABIERTA) {
+    throw Errors.conflict(
+      'No se puede eliminar una caja abierta — cerrala primero desde la pantalla de Caja.',
+    );
+  }
+
+  const sesionAbierta = await prisma.aperturaCaja.findFirst({
+    where: { cajaId: id, cierre: null },
+    select: { id: true },
+  });
+  if (sesionAbierta) {
+    throw Errors.conflict('Hay una sesión de caja abierta — cerrala antes de eliminar la caja.');
+  }
+
+  // Soft delete (mantiene comprobantes asociados intactos)
+  return prisma.caja.update({
+    where: { id },
+    data: { activa: false },
   });
 }
 

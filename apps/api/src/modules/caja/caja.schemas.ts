@@ -32,9 +32,34 @@ export const movimientoCajaSchema = z.object({
 export const cajaIdParam = z.object({ cajaId: z.string().cuid() });
 export const aperturaIdParam = z.object({ aperturaId: z.string().cuid() });
 
+// ───── CRUD admin ─────
+
+export const crearCajaInput = z.object({
+  sucursalId: z.string().cuid(),
+  nombre: z.string().trim().min(1).max(80),
+  puntoExpedicionId: z.string().cuid().nullable().optional(),
+});
+
+export const actualizarCajaInput = z.object({
+  nombre: z.string().trim().min(1).max(80).optional(),
+  puntoExpedicionId: z.string().cuid().nullable().optional(),
+  activa: z.boolean().optional(),
+});
+
+export const cajaAdminIdParam = z.object({ id: z.string().cuid() });
+
+export const listarCajasQuery = z.object({
+  incluirInactivas: z
+    .union([z.literal('true'), z.literal('false'), z.boolean()])
+    .transform((v) => v === true || v === 'true')
+    .optional(),
+});
+
 // helpers tipados
 void guaraniSigned;
 
 export type AbrirCajaInput = z.infer<typeof abrirCajaSchema>;
 export type CerrarCajaInput = z.infer<typeof cerrarCajaSchema>;
 export type MovimientoCajaInput = z.infer<typeof movimientoCajaSchema>;
+export type CrearCajaInput = z.infer<typeof crearCajaInput>;
+export type ActualizarCajaInput = z.infer<typeof actualizarCajaInput>;
