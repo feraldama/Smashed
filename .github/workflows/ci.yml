@@ -51,7 +51,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # Prisma 7 trae deps que exigen Node >= 22 (@prisma/streams-local).
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
