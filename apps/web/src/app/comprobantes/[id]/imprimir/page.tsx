@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { AuthGate } from '@/components/AuthGate';
+import { AuthGate, ROLES_ENTREGAS } from '@/components/AuthGate';
 import { FacturaA4 } from '@/components/imprimir/FacturaA4';
 import { TicketTermico } from '@/components/imprimir/TicketTermico';
 import { type ComprobanteDetalle, useComprobante } from '@/hooks/useComprobantes';
@@ -14,7 +14,7 @@ type Formato = 'ticket' | 'factura';
 
 export default function ImprimirComprobantePage() {
   return (
-    <AuthGate>
+    <AuthGate roles={ROLES_ENTREGAS}>
       <ImprimirScreen />
     </AuthGate>
   );
