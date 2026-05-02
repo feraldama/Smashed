@@ -25,7 +25,7 @@ interface ClienteSearchProps {
 
 export function ClienteSearch({
   selectedId,
-  selectedLabel,
+  selectedLabel: _selectedLabel,
   onSelect,
   requiereDireccion,
   direccionEntregaId,
@@ -282,7 +282,12 @@ function CrearClienteRapidoModal({
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-3 p-4">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="space-y-3 p-4"
+        >
           <div className="grid grid-cols-2 gap-2">
             {(['PERSONA_FISICA', 'PERSONA_JURIDICA'] as const).map((t) => (
               <button

@@ -22,7 +22,7 @@ export interface AperturaDetalle {
   abiertaEn: string;
   notas: string | null;
   caja: { id: string; nombre: string; sucursalId: string };
-  cierre: unknown | null;
+  cierre: unknown;
   movimientos: {
     id: string;
     tipo: string;
@@ -67,7 +67,7 @@ export function useAperturaActiva() {
 export function useApertura(aperturaId: string | undefined) {
   return useQuery({
     queryKey: ['caja', 'apertura', aperturaId],
-    queryFn: () => api<{ apertura: AperturaDetalle }>(`/cajas/aperturas/${aperturaId!}`),
+    queryFn: () => api<{ apertura: AperturaDetalle }>(`/cajas/aperturas/${aperturaId ?? ''}`),
     select: (data) => data.apertura,
     enabled: Boolean(aperturaId),
     staleTime: 2_000,

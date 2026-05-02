@@ -481,7 +481,9 @@ function CobroView({
       <div className="border-t p-4">
         <button
           type="button"
-          onClick={handleEmitir}
+          onClick={() => {
+            void handleEmitir();
+          }}
           disabled={trabajando || !metodo}
           className={cn(
             'flex w-full items-center justify-center gap-2 rounded-md bg-primary py-3 text-sm font-semibold text-primary-foreground shadow',
@@ -595,7 +597,6 @@ function CartLine({ item, onIncrease, onDecrease, onRemove }: CartLineProps) {
     <li className="flex gap-3 p-3">
       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted">
         {item.imagenUrl && (
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={item.imagenUrl} alt="" className="h-full w-full object-cover" loading="lazy" />
         )}
       </div>

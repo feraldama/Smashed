@@ -137,7 +137,12 @@ export async function bootstrapAuth() {
       };
       sucursalActivaId: string | null;
     }>('/auth/me');
-    store.setAuth(useAuthStore.getState().accessToken!, {
+    const accessToken = useAuthStore.getState().accessToken;
+    if (!accessToken) {
+      store.clear();
+      return;
+    }
+    store.setAuth(accessToken, {
       ...meResp.user,
       empresaId: meResp.user.empresa?.id ?? null,
       sucursalActivaId: meResp.sucursalActivaId,

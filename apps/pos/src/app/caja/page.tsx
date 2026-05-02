@@ -150,7 +150,12 @@ function AbrirCajaPanel() {
       </div>
 
       {seleccionada && (
-        <form onSubmit={handleSubmit} className="mt-6 space-y-4 rounded-lg border bg-card p-5">
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(e);
+          }}
+          className="mt-6 space-y-4 rounded-lg border bg-card p-5"
+        >
           <div>
             <label htmlFor="monto" className="text-sm font-medium">
               Monto inicial (efectivo en caja)
@@ -346,7 +351,12 @@ function CerrarCajaPanel({ aperturaId }: { aperturaId: string }) {
       </div>
 
       {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-4 rounded-lg border bg-card p-5">
+      <form
+        onSubmit={(e) => {
+          void handleSubmit(e);
+        }}
+        className="space-y-4 rounded-lg border bg-card p-5"
+      >
         <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Cierre Z
         </h2>

@@ -60,7 +60,7 @@ export interface ProductoDetalle {
 export function useProductoDetalle(productoId: string | null) {
   return useQuery({
     queryKey: ['catalogo', 'producto', productoId],
-    queryFn: () => api<{ producto: ProductoDetalle }>(`/catalogo/productos/${productoId!}`),
+    queryFn: () => api<{ producto: ProductoDetalle }>(`/catalogo/productos/${productoId ?? ''}`),
     enabled: Boolean(productoId),
     select: (d) => d.producto,
   });

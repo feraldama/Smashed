@@ -73,7 +73,13 @@ export default function LoginPage() {
           <p className="mt-1 text-sm text-muted-foreground">Iniciar sesión</p>
         </div>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4" noValidate>
+        <form
+          onSubmit={(e) => {
+            void handleSubmit(onSubmit)(e);
+          }}
+          className="space-y-4"
+          noValidate
+        >
           <div>
             <label htmlFor="email" className="text-sm font-medium">
               Email

@@ -119,7 +119,9 @@ function PosHome() {
               </span>
               <button
                 type="button"
-                onClick={logout}
+                onClick={() => {
+                  void logout();
+                }}
                 className="flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-1.5 text-xs font-medium hover:bg-accent"
               >
                 <LogOut className="h-3.5 w-3.5" /> Salir

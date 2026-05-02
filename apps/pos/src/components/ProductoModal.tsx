@@ -52,8 +52,9 @@ export function ProductoModal({ productoId, onClose }: ProductoModalProps) {
     const next: Record<string, string[]> = {};
     for (const mg of producto.modificadorGrupos) {
       const g = mg.modificadorGrupo;
-      if (g.tipo === 'UNICA' && g.obligatorio && g.opciones.length > 0) {
-        next[g.id] = [g.opciones[0]!.id];
+      if (g.tipo === 'UNICA' && g.obligatorio) {
+        const primera = g.opciones[0];
+        if (primera) next[g.id] = [primera.id];
       }
     }
     setModSeleccion(next);
@@ -130,13 +131,16 @@ export function ProductoModal({ productoId, onClose }: ProductoModalProps) {
 
     // Armar el item
     const modificadoresFlat = producto.modificadorGrupos.flatMap((mg) =>
-      (modSeleccion[mg.modificadorGrupo.id] ?? []).map((optId) => {
-        const opt = mg.modificadorGrupo.opciones.find((o) => o.id === optId)!;
-        return {
-          modificadorOpcionId: opt.id,
-          nombre: opt.nombre,
-          precioExtra: Number(opt.precioExtra),
-        };
+      (modSeleccion[mg.modificadorGrupo.id] ?? []).flatMap((optId) => {
+        const opt = mg.modificadorGrupo.opciones.find((o) => o.id === optId);
+        if (!opt) return [];
+        return [
+          {
+            modificadorOpcionId: opt.id,
+            nombre: opt.nombre,
+            precioExtra: Number(opt.precioExtra),
+          },
+        ];
       }),
     );
 

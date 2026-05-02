@@ -40,7 +40,7 @@ export function useClientesPos(busqueda?: string) {
 export function useClienteDetalle(id: string | null) {
   return useQuery({
     queryKey: ['pos', 'cliente', id],
-    queryFn: () => api<{ cliente: ClienteDetalle }>(`/clientes/${id!}`),
+    queryFn: () => api<{ cliente: ClienteDetalle }>(`/clientes/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.cliente,
   });

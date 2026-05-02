@@ -15,6 +15,12 @@ export default tseslint.config(
       '**/coverage/**',
       '**/prisma/migrations/**',
       '**/generated/**',
+      // Generado por Next.js, no editamos manualmente.
+      '**/next-env.d.ts',
+      // Archivos de config de Next/PostCSS/Tailwind fuera del project service TS.
+      '**/next.config.{js,mjs,ts}',
+      '**/postcss.config.{js,mjs}',
+      '**/tailwind.config.{js,mjs,ts}',
     ],
   },
   js.configs.recommended,

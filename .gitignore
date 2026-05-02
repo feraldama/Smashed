@@ -30,6 +30,9 @@ lerna-debug.log*
 !.vscode/extensions.json
 !.vscode/settings.json.example
 .idea/
+
+# Claude Code (sub-agent worktrees)
+.claude/worktrees/
 *.swp
 *.swo
 .DS_Store

@@ -54,7 +54,7 @@ export interface ComprobanteDetalle {
 export function useComprobante(id: string | null) {
   return useQuery({
     queryKey: ['comprobante', id],
-    queryFn: () => api<{ comprobante: ComprobanteDetalle }>(`/comprobantes/${id!}`),
+    queryFn: () => api<{ comprobante: ComprobanteDetalle }>(`/comprobantes/${id ?? ''}`),
     enabled: Boolean(id),
     select: (d) => d.comprobante,
   });
