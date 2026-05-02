@@ -46,8 +46,7 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 9
+        # Versión la toma de packageManager en package.json (pnpm@9.12.0).
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -58,11 +57,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Prisma 7 ya no auto-genera el cliente en postinstall (como sí hacía
+      # Prisma 5). Sin esto, lint/typecheck fallan porque @prisma/client no
+      # tiene tipos generados.
+      - name: Generate Prisma client
+        run: pnpm --filter @smash/api prisma:generate
+
       - name: Lint
         run: pnpm lint
 
       - name: Typecheck
         run: pnpm typecheck
+
+      - name: Apply migrations + seed test DB
+        env:
+          DATABASE_URL: postgresql://smash:smash@localhost:5432/smash_test?schema=public
+        run: |
+          pnpm --filter @smash/api exec prisma migrate deploy
+          pnpm --filter @smash/api exec tsx prisma/seed.ts
 
       - name: Test
         env:
