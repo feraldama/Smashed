@@ -37,8 +37,8 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'General' },
   { href: '/productos', label: 'Productos', icon: Utensils, group: 'Catálogo' },
-  { href: '/categorias', label: 'Categorías', icon: Tags, group: 'Catálogo' },
   { href: '/combos', label: 'Combos', icon: Layers, group: 'Catálogo' },
+  { href: '/categorias', label: 'Categorías', icon: Tags, group: 'Catálogo' },
   { href: '/insumos', label: 'Insumos', icon: Boxes, group: 'Inventario' },
   { href: '/proveedores', label: 'Proveedores', icon: Package, group: 'Inventario' },
   { href: '/pos', label: 'POS — Vender', icon: ScanLine, group: 'Ventas' },
