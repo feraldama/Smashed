@@ -17,10 +17,16 @@ export default tseslint.config(
       '**/generated/**',
       // Generado por Next.js, no editamos manualmente.
       '**/next-env.d.ts',
-      // Archivos de config de Next/PostCSS/Tailwind fuera del project service TS.
+      // Archivos de config fuera del project service TS de los apps.
       '**/next.config.{js,mjs,ts}',
       '**/postcss.config.{js,mjs}',
       '**/tailwind.config.{js,mjs,ts}',
+      'commitlint.config.{js,cjs,mjs}',
+      'eslint.config.{js,mjs}',
+      // Scripts one-shot de prisma — no están en tsconfig de @smash/api.
+      'apps/api/prisma/*.ts',
+      // Tests de packages compartidos — vitest los corre desde su propio entorno.
+      'packages/*/src/**/*.test.ts',
     ],
   },
   js.configs.recommended,
@@ -58,6 +64,19 @@ export default tseslint.config(
       '@typescript-eslint/await-thenable': 'error',
       '@typescript-eslint/require-await': 'error',
       '@typescript-eslint/no-non-null-assertion': 'warn',
+
+      // Reglas type-aware de recommendedTypeChecked muy estrictas — desactivadas
+      // porque generan ruido masivo en código que interactúa con libs sin tipos
+      // estrictos (node-forge, prisma JsonValue, decoded JWTs). Si querés
+      // re-habilitar alguna en un módulo específico, agregá un override.
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
+      '@typescript-eslint/no-unsafe-call': 'off',
+      '@typescript-eslint/no-unsafe-argument': 'off',
+      '@typescript-eslint/no-unsafe-return': 'off',
+      '@typescript-eslint/restrict-template-expressions': 'off',
+      '@typescript-eslint/no-redundant-type-constituents': 'warn',
+      '@typescript-eslint/no-base-to-string': 'off',
 
       // Import ordering
       'import/order': [
