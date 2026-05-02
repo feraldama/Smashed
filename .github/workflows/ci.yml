@@ -73,12 +73,17 @@ jobs:
       - name: Apply migrations + seed test DB
         env:
           DATABASE_URL: postgresql://smash:smash@localhost:5432/smash_test?schema=public
+          DB_PASSWORD: smash
+          JWT_SECRET: ci-only-jwt-secret-must-be-at-least-32-chars-long
         run: |
           pnpm --filter @smash/api exec prisma migrate deploy
           pnpm --filter @smash/api exec tsx prisma/seed.ts
 
       - name: Test
         env:
+          NODE_ENV: test
           DATABASE_URL: postgresql://smash:smash@localhost:5432/smash_test?schema=public
+          DB_PASSWORD: smash
+          JWT_SECRET: ci-only-jwt-secret-must-be-at-least-32-chars-long
           REDIS_URL: redis://localhost:6379
         run: pnpm test
