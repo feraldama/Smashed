@@ -70,6 +70,11 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
+      # Cert auto-firmado para los tests del módulo SIFEN. No se commitea (es
+      # binario y se regenera en cada CI run); local se hace una sola vez.
+      - name: Generate SIFEN test cert
+        run: pnpm --filter @smash/sifen-client generar-cert-test
+
       - name: Apply migrations + seed test DB
         env:
           DATABASE_URL: postgresql://smash:smash@localhost:5432/smash_test?schema=public
