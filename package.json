@@ -26,6 +26,8 @@
     "services:reset": "docker compose --profile db --profile tools down -v",
     "db:migrate": "pnpm --filter @smash/api prisma:migrate",
     "db:seed": "pnpm --filter @smash/api prisma:seed",
+    "db:seed:snapshot": "pnpm --filter @smash/api prisma:seed:snapshot",
+    "db:snapshot": "pnpm --filter @smash/api prisma:snapshot",
     "db:studio": "pnpm --filter @smash/api prisma:studio",
     "db:reset": "pnpm --filter @smash/api prisma:reset",
     "prepare": "husky"

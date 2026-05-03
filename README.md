@@ -97,6 +97,10 @@ pnpm services:up:db
 # 5. Aplicar migraciones + seed
 pnpm db:migrate
 pnpm db:seed
+#  ↳ Alternativa: pnpm db:seed:snapshot
+#    Restaura el dump versionado en apps/api/prisma/snapshot.sql — útil
+#    cuando querés arrancar con el estado de dev capturado más reciente
+#    en vez del seed minimalista.
 
 # 6. Levantar todo en dev
 pnpm dev
@@ -135,23 +139,49 @@ pnpm services:up:tools
 
 ## Scripts
 
-| Script                   | Descripción                                       |
-| ------------------------ | ------------------------------------------------- |
-| `pnpm dev`               | Levanta todas las apps en modo desarrollo         |
-| `pnpm build`             | Build de toda la monorepo                         |
-| `pnpm lint`              | Lint en todas las apps/packages                   |
-| `pnpm typecheck`         | Type-check sin emitir                             |
-| `pnpm test`              | Corre tests con Vitest                            |
-| `pnpm format`            | Formatea código con Prettier                      |
-| `pnpm services:up`       | Levanta Redis (default — Postgres se asume local) |
-| `pnpm services:up:db`    | Levanta Postgres + Redis en Docker                |
-| `pnpm services:up:tools` | + pgAdmin                                         |
-| `pnpm services:down`     | Detiene contenedores (mantiene volúmenes)         |
-| `pnpm services:reset`    | Detiene + borra volúmenes (BD desde cero)         |
-| `pnpm db:migrate`        | Aplica migraciones Prisma                         |
-| `pnpm db:seed`           | Carga seed de datos                               |
-| `pnpm db:studio`         | Abre Prisma Studio                                |
-| `pnpm db:reset`          | Resetea la BD y reaplica migraciones + seed       |
+| Script                   | Descripción                                        |
+| ------------------------ | -------------------------------------------------- |
+| `pnpm dev`               | Levanta todas las apps en modo desarrollo          |
+| `pnpm build`             | Build de toda la monorepo                          |
+| `pnpm lint`              | Lint en todas las apps/packages                    |
+| `pnpm typecheck`         | Type-check sin emitir                              |
+| `pnpm test`              | Corre tests con Vitest                             |
+| `pnpm format`            | Formatea código con Prettier                       |
+| `pnpm services:up`       | Levanta Redis (default — Postgres se asume local)  |
+| `pnpm services:up:db`    | Levanta Postgres + Redis en Docker                 |
+| `pnpm services:up:tools` | + pgAdmin                                          |
+| `pnpm services:down`     | Detiene contenedores (mantiene volúmenes)          |
+| `pnpm services:reset`    | Detiene + borra volúmenes (BD desde cero)          |
+| `pnpm db:migrate`        | Aplica migraciones Prisma                          |
+| `pnpm db:seed`           | Carga seed minimalista (catálogo + usuarios demo)  |
+| `pnpm db:seed:snapshot`  | Trunca y carga `prisma/snapshot.sql` (restore 1:1) |
+| `pnpm db:snapshot`       | Regenera `prisma/snapshot.sql` desde la BD actual  |
+| `pnpm db:studio`         | Abre Prisma Studio                                 |
+| `pnpm db:reset`          | Resetea la BD y reaplica migraciones + seed        |
+
+### Snapshot: clonar la BD de dev entre máquinas
+
+Hay dos formas de poblar la BD:
+
+| Comando                 | Cuándo usar                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `pnpm db:seed`          | Empezás de cero — cataloga + usuarios + un combo. Útil para devs nuevos o tests.                            |
+| `pnpm db:seed:snapshot` | Querés el estado actual de dev (productos modificados, pedidos de prueba, etc.) tal cual lo dejó el equipo. |
+
+**Generar un nuevo snapshot** (sólo cuando querés actualizar el archivo versionado):
+
+```bash
+pnpm db:snapshot
+# Sobrescribe apps/api/prisma/snapshot.sql con un dump --data-only de la BD actual.
+# Requiere `pg_dump` en PATH; si no, exportá PG_DUMP_PATH apuntando al ejecutable
+# (ej. en Windows: D:\Archivos de programa\PostgreSQL\18\bin\pg_dump.exe).
+```
+
+**Notas**:
+
+- El snapshot preserva los IDs (cuids) y secuencias originales — el ciclo `db:snapshot` → `db:seed:snapshot` es idempotente.
+- `db:seed:snapshot` trunca todas las tablas de `public` (excepto `_prisma_migrations`) antes de cargar.
+- Las migraciones tienen que estar al día (`pnpm db:migrate`) antes de cargar un snapshot, o los `INSERT` van a fallar contra columnas inexistentes.
 
 ---
 
