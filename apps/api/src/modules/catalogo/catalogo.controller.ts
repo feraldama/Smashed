@@ -1,4 +1,3 @@
-
 import { Errors } from '../../lib/errors.js';
 
 import {
@@ -47,16 +46,16 @@ export async function listarCategorias(req: Request, res: Response) {
 export async function listarProductos(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
   if (!ctx.empresaId) {
-    res.json({ productos: [] });
+    res.json({ productos: [], total: 0, page: 1, pageSize: 0 });
     return;
   }
   const filtros = listarProductosQuery.parse(req.query);
-  const productos = await service.listarProductos({
+  const result = await service.listarProductos({
     empresaId: ctx.empresaId,
     sucursalId: ctx.sucursalActivaId,
     filtros,
   });
-  res.json({ productos, sucursalActivaId: ctx.sucursalActivaId });
+  res.json({ ...result, sucursalActivaId: ctx.sucursalActivaId });
 }
 
 export async function obtenerProducto(req: Request, res: Response) {

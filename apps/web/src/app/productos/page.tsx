@@ -1,16 +1,31 @@
 'use client';
 
-import { Loader2, Pencil, Plus, Search, Trash2, Utensils, X } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Loader2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Utensils,
+  X,
+} from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { toast } from '@/components/Toast';
-import { useCategorias, useEliminarProducto, useProductos } from '@/hooks/useCatalogo';
+import { useCategorias, useEliminarProducto, useProductosPaginados } from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
+
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const PAGE_SIZE_DEFAULT = 10;
 
 export default function ProductosPage() {
   return (
@@ -26,13 +41,28 @@ function ProductosScreen() {
   const [busqueda, setBusqueda] = useState('');
   const [categoriaId, setCategoriaId] = useState<string | undefined>(undefined);
   const [incluirNoVendibles, setIncluirNoVendibles] = useState(false);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(PAGE_SIZE_DEFAULT);
+
+  // Cualquier cambio de filtros nos lleva a la primera página — si no, podríamos
+  // quedar fuera de rango (ej. página 5 cuando el filtro deja sólo 12 ítems).
+  useEffect(() => {
+    setPage(1);
+  }, [busqueda, categoriaId, incluirNoVendibles, pageSize]);
 
   const { data: categorias = [] } = useCategorias();
-  const { data: productos = [], isLoading } = useProductos({
+  const { data, isLoading, isFetching } = useProductosPaginados({
     busqueda: busqueda.trim() || undefined,
     categoriaId,
     incluirNoVendibles,
+    page,
+    pageSize,
   });
+  const productos = data?.productos ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const desde = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const hasta = Math.min(page * pageSize, total);
 
   const eliminar = useEliminarProducto();
 
@@ -52,7 +82,7 @@ function ProductosScreen() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Productos</h1>
           <p className="text-sm text-muted-foreground">
-            {productos.length} producto{productos.length !== 1 ? 's' : ''}
+            {total} producto{total !== 1 ? 's' : ''}
           </p>
         </div>
         <Link
@@ -120,7 +150,9 @@ function ProductosScreen() {
           No hay productos que coincidan con los filtros.
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border bg-card">
+        <div
+          className={cn('overflow-hidden rounded-lg border bg-card', isFetching && 'opacity-60')}
+        >
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
@@ -211,6 +243,90 @@ function ProductosScreen() {
           </table>
         </div>
       )}
+
+      {/* Paginador — visible siempre que haya algún resultado */}
+      {total > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <label className="flex items-center gap-2">
+              Mostrar
+              <select
+                value={pageSize}
+                onChange={(e) => setPageSize(Number(e.target.value))}
+                className="rounded-md border border-input bg-background px-2 py-1 text-sm"
+              >
+                {PAGE_SIZE_OPTIONS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+              por página
+            </label>
+            <span className="hidden sm:inline">·</span>
+            <span className="hidden sm:inline">
+              {desde}–{hasta} de {total}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <PagerBtn
+              onClick={() => setPage(1)}
+              disabled={page === 1 || isFetching}
+              ariaLabel="Primera página"
+            >
+              <ChevronsLeft className="h-4 w-4" />
+            </PagerBtn>
+            <PagerBtn
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1 || isFetching}
+              ariaLabel="Página anterior"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </PagerBtn>
+            <span className="px-2 text-xs text-muted-foreground">
+              Página <strong className="text-foreground">{page}</strong> de {totalPages}
+            </span>
+            <PagerBtn
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page >= totalPages || isFetching}
+              ariaLabel="Página siguiente"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </PagerBtn>
+            <PagerBtn
+              onClick={() => setPage(totalPages)}
+              disabled={page >= totalPages || isFetching}
+              ariaLabel="Última página"
+            >
+              <ChevronsRight className="h-4 w-4" />
+            </PagerBtn>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+function PagerBtn({
+  onClick,
+  disabled,
+  ariaLabel,
+  children,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  ariaLabel: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={ariaLabel}
+      className="rounded-md border border-input bg-background p-1.5 text-muted-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40"
+    >
+      {children}
+    </button>
   );
 }

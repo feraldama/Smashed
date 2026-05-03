@@ -24,6 +24,11 @@ export const listarProductosQuery = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => v === 'true'),
+  // Paginación opcional: si llega `pageSize`, se pagina con skip/take. Si no
+  // se envía, devuelve todos (uso típico del POS, que necesita el catálogo
+  // completo para mostrar como tarjetas).
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(200).optional(),
 });
 
 export const obtenerProductoParams = z.object({

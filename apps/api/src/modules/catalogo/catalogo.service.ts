@@ -66,41 +66,51 @@ export async function listarProductos(args: {
     ...(filtros.busqueda ? buildBusquedaWhere(filtros.busqueda) : {}),
   };
 
-  const productos = await prisma.productoVenta.findMany({
-    where,
-    select: {
-      id: true,
-      codigo: true,
-      codigoBarras: true,
-      nombre: true,
-      descripcion: true,
-      precioBase: true,
-      tasaIva: true,
-      imagenUrl: true,
-      sectorComanda: true,
-      tiempoPrepSegundos: true,
-      esCombo: true,
-      esVendible: true,
-      categoria: { select: { id: true, nombre: true, categoriaBase: true } },
-      ...(sucursalId
-        ? {
-            preciosSucursal: {
-              where: {
-                sucursalId,
-                vigenteDesde: { lte: ahora },
-                OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: ahora } }],
-              },
-              orderBy: { vigenteDesde: 'desc' },
-              take: 1,
-              select: { precio: true },
-            },
-          }
-        : {}),
-    },
-    orderBy: [{ categoria: { ordenMenu: 'asc' } }, { nombre: 'asc' }],
-  });
+  // Paginación opcional: si el caller manda pageSize, se aplica skip/take y se
+  // calcula `total` (count del where). Si no, devuelve todos (uso del POS).
+  const paginar = filtros.pageSize !== undefined;
+  const page = filtros.page ?? 1;
+  const pageSize = filtros.pageSize;
 
-  return productos.map((p) => {
+  const [productos, total] = await Promise.all([
+    prisma.productoVenta.findMany({
+      where,
+      select: {
+        id: true,
+        codigo: true,
+        codigoBarras: true,
+        nombre: true,
+        descripcion: true,
+        precioBase: true,
+        tasaIva: true,
+        imagenUrl: true,
+        sectorComanda: true,
+        tiempoPrepSegundos: true,
+        esCombo: true,
+        esVendible: true,
+        categoria: { select: { id: true, nombre: true, categoriaBase: true } },
+        ...(sucursalId
+          ? {
+              preciosSucursal: {
+                where: {
+                  sucursalId,
+                  vigenteDesde: { lte: ahora },
+                  OR: [{ vigenteHasta: null }, { vigenteHasta: { gte: ahora } }],
+                },
+                orderBy: { vigenteDesde: 'desc' },
+                take: 1,
+                select: { precio: true },
+              },
+            }
+          : {}),
+      },
+      orderBy: [{ categoria: { ordenMenu: 'asc' } }, { nombre: 'asc' }],
+      ...(paginar ? { skip: (page - 1) * pageSize!, take: pageSize } : {}),
+    }),
+    paginar ? prisma.productoVenta.count({ where }) : Promise.resolve(0),
+  ]);
+
+  const items = productos.map((p) => {
     const override = 'preciosSucursal' in p ? p.preciosSucursal[0]?.precio : undefined;
     const { preciosSucursal: _drop, ...rest } = p as typeof p & { preciosSucursal?: unknown };
     void _drop;
@@ -111,6 +121,13 @@ export async function listarProductos(args: {
       tienePrecioSucursal: override !== undefined,
     };
   });
+
+  return {
+    productos: items,
+    total: paginar ? total : items.length,
+    page,
+    pageSize: pageSize ?? items.length,
+  };
 }
 
 export async function obtenerProducto(args: {

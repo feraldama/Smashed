@@ -165,6 +165,40 @@ export function useProductos(
   });
 }
 
+/**
+ * Versión paginada para la pantalla de admin de productos. A diferencia de
+ * `useProductos` (POS, todos los productos a la vez), acá controlamos page +
+ * pageSize y exponemos el total para construir el paginador.
+ */
+export function useProductosPaginados(filtros: {
+  categoriaId?: string;
+  busqueda?: string;
+  incluirNoVendibles?: boolean;
+  esCombo?: boolean;
+  page: number;
+  pageSize: number;
+}) {
+  const params = new URLSearchParams();
+  if (filtros.categoriaId) params.set('categoriaId', filtros.categoriaId);
+  if (filtros.busqueda) params.set('busqueda', filtros.busqueda);
+  if (filtros.incluirNoVendibles) params.set('incluirNoVendibles', 'true');
+  if (filtros.esCombo !== undefined) params.set('esCombo', String(filtros.esCombo));
+  params.set('page', String(filtros.page));
+  params.set('pageSize', String(filtros.pageSize));
+  const qs = params.toString();
+  return useQuery({
+    queryKey: ['admin', 'productos', 'paginados', filtros],
+    queryFn: () =>
+      api<{
+        productos: ProductoListado[];
+        total: number;
+        page: number;
+        pageSize: number;
+      }>(`/catalogo/productos?${qs}`),
+    placeholderData: (prev) => prev,
+  });
+}
+
 export function useProductoDetalle(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'producto', id],
