@@ -6,6 +6,7 @@
     "bradlc.vscode-tailwindcss",
     "editorconfig.editorconfig",
     "ms-azuretools.vscode-docker",
-    "vitest.explorer"
+    "vitest.explorer",
+    "vivaxy.vscode-conventional-commits"
   ]
 }

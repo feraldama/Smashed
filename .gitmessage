@@ -1,0 +1,25 @@
+# <type>(<scope>): <subject>
+#
+# Tipos válidos (commitlint config-conventional):
+#   feat      Nueva feature visible al usuario
+#   fix       Corrección de bug
+#   refactor  Cambio interno sin cambio de comportamiento
+#   perf      Mejora de performance
+#   docs      Solo documentación
+#   style     Formateo, espacios, sin afectar código
+#   test      Agregar/ajustar tests
+#   build     Cambios en build system o dependencias
+#   ci        Cambios en CI
+#   chore     Tareas varias que no afectan src ni tests
+#   revert    Revierte un commit anterior
+#
+# Reglas:
+#   - subject: imperativo, en minúscula, sin punto final, máx 72 chars
+#   - body: opcional, líneas máx 100 chars, separar de subject con línea vacía
+#   - bullets con "- " o "* "
+#
+# Ejemplos:
+#   feat(permisos): matriz visual de menús por rol
+#   fix(comprobantes): permite imprimir desde rol REPARTIDOR
+#   refactor(auth): elimina chequeo de roles explícito en AuthGate
+#
