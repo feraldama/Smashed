@@ -16,13 +16,15 @@ export type SectorComanda =
 export interface KdsItemModificador {
   id: string;
   modificadorOpcion: { nombre: string };
+  /** Si tiene comboGrupo, el modificador aplica al componente del combo, no al item global. */
+  comboGrupo: { id: string; nombre: string } | null;
 }
 
 export interface KdsItemCombo {
   id: string;
   estado: EstadoItem;
   sectorComanda: SectorComanda | null;
-  comboGrupo: { nombre: string };
+  comboGrupo: { id: string; nombre: string };
   comboGrupoOpcion: {
     productoVenta: { nombre: string; sectorComanda: SectorComanda | null };
   };

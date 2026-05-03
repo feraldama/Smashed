@@ -192,11 +192,13 @@ export function PedidoCard({ pedido, sector }: Props) {
       <div className="flex-1">
         <ul className="divide-y">
           {activas.map((t) => {
-            // En Mostrador, las bebidas (BAR) son "tomar y entregar" — el cajero
-            // las marca listo directamente sin pasar por el bar. Para todo lo demás
-            // en Mostrador, sólo se ve el estado (cocina/bar marcan desde su tab).
+            // En Mostrador, las bebidas (BAR) y los postres pre-armados son
+            // "tomar y entregar" — el cajero las marca listo directamente sin
+            // pasar por la estación. Para todo lo demás en Mostrador, sólo se
+            // ve el estado (cocina/bar marcan desde su tab).
             const tSector = tareaSector(t);
-            const mostradorPuedeMarcar = isMostrador && tSector === 'BAR';
+            const mostradorPuedeMarcar =
+              isMostrador && (tSector === 'BAR' || tSector === 'POSTRES');
             const tareaReadOnly = isMostrador && !mostradorPuedeMarcar;
             return (
               <TareaRow
@@ -337,13 +339,25 @@ function TareaRow({
             </>
           )}
 
-          {tarea.kind === 'item' && tarea.item.modificadores.length > 0 && (
-            <ul className="mt-0.5 text-[11px] text-amber-900 dark:text-amber-300">
-              {tarea.item.modificadores.map((m) => (
-                <li key={m.id}>+ {m.modificadorOpcion.nombre}</li>
-              ))}
-            </ul>
-          )}
+          {/* Modificadores: en `item` mostramos los que aplican al item global
+               (sin comboGrupoId). En `opcion` mostramos los que apuntan
+               específicamente al componente del combo. */}
+          {(() => {
+            const mods =
+              tarea.kind === 'item'
+                ? tarea.item.modificadores.filter((m) => !m.comboGrupo)
+                : tarea.parent.modificadores.filter(
+                    (m) => m.comboGrupo?.id === tarea.opcion.comboGrupo.id,
+                  );
+            if (mods.length === 0) return null;
+            return (
+              <ul className="mt-0.5 text-[11px] text-amber-900 dark:text-amber-300">
+                {mods.map((m) => (
+                  <li key={m.id}>+ {m.modificadorOpcion.nombre}</li>
+                ))}
+              </ul>
+            );
+          })()}
 
           {tarea.kind === 'item' && tarea.item.observaciones && (
             <p className="mt-0.5 text-[11px] italic text-amber-700 dark:text-amber-400">

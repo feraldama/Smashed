@@ -84,10 +84,14 @@ export async function listarProductos(args: {
         precioBase: true,
         tasaIva: true,
         imagenUrl: true,
+        imagen: { select: { updatedAt: true } },
         sectorComanda: true,
         tiempoPrepSegundos: true,
         esCombo: true,
         esVendible: true,
+        // Sólo necesitamos saber si tiene grupos vinculados (para que el POS
+        // sepa si abrir el modal de configuración). Un count basta.
+        _count: { select: { modificadorGrupos: true } },
         categoria: { select: { id: true, nombre: true, categoriaBase: true } },
         ...(sucursalId
           ? {
@@ -112,13 +116,18 @@ export async function listarProductos(args: {
 
   const items = productos.map((p) => {
     const override = 'preciosSucursal' in p ? p.preciosSucursal[0]?.precio : undefined;
-    const { preciosSucursal: _drop, ...rest } = p as typeof p & { preciosSucursal?: unknown };
+    const {
+      preciosSucursal: _drop,
+      _count,
+      ...rest
+    } = p as typeof p & { preciosSucursal?: unknown };
     void _drop;
     return {
       ...rest,
       precio: override ?? p.precioBase,
       precioBase: p.precioBase,
       tienePrecioSucursal: override !== undefined,
+      tieneModificadores: _count.modificadorGrupos > 0,
     };
   });
 
@@ -142,6 +151,7 @@ export async function obtenerProducto(args: {
     where: { id, empresaId, deletedAt: null },
     include: {
       categoria: { select: { id: true, nombre: true, categoriaBase: true } },
+      imagen: { select: { updatedAt: true } },
       receta: {
         include: {
           items: {
@@ -166,6 +176,7 @@ export async function obtenerProducto(args: {
                       codigo: true,
                       nombre: true,
                       imagenUrl: true,
+                      imagen: { select: { updatedAt: true } },
                       precioBase: true,
                     },
                   },
@@ -319,6 +330,71 @@ export async function eliminarProducto(empresaId: string, id: string) {
     where: { id },
     data: { deletedAt: new Date(), activo: false },
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  WRITE/READ — Imagen del producto (subida desde archivo, guardada en bytea)
+// ═══════════════════════════════════════════════════════════════════════════
+
+export async function setImagenProducto(args: {
+  empresaId: string;
+  productoId: string;
+  bytes: Buffer;
+  mime: string;
+  width?: number;
+  height?: number;
+}) {
+  const { empresaId, productoId, bytes, mime, width, height } = args;
+  const prod = await prisma.productoVenta.findFirst({
+    where: { id: productoId, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!prod) throw Errors.notFound('Producto no encontrado');
+
+  // Prisma 7 espera Uint8Array<ArrayBuffer> (no SharedArrayBuffer). El Buffer
+  // que multer entrega puede tener un ArrayBufferLike más amplio, así que
+  // copiamos a un Uint8Array nuevo para satisfacer el tipo y desacoplar del
+  // pool interno de Node.
+  const data = new Uint8Array(bytes.byteLength);
+  data.set(bytes);
+
+  const imagen = await prisma.productoImagen.upsert({
+    where: { productoVentaId: productoId },
+    create: {
+      productoVentaId: productoId,
+      bytes: data,
+      mime,
+      size: data.byteLength,
+      width,
+      height,
+    },
+    update: { bytes: data, mime, size: data.byteLength, width, height },
+    select: { updatedAt: true, mime: true, size: true },
+  });
+
+  return imagen;
+}
+
+export async function eliminarImagenProducto(empresaId: string, productoId: string) {
+  const prod = await prisma.productoVenta.findFirst({
+    where: { id: productoId, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!prod) throw Errors.notFound('Producto no encontrado');
+
+  // deleteMany no falla si no existe — idempotente
+  await prisma.productoImagen.deleteMany({ where: { productoVentaId: productoId } });
+}
+
+export async function obtenerImagenProducto(productoId: string) {
+  // Lookup público: el CUID actúa como token opaco. Las fotos de productos
+  // no son sensibles (catálogo público) y así podemos servirlas vía <img src>
+  // sin tener que adjuntar el bearer token en cada request.
+  const imagen = await prisma.productoImagen.findFirst({
+    where: { productoVentaId: productoId, productoVenta: { deletedAt: null } },
+    select: { bytes: true, mime: true, updatedAt: true },
+  });
+  return imagen;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

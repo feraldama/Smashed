@@ -1,0 +1,2 @@
+-- RenameIndex
+ALTER INDEX "item_pedido_modificador_item_pedido_id_modificador_opcion__key" RENAME TO "item_pedido_modificador_item_pedido_id_modificador_opcion_i_key";

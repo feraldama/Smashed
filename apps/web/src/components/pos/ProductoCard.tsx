@@ -2,8 +2,7 @@
 
 import { ImageOff, Package } from 'lucide-react';
 
-import type { ProductoListado } from '@/hooks/useCatalogo';
-
+import { productoImagenSrc, type ProductoListado } from '@/hooks/useCatalogo';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -12,7 +11,8 @@ interface Props {
 }
 
 export function ProductoCard({ producto, onClick }: Props) {
-  const requiereConfig = producto.esCombo; // Combos siempre requieren elegir opciones; modificadores se chequean luego
+  const requiereConfig = producto.esCombo || producto.tieneModificadores;
+  const imgSrc = productoImagenSrc(producto);
 
   return (
     <button
@@ -25,9 +25,9 @@ export function ProductoCard({ producto, onClick }: Props) {
       )}
     >
       <div className="relative aspect-square w-full overflow-hidden bg-muted">
-        {producto.imagenUrl ? (
+        {imgSrc ? (
           <img
-            src={producto.imagenUrl}
+            src={imgSrc}
             alt={producto.nombre}
             className="h-full w-full object-cover transition-transform group-hover:scale-105"
           />

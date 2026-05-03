@@ -1,20 +1,26 @@
 'use client';
 
-import { ImageOff, Loader2, Save } from 'lucide-react';
+import { ImageOff, Loader2, Save, Sliders, Trash2, Upload } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
+import { ProductoModificadoresSection } from '@/components/ProductoModificadoresSection';
 import { toast } from '@/components/Toast';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
 import {
+  productoImagenSrc,
   type ProductoDetalle,
   useActualizarProducto,
   useCategorias,
   useCrearProducto,
+  useEliminarImagenProducto,
+  useSubirImagenProducto,
 } from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
+
+const TAMANO_MAX_MB = 5;
 
 const SECTORES = [
   'COCINA_CALIENTE',
@@ -35,6 +41,8 @@ export function ProductoForm({ producto }: ProductoFormProps) {
   const { data: categorias = [] } = useCategorias();
   const crear = useCrearProducto();
   const actualizar = useActualizarProducto();
+  const subirImagen = useSubirImagenProducto();
+  const eliminarImagen = useEliminarImagenProducto();
 
   const [nombre, setNombre] = useState(producto?.nombre ?? '');
   const [codigo, setCodigo] = useState(producto?.codigo ?? '');
@@ -47,6 +55,9 @@ export function ProductoForm({ producto }: ProductoFormProps) {
   const [categoriaId, setCategoriaId] = useState(producto?.categoria?.id ?? '');
   const [imagenUrl, setImagenUrl] = useState(producto?.imagenUrl ?? '');
   const [imagenError, setImagenError] = useState(false);
+  // Archivo seleccionado en el input file (todavía no subido — sube al guardar)
+  const [archivoLocal, setArchivoLocal] = useState<File | null>(null);
+  const [archivoPreview, setArchivoPreview] = useState<string | null>(null);
   const [sectorComanda, setSectorComanda] = useState<string>(producto?.sectorComanda ?? '');
   const [tiempoPrep, setTiempoPrep] = useState(
     producto?.tiempoPrepSegundos ? String(producto.tiempoPrepSegundos) : '',
@@ -56,9 +67,56 @@ export function ProductoForm({ producto }: ProductoFormProps) {
   const [esPreparacion, setEsPreparacion] = useState(producto?.esPreparacion ?? false);
 
   const [error, setError] = useState<string | null>(null);
-  const isPending = crear.isPending || actualizar.isPending;
+  const isPending =
+    crear.isPending || actualizar.isPending || subirImagen.isPending || eliminarImagen.isPending;
 
   const precioPreview = Number.parseInt(precioBase.replace(/[^\d]/g, ''), 10);
+
+  // Liberar el ObjectURL del preview cuando se reemplace o se desmonte el form
+  useEffect(() => {
+    return () => {
+      if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    };
+  }, [archivoPreview]);
+
+  // URL final a mostrar — preview local > imagen subida en BD > imagenUrl externa
+  const imagenSrcActual = archivoPreview ?? (producto ? productoImagenSrc(producto) : null) ?? null;
+  const tieneImagenSubida = Boolean(producto?.imagen);
+
+  function handleArchivoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-seleccionar el mismo archivo
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('El archivo no es una imagen');
+      return;
+    }
+    if (file.size > TAMANO_MAX_MB * 1024 * 1024) {
+      toast.error(`Imagen demasiado grande (máx ${TAMANO_MAX_MB} MB)`);
+      return;
+    }
+    if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    setArchivoLocal(file);
+    setArchivoPreview(URL.createObjectURL(file));
+    setImagenError(false);
+  }
+
+  function descartarArchivoSeleccionado() {
+    if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    setArchivoLocal(null);
+    setArchivoPreview(null);
+  }
+
+  async function handleEliminarImagenSubida() {
+    if (!producto?.imagen) return;
+    if (!confirm('¿Eliminar la imagen subida?')) return;
+    try {
+      await eliminarImagen.mutateAsync(producto.id);
+      toast.success('Imagen eliminada');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al eliminar imagen');
+    }
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -84,13 +142,29 @@ export function ProductoForm({ producto }: ProductoFormProps) {
     };
 
     try {
+      let productoId: string;
       if (producto) {
         await actualizar.mutateAsync({ id: producto.id, ...body });
-        toast.success('Producto actualizado');
+        productoId = producto.id;
       } else {
         const result = await crear.mutateAsync(body);
-        toast.success('Producto creado');
-        router.push(`/productos/${result.producto.id}`);
+        productoId = result.producto.id;
+      }
+
+      // Si hay archivo nuevo seleccionado, lo subimos después del create/update
+      if (archivoLocal) {
+        try {
+          await subirImagen.mutateAsync({ id: productoId, archivo: archivoLocal });
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : 'Error al subir imagen');
+          // El producto se guardó OK; no bloqueamos la navegación.
+        }
+        descartarArchivoSeleccionado();
+      }
+
+      toast.success(producto ? 'Producto actualizado' : 'Producto creado');
+      if (!producto) {
+        router.push(`/productos/${productoId}`);
         return;
       }
       router.push('/productos');
@@ -218,14 +292,25 @@ export function ProductoForm({ producto }: ProductoFormProps) {
             </Field>
           </div>
         </Section>
+
+        {producto ? (
+          <ProductoModificadoresSection producto={producto} />
+        ) : (
+          <section className="rounded-lg border border-dashed bg-muted/20 p-5 text-center text-xs text-muted-foreground">
+            <Sliders className="mx-auto mb-2 h-5 w-5 opacity-40" />
+            Guardá primero el producto para configurar modificadores
+            <br />
+            (ej: punto de cocción, extras, sabores).
+          </section>
+        )}
       </div>
 
       {/* ═══ Columna derecha — imagen + flags + acciones ═══ */}
       <div className="space-y-4">
         <Section title="Imagen">
-          {imagenUrl && !imagenError ? (
+          {imagenSrcActual && !imagenError ? (
             <img
-              src={imagenUrl}
+              src={imagenSrcActual}
               alt={nombre || 'Producto'}
               className="mb-3 aspect-[4/3] w-full rounded-md border bg-muted object-cover"
               onError={() => setImagenError(true)}
@@ -237,7 +322,48 @@ export function ProductoForm({ producto }: ProductoFormProps) {
               {imagenError ? 'No se pudo cargar la imagen' : 'Sin imagen'}
             </div>
           )}
-          <Field label="URL de imagen">
+
+          <div className="space-y-2">
+            <label
+              className={cn(
+                'flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed bg-muted/20 py-2 text-xs font-medium transition-colors',
+                'hover:bg-muted/40',
+              )}
+            >
+              <Upload className="h-3.5 w-3.5" />
+              {archivoLocal ? archivoLocal.name : 'Subir imagen desde mi PC'}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleArchivoChange}
+              />
+            </label>
+            {archivoLocal && (
+              <p className="text-[11px] text-muted-foreground">
+                Archivo nuevo seleccionado — se subirá al guardar.{' '}
+                <button
+                  type="button"
+                  onClick={descartarArchivoSeleccionado}
+                  className="underline hover:text-foreground"
+                >
+                  descartar
+                </button>
+              </p>
+            )}
+            {tieneImagenSubida && !archivoLocal && (
+              <button
+                type="button"
+                onClick={() => void handleEliminarImagenSubida()}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md border border-destructive/30 py-1.5 text-[11px] text-destructive hover:bg-destructive/5"
+              >
+                <Trash2 className="h-3 w-3" />
+                Eliminar imagen subida
+              </button>
+            )}
+          </div>
+
+          <Field label="O usar URL externa" hint="Sólo se usa si no hay imagen subida">
             <Input
               type="url"
               value={imagenUrl}

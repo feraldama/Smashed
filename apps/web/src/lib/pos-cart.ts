@@ -1,4 +1,4 @@
-import type { ProductoListado } from '@/hooks/useCatalogo';
+import { productoImagenSrc, type ProductoListado } from '@/hooks/useCatalogo';
 
 /**
  * Carrito del POS — estado local con reducer puro.
@@ -20,6 +20,11 @@ export interface ItemCarritoModificador {
   modificadorOpcionId: string;
   nombre: string;
   precioExtra: number;
+  /** Si el modificador aplica a un componente específico de un combo
+   * (ej: "sin cebolla" para la hamburguesa elegida del combo, no al item global). */
+  comboGrupoId?: string;
+  /** Nombre del componente del combo, sólo para UI (ticket, carrito). */
+  comboGrupoNombre?: string;
 }
 
 export interface ItemCarritoCombo {
@@ -133,7 +138,10 @@ export function aPayloadPedidoItems(state: CartState) {
     productoVentaId: it.productoVentaId,
     cantidad: it.cantidad,
     observaciones: it.observaciones,
-    modificadores: it.modificadores.map((m) => ({ modificadorOpcionId: m.modificadorOpcionId })),
+    modificadores: it.modificadores.map((m) => ({
+      modificadorOpcionId: m.modificadorOpcionId,
+      ...(m.comboGrupoId ? { comboGrupoId: m.comboGrupoId } : {}),
+    })),
     combosOpcion: it.combosOpcion.map((c) => ({
       comboGrupoId: c.comboGrupoId,
       comboGrupoOpcionId: c.comboGrupoOpcionId,
@@ -150,7 +158,7 @@ export function itemDesdeProductoSimple(
     productoVentaId: p.id,
     codigo: p.codigo,
     nombre: p.nombre,
-    imagenUrl: p.imagenUrl,
+    imagenUrl: productoImagenSrc(p),
     precioUnitario: Number(p.precio),
     modificadores: [],
     combosOpcion: [],

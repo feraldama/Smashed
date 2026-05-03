@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import { MulterError } from 'multer';
 import { ZodError } from 'zod';
 
 import { logger } from '../config/logger.js';
@@ -22,6 +23,18 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
         message: 'Datos inválidos',
         details: { fieldErrors: flat.fieldErrors, formErrors: flat.formErrors },
       },
+    });
+    return;
+  }
+
+  // Multer — errores de upload (tamaño, formato, etc.)
+  if (err instanceof MulterError) {
+    const message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? 'Archivo demasiado grande (máx 5 MB)'
+        : `Error en el upload: ${err.message}`;
+    res.status(400).json({
+      error: { code: 'VALIDATION_ERROR', message, details: { field: err.field } },
     });
     return;
   }

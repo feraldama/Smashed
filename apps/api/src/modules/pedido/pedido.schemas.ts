@@ -5,6 +5,10 @@ const cantidadEntera = z.number().int().min(1).max(999);
 
 export const itemModificadorInput = z.object({
   modificadorOpcionId: z.string().cuid(),
+  /** Si el modificador aplica a un componente específico de un combo
+   * (ej: "sin cebolla" sólo a la hamburguesa del combo, no al item global),
+   * este es el id del ComboGrupo. Omitir si aplica al item entero. */
+  comboGrupoId: z.string().cuid().optional(),
 });
 
 export const itemComboOpcionInput = z.object({

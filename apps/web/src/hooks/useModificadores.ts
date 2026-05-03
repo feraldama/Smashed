@@ -144,3 +144,44 @@ export function useEliminarOpcion(grupoId: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['admin', 'modificadores'] }),
   });
 }
+
+// ───── Vinculación Producto ↔ Grupo ─────
+
+export function useVincularModificadorAProducto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      grupoId,
+      productoVentaId,
+      ordenEnProducto,
+    }: {
+      grupoId: string;
+      productoVentaId: string;
+      ordenEnProducto?: number;
+    }) =>
+      api<{
+        link: { productoVentaId: string; modificadorGrupoId: string; ordenEnProducto: number };
+      }>(`/modificadores/${grupoId}/productos`, {
+        method: 'POST',
+        body: { productoVentaId, ordenEnProducto },
+      }),
+    onSuccess: (_d, vars) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modificadores'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', vars.productoVentaId] });
+    },
+  });
+}
+
+export function useDesvincularModificadorDeProducto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ grupoId, productoVentaId }: { grupoId: string; productoVentaId: string }) =>
+      api<undefined>(`/modificadores/${grupoId}/productos/${productoVentaId}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: (_d, vars) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'modificadores'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', vars.productoVentaId] });
+    },
+  });
+}

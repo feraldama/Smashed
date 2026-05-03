@@ -118,6 +118,42 @@ export async function eliminarProducto(req: Request, res: Response) {
   res.status(204).send();
 }
 
+// ───── WRITE/READ: Imagen de producto ─────
+
+export async function subirImagenProducto(req: Request, res: Response) {
+  const { empresaId } = requireEmpresa(req);
+  const { id } = productoIdParam.parse(req.params);
+  if (!req.file) throw Errors.validation({ archivo: 'Falta archivo (campo "archivo")' });
+
+  const imagen = await service.setImagenProducto({
+    empresaId,
+    productoId: id,
+    bytes: req.file.buffer,
+    mime: req.file.mimetype,
+  });
+  res.status(201).json({ imagen });
+}
+
+export async function eliminarImagenProducto(req: Request, res: Response) {
+  const { empresaId } = requireEmpresa(req);
+  const { id } = productoIdParam.parse(req.params);
+  await service.eliminarImagenProducto(empresaId, id);
+  res.status(204).send();
+}
+
+// Endpoint PÚBLICO (sin auth) — es lo que permite que `<img src>` funcione sin
+// adjuntar el bearer. El CUID del producto actúa como token opaco.
+export async function obtenerImagenProducto(req: Request, res: Response) {
+  const { id } = productoIdParam.parse(req.params);
+  const imagen = await service.obtenerImagenProducto(id);
+  if (!imagen) throw Errors.notFound('Imagen no encontrada');
+
+  res.setHeader('Content-Type', imagen.mime);
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Content-Length', String(imagen.bytes.byteLength));
+  res.send(Buffer.from(imagen.bytes));
+}
+
 export async function setPrecioSucursal(req: Request, res: Response) {
   const { empresaId } = requireEmpresa(req);
   const { id } = productoIdParam.parse(req.params);

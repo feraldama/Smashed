@@ -717,6 +717,7 @@ model ProductoVenta {
 
   receta             Receta?
   combo              Combo?
+  imagen             ProductoImagen?
   modificadorGrupos  ProductoVentaModificadorGrupo[]
   preciosSucursal    PrecioPorSucursal[]
   itemsPedido        ItemPedido[]
@@ -729,6 +730,24 @@ model ProductoVenta {
   @@index([empresaId, categoriaId, activo, deletedAt])
   @@index([empresaId, nombre])
   @@map("producto_venta")
+}
+
+// Imagen subida desde archivo local — bytes guardados en Postgres (bytea).
+// Tabla aparte para que los findMany del catálogo no carguen los blobs.
+model ProductoImagen {
+  productoVentaId String        @id @map("producto_venta_id")
+  productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+
+  bytes  Bytes
+  mime   String
+  size   Int
+  width  Int?
+  height Int?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("producto_imagen")
 }
 
 model PrecioPorSucursal {
@@ -842,6 +861,7 @@ model ComboGrupo {
 
   opciones        ComboGrupoOpcion[]
   itemsPedidoSel  ItemPedidoComboOpcion[]
+  itemsPedidoMod  ItemPedidoModificador[]
 
   @@index([comboId])
   @@map("combo_grupo")
@@ -1204,13 +1224,23 @@ model ItemPedidoModificador {
   modificadorOpcionId String   @map("modificador_opcion_id")
   modificadorOpcion   ModificadorOpcion @relation(fields: [modificadorOpcionId], references: [id], onDelete: Restrict)
 
+  // Si el modificador aplica a un componente específico de un combo
+  // (ej: "sin cebolla" para la hamburguesa del combo, no para todo el combo),
+  // este campo apunta al ComboGrupo del combo. Null para items no-combo o
+  // modificadores que aplican al item en general.
+  comboGrupoId String?    @map("combo_grupo_id")
+  comboGrupo   ComboGrupo? @relation(fields: [comboGrupoId], references: [id], onDelete: Restrict)
+
   // Snapshot del precio extra al momento del pedido
   precioExtra BigInt @default(0) @map("precio_extra")
 
   createdAt DateTime @default(now()) @map("created_at")
 
-  @@unique([itemPedidoId, modificadorOpcionId])
+  // Permite el mismo modificadorOpcion en distintos componentes del combo
+  // (ej: "sin sal" en hamburguesa Y en papas → 2 filas distintas).
+  @@unique([itemPedidoId, modificadorOpcionId, comboGrupoId])
   @@index([modificadorOpcionId])
+  @@index([comboGrupoId])
   @@map("item_pedido_modificador")
 }
 

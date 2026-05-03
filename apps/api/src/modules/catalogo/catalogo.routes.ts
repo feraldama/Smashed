@@ -1,10 +1,15 @@
 import { type NextFunction, type Request, type Response, Router } from 'express';
 
 import { authRequired, requireRol } from '../../middleware/auth.js';
+import { uploadImagen } from '../../middleware/upload.js';
 
 import * as ctrl from './catalogo.controller.js';
 
 const router = Router();
+
+// ───── PÚBLICO (sin auth) — sólo bytes de imagen, para <img src> directos ─────
+router.get('/productos/:id/imagen', asyncH(ctrl.obtenerImagenProducto));
+
 router.use(authRequired);
 
 const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
@@ -22,6 +27,8 @@ router.delete('/categorias/:id', requireAdmin, asyncH(ctrl.eliminarCategoria));
 router.post('/productos', requireAdmin, asyncH(ctrl.crearProducto));
 router.patch('/productos/:id', requireAdmin, asyncH(ctrl.actualizarProducto));
 router.delete('/productos/:id', requireAdmin, asyncH(ctrl.eliminarProducto));
+router.post('/productos/:id/imagen', requireAdmin, uploadImagen, asyncH(ctrl.subirImagenProducto));
+router.delete('/productos/:id/imagen', requireAdmin, asyncH(ctrl.eliminarImagenProducto));
 router.post('/productos/:id/precio-sucursal', requireAdmin, asyncH(ctrl.setPrecioSucursal));
 router.put('/productos/:id/receta', requireAdmin, asyncH(ctrl.setReceta));
 router.delete('/productos/:id/receta', requireAdmin, asyncH(ctrl.eliminarReceta));

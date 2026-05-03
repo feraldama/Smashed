@@ -17,7 +17,9 @@ export interface ItemPedidoInput {
   productoVentaId: string;
   cantidad: number;
   observaciones?: string;
-  modificadores?: { modificadorOpcionId: string }[];
+  /** Si el modificador aplica a un componente del combo (no al item global),
+   * `comboGrupoId` apunta al ComboGrupo correspondiente. */
+  modificadores?: { modificadorOpcionId: string; comboGrupoId?: string }[];
   combosOpcion?: { comboGrupoId: string; comboGrupoOpcionId: string }[];
 }
 

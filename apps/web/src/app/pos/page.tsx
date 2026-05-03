@@ -139,17 +139,12 @@ function POSScreen() {
   }
 
   function handleAgregar(p: ProductoListado) {
-    // Si tiene combo o si tiene `esCombo`, abrir modal de configuración.
-    // Para detectar modificadores se requiere fetch del detalle, así que
-    // abrimos el modal siempre que sea combo o cuando el detalle indique grupos.
-    // Por ahora: abrir modal si esCombo, sino agregar directo.
-    // (El modal se autodetecta y si no hay nada que configurar, se puede confirmar directo.)
-    if (p.esCombo) {
+    // Combos y productos con modificadores vinculados requieren elegir opciones,
+    // así que se abre el modal de configuración antes de añadir al carrito.
+    if (p.esCombo || p.tieneModificadores) {
       setConfigProductoId(p.id);
       return;
     }
-    // Probamos agregado directo. Si después el backend rechaza por modificadores
-    // obligatorios, el usuario verá el error y deberá usar el modal.
     dispatch({ type: 'ADD', item: itemDesdeProductoSimple(p) });
     toast.success(`+ ${p.nombre}`);
   }
@@ -258,6 +253,14 @@ function POSScreen() {
           <span className="hidden text-xs text-muted-foreground sm:inline">
             {user?.nombreCompleto}
           </span>
+          <Link
+            href="/caja"
+            className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+            title="Ir a caja (cerrar turno, ver movimientos)"
+          >
+            <Wallet className="h-3.5 w-3.5" />
+            Caja
+          </Link>
           <LogoutButton />
         </div>
       </header>

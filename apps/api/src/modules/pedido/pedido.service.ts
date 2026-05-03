@@ -146,7 +146,12 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
       include: {
         items: {
           include: {
-            modificadores: { include: { modificadorOpcion: true } },
+            modificadores: {
+              include: {
+                modificadorOpcion: true,
+                comboGrupo: { select: { id: true, nombre: true } },
+              },
+            },
             combosOpcion: { include: { comboGrupoOpcion: true, comboGrupo: true } },
             productoVenta: {
               select: { id: true, nombre: true, codigo: true, sectorComanda: true },
@@ -315,7 +320,12 @@ export async function agregarItemsAPedido(
       include: {
         items: {
           include: {
-            modificadores: { include: { modificadorOpcion: true } },
+            modificadores: {
+              include: {
+                modificadorOpcion: true,
+                comboGrupo: { select: { id: true, nombre: true } },
+              },
+            },
             combosOpcion: { include: { comboGrupoOpcion: true, comboGrupo: true } },
             productoVenta: {
               select: { id: true, nombre: true, codigo: true, sectorComanda: true },
@@ -949,11 +959,16 @@ const kdsInclude = {
         select: { id: true, nombre: true, sectorComanda: true, tiempoPrepSegundos: true },
       },
       modificadores: {
-        include: { modificadorOpcion: { select: { nombre: true } } },
+        include: {
+          modificadorOpcion: { select: { nombre: true } },
+          comboGrupo: { select: { id: true, nombre: true } },
+        },
       },
       combosOpcion: {
         include: {
-          comboGrupo: { select: { nombre: true } },
+          // id es necesario para emparejar modificadores que apuntan a este
+          // ComboGrupo (B+ — modificadores por componente del combo).
+          comboGrupo: { select: { id: true, nombre: true } },
           comboGrupoOpcion: {
             include: {
               productoVenta: { select: { nombre: true, sectorComanda: true } },
@@ -1142,6 +1157,7 @@ export async function obtenerPedido(user: UserCtx, pedidoId: string) {
           modificadores: {
             include: {
               modificadorOpcion: { select: { id: true, nombre: true, precioExtra: true } },
+              comboGrupo: { select: { id: true, nombre: true } },
             },
           },
           combosOpcion: {
@@ -1226,7 +1242,14 @@ async function construirItemsPedido(args: {
                   precioExtra: true,
                   // Necesitamos el sector del producto elegido para que cada opción
                   // del combo se enrute al sector correcto en el KDS (cocina/bar/...).
-                  productoVenta: { select: { sectorComanda: true } },
+                  // También sus modificadorGrupos para validar mods por componente.
+                  productoVenta: {
+                    select: {
+                      id: true,
+                      sectorComanda: true,
+                      modificadorGrupos: { select: { modificadorGrupoId: true } },
+                    },
+                  },
                 },
               },
             },
@@ -1297,12 +1320,50 @@ async function construirItemsPedido(args: {
     }
 
     let extraMod = 0n;
-    const gruposPermitidos = new Set(prod.modificadorGrupos.map((m) => m.modificadorGrupoId));
+    // Grupos válidos al item GLOBAL (modificadores sin comboGrupoId)
+    const gruposItemGlobal = new Set(prod.modificadorGrupos.map((m) => m.modificadorGrupoId));
+    // Grupos válidos POR componente del combo (comboGrupoId → set de modificadorGrupoIds).
+    // Sólo se arma si el item es un combo y el usuario eligió las opciones.
+    const gruposPorComponenteCombo = new Map<string, Set<string>>();
+    if (prod.esCombo && prod.combo) {
+      for (const eleccion of it.combosOpcion ?? []) {
+        const grupo = prod.combo.grupos.find((g) => g.id === eleccion.comboGrupoId);
+        const opcion = grupo?.opciones.find((o) => o.id === eleccion.comboGrupoOpcionId);
+        if (!opcion) continue;
+        gruposPorComponenteCombo.set(
+          eleccion.comboGrupoId,
+          new Set(opcion.productoVenta.modificadorGrupos.map((mg) => mg.modificadorGrupoId)),
+        );
+      }
+    }
+
     for (const mod of it.modificadores ?? []) {
       const opcion = modMap.get(mod.modificadorOpcionId);
       if (!opcion) throw Errors.validation({ modificadores: 'Opción no encontrada' });
-      if (!gruposPermitidos.has(opcion.modificadorGrupoId)) {
-        throw Errors.validation({ modificadores: 'Esa opción no aplica a este producto' });
+
+      if (mod.comboGrupoId) {
+        // Modificador que aplica a un componente del combo
+        if (!prod.esCombo) {
+          throw Errors.validation({
+            modificadores: 'comboGrupoId sólo válido en items combo',
+          });
+        }
+        const gruposComponente = gruposPorComponenteCombo.get(mod.comboGrupoId);
+        if (!gruposComponente) {
+          throw Errors.validation({
+            modificadores: 'comboGrupoId no corresponde a una opción elegida',
+          });
+        }
+        if (!gruposComponente.has(opcion.modificadorGrupoId)) {
+          throw Errors.validation({
+            modificadores: 'Esa opción no aplica al componente del combo elegido',
+          });
+        }
+      } else {
+        // Modificador del item global (producto suelto, o el combo en sí)
+        if (!gruposItemGlobal.has(opcion.modificadorGrupoId)) {
+          throw Errors.validation({ modificadores: 'Esa opción no aplica a este producto' });
+        }
       }
       extraMod += opcion.precioExtra;
     }
@@ -1326,6 +1387,7 @@ async function construirItemsPedido(args: {
             create: it.modificadores.map((m) => ({
               modificadorOpcion: { connect: { id: m.modificadorOpcionId } },
               precioExtra: modMap.get(m.modificadorOpcionId)?.precioExtra ?? 0n,
+              ...(m.comboGrupoId ? { comboGrupo: { connect: { id: m.comboGrupoId } } } : {}),
             })),
           }
         : undefined,

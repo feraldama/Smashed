@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 
 // ───── Tipos ─────
 
@@ -23,11 +24,48 @@ export interface ProductoListado {
   precioBase: string;
   tasaIva: string;
   imagenUrl: string | null;
+  /** Si existe una imagen subida desde archivo, su `updatedAt` (ISO). Sirve
+   * de cache-buster para construir la URL `/api/catalogo/productos/:id/imagen?v=...` */
+  imagen: { updatedAt: string } | null;
   sectorComanda: string | null;
   esCombo: boolean;
   esVendible: boolean;
   tienePrecioSucursal: boolean;
+  /** True si el producto tiene al menos un grupo de modificadores vinculado.
+   * El POS lo usa para decidir si abrir el modal de configuración antes de añadir al carrito. */
+  tieneModificadores: boolean;
   categoria: { id: string; nombre: string; categoriaBase: string } | null;
+}
+
+/**
+ * Resuelve la URL final de la imagen a mostrar para un producto.
+ * Prioriza la imagen subida (si hay) sobre `imagenUrl` (legacy / externa).
+ * Devuelve null si no tiene ninguna.
+ */
+export function productoImagenSrc(p: {
+  id: string;
+  imagen?: { updatedAt: string } | null;
+  imagenUrl?: string | null;
+}): string | null {
+  if (p.imagen) {
+    return `/api/catalogo/productos/${p.id}/imagen?v=${encodeURIComponent(p.imagen.updatedAt)}`;
+  }
+  return p.imagenUrl ?? null;
+}
+
+export interface ProductoModificadorGrupoVinculado {
+  productoVentaId: string;
+  modificadorGrupoId: string;
+  ordenEnProducto: number;
+  modificadorGrupo: {
+    id: string;
+    nombre: string;
+    tipo: 'UNICA' | 'MULTIPLE';
+    obligatorio: boolean;
+    minSeleccion: number;
+    maxSeleccion: number | null;
+    opciones: { id: string; nombre: string; precioExtra: string }[];
+  };
 }
 
 export interface ProductoDetalle extends ProductoListado {
@@ -35,7 +73,7 @@ export interface ProductoDetalle extends ProductoListado {
   esPreparacion: boolean;
   receta: unknown;
   combo: ComboConfig | null;
-  modificadorGrupos: unknown[];
+  modificadorGrupos: ProductoModificadorGrupoVinculado[];
 }
 
 // ───── Combo (config) ─────
@@ -259,6 +297,49 @@ export function useEliminarProducto() {
     mutationFn: (id: string) => api<void>(`/catalogo/productos/${id}`, { method: 'DELETE' }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+    },
+  });
+}
+
+/** Sube un archivo de imagen al endpoint multipart del producto. */
+export function useSubirImagenProducto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, archivo }: { id: string; archivo: File }) => {
+      const fd = new FormData();
+      fd.append('archivo', archivo);
+      const accessToken = useAuthStore.getState().accessToken;
+      const res = await fetch(`/api/catalogo/productos/${id}/imagen`, {
+        method: 'POST',
+        body: fd,
+        credentials: 'include',
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        const json: unknown = text ? JSON.parse(text) : null;
+        const msg =
+          json && typeof json === 'object' && 'error' in json
+            ? (json as { error: { message?: string } }).error.message
+            : res.statusText;
+        throw new Error(msg ?? 'Error al subir imagen');
+      }
+      return res.json() as Promise<{ imagen: { updatedAt: string; mime: string; size: number } }>;
+    },
+    onSuccess: (_d, vars) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', vars.id] });
+    },
+  });
+}
+
+export function useEliminarImagenProducto() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/catalogo/productos/${id}/imagen`, { method: 'DELETE' }),
+    onSuccess: (_d, id) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'producto', id] });
     },
   });
 }

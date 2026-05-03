@@ -20,7 +20,12 @@ import { useEffect, useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { toast } from '@/components/Toast';
-import { useCategorias, useEliminarProducto, useProductosPaginados } from '@/hooks/useCatalogo';
+import {
+  productoImagenSrc,
+  useCategorias,
+  useEliminarProducto,
+  useProductosPaginados,
+} from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -167,78 +172,82 @@ function ProductosScreen() {
               </tr>
             </thead>
             <tbody className="divide-y">
-              {productos.map((p) => (
-                <tr key={p.id} className="hover:bg-muted/20">
-                  <td className="px-4 py-2">
-                    {p.imagenUrl ? (
-                      <Image
-                        src={p.imagenUrl}
-                        alt=""
-                        width={32}
-                        height={32}
-                        className="h-8 w-8 rounded-md object-cover"
-                      />
-                    ) : (
-                      <div className="h-8 w-8 rounded-md bg-muted" />
-                    )}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-[11px] text-muted-foreground">
-                    {p.codigo ?? '—'}
-                  </td>
-                  <td className="px-4 py-2">
-                    <p className="font-medium">{p.nombre}</p>
-                    {p.descripcion && (
-                      <p className="line-clamp-1 text-[11px] text-muted-foreground">
-                        {p.descripcion}
-                      </p>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-muted-foreground">
-                    {p.categoria?.nombre ?? '—'}
-                  </td>
-                  <td className="px-4 py-2 text-right font-mono">{formatGs(p.precioBase)}</td>
-                  <td className="px-4 py-2 text-center text-xs">
-                    {p.tasaIva.replace('IVA_', '') + '%'}
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    {p.esCombo && (
-                      <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
-                        COMBO
-                      </span>
-                    )}
-                    {!p.esVendible && (
-                      <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        oculto
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    <div className="flex justify-end gap-1">
-                      <Link
-                        href={`/productos/${p.id}`}
-                        className="rounded-md p-1.5 text-muted-foreground hover:bg-accent"
-                        aria-label="Editar"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Link>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleEliminar(p.id, p.nombre);
-                        }}
-                        disabled={eliminar.isPending}
-                        className={cn(
-                          'rounded-md p-1.5 text-destructive hover:bg-destructive/10',
-                          eliminar.isPending && 'opacity-50',
-                        )}
-                        aria-label="Eliminar"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {productos.map((p) => {
+                const imgSrc = productoImagenSrc(p);
+                return (
+                  <tr key={p.id} className="hover:bg-muted/20">
+                    <td className="px-4 py-2">
+                      {imgSrc ? (
+                        <Image
+                          src={imgSrc}
+                          alt=""
+                          width={32}
+                          height={32}
+                          unoptimized
+                          className="h-8 w-8 rounded-md object-cover"
+                        />
+                      ) : (
+                        <div className="h-8 w-8 rounded-md bg-muted" />
+                      )}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-[11px] text-muted-foreground">
+                      {p.codigo ?? '—'}
+                    </td>
+                    <td className="px-4 py-2">
+                      <p className="font-medium">{p.nombre}</p>
+                      {p.descripcion && (
+                        <p className="line-clamp-1 text-[11px] text-muted-foreground">
+                          {p.descripcion}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground">
+                      {p.categoria?.nombre ?? '—'}
+                    </td>
+                    <td className="px-4 py-2 text-right font-mono">{formatGs(p.precioBase)}</td>
+                    <td className="px-4 py-2 text-center text-xs">
+                      {p.tasaIva.replace('IVA_', '') + '%'}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      {p.esCombo && (
+                        <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-bold text-primary">
+                          COMBO
+                        </span>
+                      )}
+                      {!p.esVendible && (
+                        <span className="ml-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          oculto
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="flex justify-end gap-1">
+                        <Link
+                          href={`/productos/${p.id}`}
+                          className="rounded-md p-1.5 text-muted-foreground hover:bg-accent"
+                          aria-label="Editar"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handleEliminar(p.id, p.nombre);
+                          }}
+                          disabled={eliminar.isPending}
+                          className={cn(
+                            'rounded-md p-1.5 text-destructive hover:bg-destructive/10',
+                            eliminar.isPending && 'opacity-50',
+                          )}
+                          aria-label="Eliminar"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

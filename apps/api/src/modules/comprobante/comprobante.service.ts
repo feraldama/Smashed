@@ -559,7 +559,7 @@ interface ItemPedidoInput {
   precioModificadores: bigint;
   subtotal: bigint;
   productoVenta: { tasaIva: TasaIva };
-  modificadores: { modificadorOpcion: { nombre: string } }[];
+  modificadores: { precioExtra: bigint; modificadorOpcion: { nombre: string } }[];
   combosOpcion: {
     comboGrupo: { nombre: string };
     comboGrupoOpcion: { productoVenta: { nombre: string } };
@@ -594,12 +594,16 @@ function calcularTotalesComprobante(items: ItemPedidoInput[]) {
 }
 
 function armarDescripcionItem(it: ItemPedidoInput & { productoVenta: { nombre: string } }): string {
+  // En el ticket fiscal mostramos:
+  //  - Sólo el nombre del producto (para combos NO desglosamos los componentes elegidos).
+  //  - Sólo los modificadores con recargo (precioExtra > 0), porque son los
+  //    que afectan el monto facturado. Los modificadores sin precio (sin sal,
+  //    punto de cocción, etc.) van a la comanda/KDS pero no al cliente.
   const partes: string[] = [it.productoVenta.nombre];
-  for (const co of it.combosOpcion) {
-    partes.push(`(${co.comboGrupo.nombre}: ${co.comboGrupoOpcion.productoVenta.nombre})`);
-  }
   for (const m of it.modificadores) {
-    partes.push(`+ ${m.modificadorOpcion.nombre}`);
+    if (m.precioExtra > 0n) {
+      partes.push(`+ ${m.modificadorOpcion.nombre}`);
+    }
   }
   return partes.join(' ');
 }
