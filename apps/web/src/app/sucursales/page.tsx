@@ -11,11 +11,9 @@ import { type Sucursal, useEliminarSucursal, useSucursales } from '@/hooks/useSu
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'SUPER_ADMIN'] as const;
-
 export default function SucursalesPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <SucursalesScreen />
       </AdminShell>

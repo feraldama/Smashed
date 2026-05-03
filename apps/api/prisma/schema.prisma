@@ -264,9 +264,30 @@ model Empresa {
   comprobantes     Comprobante[]
   auditLogs        AuditLog[]
   configuracion    ConfiguracionEmpresa?
+  menusPorRol      MenuRol[]
 
   @@index([deletedAt])
   @@map("empresa")
+}
+
+/// Configuración por empresa de qué menús de la UI puede ver cada rol.
+/// Una fila por cada (empresa, rol, menu) que está PERMITIDO. Si no hay fila
+/// para un par, el menú no se muestra.
+///
+/// SUPER_ADMIN no se almacena aquí — siempre ve todo en código.
+model MenuRol {
+  id        String   @id @default(cuid())
+  empresaId String   @map("empresa_id")
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  menu      String   // ej: "/productos"
+  rol       Rol
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([empresaId, menu, rol])
+  @@index([empresaId, rol])
+  @@map("menu_rol")
 }
 
 model ConfiguracionEmpresa {

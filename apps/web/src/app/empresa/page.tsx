@@ -23,11 +23,9 @@ import {
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'SUPER_ADMIN'] as const;
-
 export default function EmpresaPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <EmpresaScreen />
       </AdminShell>

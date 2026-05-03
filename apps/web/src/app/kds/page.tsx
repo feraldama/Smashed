@@ -4,7 +4,7 @@ import { ChefHat, ChevronLeft, Filter, Loader2, RefreshCcw, Store } from 'lucide
 import Link from 'next/link';
 import { useState } from 'react';
 
-import { AuthGate, ROLES_KITCHEN } from '@/components/AuthGate';
+import { AuthGate } from '@/components/AuthGate';
 import { PedidoCard } from '@/components/kds/PedidoCard';
 import { LogoutButton } from '@/components/ui/LogoutButton';
 import { type SectorComanda, useKds } from '@/hooks/useKds';
@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils';
 
 export default function KdsPage() {
   return (
-    <AuthGate roles={ROLES_KITCHEN}>
+    <AuthGate>
       <KdsScreen />
     </AuthGate>
   );

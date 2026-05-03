@@ -120,6 +120,7 @@ export async function bootstrapAuth() {
           establecimiento: string;
           esPrincipal: boolean;
         }[];
+        menusPermitidos: string[];
       };
       sucursalActivaId: string | null;
     }>('/auth/me');

@@ -1,7 +1,7 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Loader2, LogIn } from 'lucide-react';
+import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
@@ -52,26 +52,22 @@ export default function LoginPage() {
   const user = useAuthStore((s) => s.user);
   const bootstrapping = useAuthStore((s) => s.bootstrapping);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
 
-  // Mensaje desde otra página (ej: AuthGate redirigió por rol no autorizado)
+  // Mensaje desde otra página (ej: sesión expirada).
   useEffect(() => {
     const err = searchParams.get('error');
-    if (err === 'role') {
-      setServerError('Tu rol no tiene acceso a esa pantalla.');
-    } else if (err === 'session') {
+    if (err === 'session') {
       setServerError('Tu sesión expiró — volvé a entrar.');
     }
   }, [searchParams]);
 
-  // Si ya hay sesión activa, redirigir según rol — pero NO si la URL trae
-  // ?error=role (significa que la pantalla destino rechazó al usuario, y un
-  // redirect automático generaría un loop infinito).
+  // Si ya hay sesión activa, redirigir según rol.
   useEffect(() => {
-    if (searchParams.get('error') === 'role') return;
     if (!bootstrapping && accessToken && user) {
       router.replace(rutaInicial(user.rol));
     }
-  }, [accessToken, bootstrapping, user, router, searchParams]);
+  }, [accessToken, bootstrapping, user, router]);
 
   const {
     register,
@@ -122,7 +118,23 @@ export default function LoginPage() {
           </Field>
 
           <Field label="Contraseña" required error={errors.password?.message}>
-            <Input type="password" autoComplete="current-password" {...register('password')} />
+            <div className="relative">
+              <Input
+                type={showPassword ? 'text' : 'password'}
+                autoComplete="current-password"
+                className="pr-10"
+                {...register('password')}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+                tabIndex={-1}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
           </Field>
 
           {serverError && (

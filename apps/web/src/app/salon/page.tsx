@@ -20,11 +20,9 @@ import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function SalonPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <SalonScreen />
       </AdminShell>

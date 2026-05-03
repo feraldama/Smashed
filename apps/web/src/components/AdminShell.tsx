@@ -15,6 +15,7 @@ import {
   PackageCheck,
   ScanLine,
   Settings,
+  ShieldCheck,
   ShoppingCart,
   Sliders,
   Tags,
@@ -26,9 +27,11 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useEffect, useRef } from 'react';
 
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import { puedeAcceder } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
 
 interface NavItem {
@@ -57,6 +60,7 @@ const NAV: NavItem[] = [
   { href: '/reportes', label: 'Reportes', icon: BarChart3, group: 'Análisis' },
   { href: '/salon', label: 'Salón / Mesas', icon: Armchair, group: 'Configuración' },
   { href: '/cajas', label: 'Cajas', icon: Wallet, group: 'Configuración' },
+  { href: '/permisos', label: 'Permisos', icon: ShieldCheck, group: 'Configuración' },
   { href: '/usuarios', label: 'Usuarios', icon: UserCog, group: 'Configuración' },
   { href: '/sucursales', label: 'Sucursales', icon: Building2, group: 'Configuración' },
   { href: '/empresa', label: 'Empresa', icon: Settings, group: 'Configuración' },
@@ -66,13 +70,21 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const user = useAuthStore((s) => s.user);
   const clear = useAuthStore((s) => s.clear);
+  const activeLinkRef = useRef<HTMLAnchorElement | null>(null);
 
-  // Agrupar items por sección
-  const grupos = NAV.reduce<Record<string, NavItem[]>>((acc, item) => {
+  // Filtrar NAV por permisos del rol actual y agrupar por sección.
+  const itemsPermitidos = NAV.filter((item) => puedeAcceder(user?.menusPermitidos, item.href));
+  const grupos = itemsPermitidos.reduce<Record<string, NavItem[]>>((acc, item) => {
     const g = item.group ?? 'General';
     (acc[g] ??= []).push(item);
     return acc;
   }, {});
+
+  // Scroll automático del sidebar para que el item activo siempre sea visible.
+  // Usa "nearest" para no mover el scroll si ya está a la vista.
+  useEffect(() => {
+    activeLinkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+  }, [pathname]);
 
   async function logout() {
     await api('/auth/logout', { method: 'POST', skipAuth: true }).catch(() => {});
@@ -108,10 +120,13 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
                 {items.map((item) => {
                   const Icon = item.icon;
                   const active =
-                    item.href === '/' ? pathname === '/' : pathname?.startsWith(item.href);
+                    item.href === '/'
+                      ? pathname === '/'
+                      : pathname === item.href || pathname?.startsWith(`${item.href}/`);
                   return (
                     <li key={item.href}>
                       <Link
+                        ref={active ? activeLinkRef : undefined}
                         href={item.href}
                         className={cn(
                           'flex items-center gap-2 rounded-md px-2.5 py-1.5 transition-colors',

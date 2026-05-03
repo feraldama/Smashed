@@ -36,6 +36,7 @@ import {
   TipoDocumentoFiscal,
   EstadoCaja,
 } from '@prisma/client';
+import { MENU_DEFINICIONES } from '@smash/shared-types';
 import { calcularDvRuc } from '@smash/shared-utils';
 import bcrypt from 'bcrypt';
 
@@ -113,6 +114,7 @@ async function limpiar() {
   await prisma.permiso.deleteMany();
   await prisma.usuarioSucursal.deleteMany();
   await prisma.usuario.deleteMany();
+  await prisma.menuRol.deleteMany();
   await prisma.configuracionEmpresa.deleteMany();
   await prisma.sucursal.deleteMany();
   await prisma.empresa.deleteMany();
@@ -286,7 +288,21 @@ async function crearEmpresaYSucursales() {
     ],
   });
 
+  // Configuración de menús por rol — defaults desde el catálogo central.
+  await crearDefaultsMenuRol(empresa.id);
+
   return { empresa, sucursalCentro, sucursalSanLorenzo, ptoCentro1, ptoCentro2, ptoSanLorenzo1 };
+}
+
+async function crearDefaultsMenuRol(empresaId: string) {
+  const filas = MENU_DEFINICIONES.flatMap((m) =>
+    m.defaults.map((rol) => ({
+      empresaId,
+      menu: m.path,
+      rol: rol as Rol,
+    })),
+  );
+  await prisma.menuRol.createMany({ data: filas, skipDuplicates: true });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

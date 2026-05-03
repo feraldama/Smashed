@@ -14,8 +14,6 @@ import { useCrearTransferencia } from '@/hooks/useTransferencias';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 interface ItemDraft {
   key: string;
   productoInventarioId: string;
@@ -24,7 +22,7 @@ interface ItemDraft {
 
 export default function NuevaTransferenciaPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <NuevaTransferenciaScreen />
       </AdminShell>

@@ -8,11 +8,9 @@ import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { useTransferencia } from '@/hooks/useTransferencias';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function TransferenciaDetallePage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <TransferenciaDetalleScreen />
       </AdminShell>

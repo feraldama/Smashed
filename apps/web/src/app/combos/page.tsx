@@ -10,11 +10,9 @@ import { toast } from '@/components/Toast';
 import { type ProductoListado, useEliminarProducto, useProductos } from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function CombosPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <CombosScreen />
       </AdminShell>

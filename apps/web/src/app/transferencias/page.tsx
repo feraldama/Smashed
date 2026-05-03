@@ -9,11 +9,9 @@ import { AuthGate } from '@/components/AuthGate';
 import { type ListarTransferenciasFiltros, useTransferencias } from '@/hooks/useTransferencias';
 import { useAuthStore } from '@/lib/auth-store';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function TransferenciasPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <TransferenciasScreen />
       </AdminShell>

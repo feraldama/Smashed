@@ -28,11 +28,9 @@ import {
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function ModificadoresPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <ModificadoresScreen />
       </AdminShell>

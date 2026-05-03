@@ -10,11 +10,9 @@ import { useCompras, type ListarComprasFiltros } from '@/hooks/useCompras';
 import { useProveedores } from '@/hooks/useProveedores';
 import { formatGs } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function ComprasPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <ComprasScreen />
       </AdminShell>

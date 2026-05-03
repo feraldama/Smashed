@@ -9,11 +9,9 @@ import { AuthGate } from '@/components/AuthGate';
 import { useCompra } from '@/hooks/useCompras';
 import { formatGs } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 export default function CompraDetallePage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <CompraDetalleScreen />
       </AdminShell>

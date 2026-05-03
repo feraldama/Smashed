@@ -11,7 +11,7 @@ import {
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
-import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
+import { AuthGate } from '@/components/AuthGate';
 import { AbrirCajaModal } from '@/components/caja/AbrirCajaModal';
 import { CerrarCajaModal } from '@/components/caja/CerrarCajaModal';
 import {
@@ -25,7 +25,7 @@ import { cn } from '@/lib/utils';
 
 export default function CajaPage() {
   return (
-    <AuthGate roles={ROLES_OPERATIVOS}>
+    <AuthGate>
       <AdminShell>
         <CajaScreen />
       </AdminShell>

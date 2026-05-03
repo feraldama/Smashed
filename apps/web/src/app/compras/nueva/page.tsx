@@ -16,8 +16,6 @@ import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { formatGs } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'] as const;
-
 interface ItemDraft {
   key: string;
   productoInventarioId: string;
@@ -27,7 +25,7 @@ interface ItemDraft {
 
 export default function NuevaCompraPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <NuevaCompraScreen />
       </AdminShell>

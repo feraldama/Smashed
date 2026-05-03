@@ -11,6 +11,7 @@ import {
   verifyRefreshToken,
 } from '../../lib/jwt.js';
 import { prisma } from '../../lib/prisma.js';
+import { obtenerMenusPermitidos } from '../menuRol/menuRol.service.js';
 
 import type { LoginInput } from './auth.schemas.js';
 import type { Rol } from '@prisma/client';
@@ -86,6 +87,8 @@ export async function login(input: LoginInput, meta: ClientMeta) {
       /* ignorar */
     });
 
+  const menusPermitidos = await obtenerMenusPermitidos(usuario.empresaId, usuario.rol);
+
   return {
     accessToken,
     refreshToken: refresh.token,
@@ -104,6 +107,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
         esPrincipal: us.esPrincipal,
       })),
       sucursalActivaId,
+      menusPermitidos,
     },
   };
 }
@@ -207,6 +211,8 @@ export async function me(userId: string) {
   });
   if (!usuario || usuario.deletedAt || !usuario.activo) throw Errors.unauthorized();
 
+  const menusPermitidos = await obtenerMenusPermitidos(usuario.empresaId, usuario.rol);
+
   return {
     id: usuario.id,
     email: usuario.email,
@@ -220,6 +226,7 @@ export async function me(userId: string) {
       establecimiento: us.sucursal.establecimiento,
       esPrincipal: us.esPrincipal,
     })),
+    menusPermitidos,
   };
 }
 

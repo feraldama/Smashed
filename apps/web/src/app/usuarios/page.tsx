@@ -32,11 +32,9 @@ import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
-const ROLES_ADMIN = ['ADMIN_EMPRESA', 'SUPER_ADMIN'] as const;
-
 export default function UsuariosPage() {
   return (
-    <AuthGate roles={ROLES_ADMIN}>
+    <AuthGate>
       <AdminShell>
         <UsuariosScreen />
       </AdminShell>

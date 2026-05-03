@@ -14,6 +14,12 @@ export interface SesionUsuario {
     esPrincipal: boolean;
   }[];
   sucursalActivaId: string | null;
+  /**
+   * Lista de paths que el rol del usuario puede ver. La calcula el backend
+   * a partir de la matriz `MenuRol` de la empresa. SUPER_ADMIN recibe todos.
+   * Vacío = sin acceso a ningún menú admin.
+   */
+  menusPermitidos: string[];
 }
 
 interface AuthState {

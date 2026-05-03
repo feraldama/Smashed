@@ -16,7 +16,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-import { AuthGate, ROLES_ENTREGAS } from '@/components/AuthGate';
+import { AuthGate } from '@/components/AuthGate';
 import { Cronometro } from '@/components/kds/Cronometro';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { toast } from '@/components/Toast';
@@ -39,7 +39,7 @@ const TIPO_ICON = {
 
 export default function EntregasPage() {
   return (
-    <AuthGate roles={ROLES_ENTREGAS}>
+    <AuthGate>
       <EntregasScreen />
     </AuthGate>
   );

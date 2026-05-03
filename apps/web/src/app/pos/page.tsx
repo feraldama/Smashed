@@ -21,7 +21,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useMemo, useReducer, useState } from 'react';
 
-import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
+import { AuthGate } from '@/components/AuthGate';
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
 import { CobrarModal } from '@/components/pos/CobrarModal';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
@@ -60,7 +60,7 @@ import { cn } from '@/lib/utils';
 
 export default function POSPage() {
   return (
-    <AuthGate roles={ROLES_OPERATIVOS}>
+    <AuthGate>
       <POSScreen />
     </AuthGate>
   );
