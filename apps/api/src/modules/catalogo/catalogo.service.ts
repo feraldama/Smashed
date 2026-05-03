@@ -105,7 +105,7 @@ export async function listarProductos(args: {
           : {}),
       },
       orderBy: [{ categoria: { ordenMenu: 'asc' } }, { nombre: 'asc' }],
-      ...(paginar ? { skip: (page - 1) * pageSize!, take: pageSize } : {}),
+      ...(pageSize !== undefined ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
     }),
     paginar ? prisma.productoVenta.count({ where }) : Promise.resolve(0),
   ]);
