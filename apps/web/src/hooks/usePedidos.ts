@@ -106,6 +106,7 @@ export interface PedidoListItem {
   tipo: TipoPedido;
   estado: EstadoPedido;
   total: string;
+  numeroPager: number | null;
   createdAt: string;
   cliente: { id: string; razonSocial: string } | null;
   mesa: { id: string; numero: number } | null;

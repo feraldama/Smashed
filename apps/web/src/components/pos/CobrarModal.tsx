@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  BellRing,
   CreditCard,
   Loader2,
   Plus,
@@ -15,6 +16,7 @@ import { useMemo, useState } from 'react';
 
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
 import { toast } from '@/components/Toast';
+import { Input } from '@/components/ui/Input';
 import { type Cliente } from '@/hooks/useClientes';
 import {
   type MetodoPago,
@@ -74,6 +76,7 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
   const [cliente, setCliente] = useState<Cliente | null>(clienteInicial);
   const [showClienteSelector, setShowClienteSelector] = useState(false);
   const [pagos, setPagos] = useState<Pago[]>([nuevoPago(total)]);
+  const [numeroPager, setNumeroPager] = useState('');
   const emitir = useEmitirComprobante();
 
   const totalPagado = useMemo(() => pagos.reduce((acc, p) => acc + parseGs(p.monto), 0), [pagos]);
@@ -136,12 +139,23 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
       return;
     }
 
+    let pagerPayload: number | undefined;
+    if (numeroPager.trim()) {
+      const n = parseInt(numeroPager, 10);
+      if (!Number.isFinite(n) || n < 1 || n > 50) {
+        toast.error('El número de pager debe estar entre 1 y 50');
+        return;
+      }
+      pagerPayload = n;
+    }
+
     try {
       const res = await emitir.mutateAsync({
         pedidoId,
         clienteId: cliente?.id,
         tipoDocumento: tipoDoc,
         pagos: pagosPayload,
+        numeroPager: pagerPayload,
       });
       toast.success(`${tipoDoc} ${res.comprobante.numeroDocumento} emitido`);
       onSuccess(res.comprobante.id);
@@ -232,6 +246,25 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
                 ⚠ Cliente sin RUC. Se va a emitir FACTURA pero idealmente requiere RUC.
               </p>
             )}
+          </div>
+
+          {/* Nº de pager */}
+          <div>
+            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Nº de pager
+            </label>
+            <div className="relative">
+              <BellRing className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                type="text"
+                inputMode="numeric"
+                value={numeroPager}
+                onChange={(e) => setNumeroPager(e.target.value.replace(/\D/g, '').slice(0, 2))}
+                placeholder="Opcional — entre 1 y 50"
+                maxLength={2}
+                className="pl-9"
+              />
+            </div>
           </div>
 
           {/* Pagos */}

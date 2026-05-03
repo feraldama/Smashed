@@ -187,17 +187,25 @@ function POSScreen() {
         clienteId: cliente?.id,
         mesaId: tipo === 'MESA' ? mesa?.id : undefined,
       });
-      // Confirmar inmediatamente (descuenta stock). Si falla por stock, queda PENDIENTE
-      // y el pedido se puede atender desde otra pantalla.
-      try {
-        await confirmarPedido.mutateAsync(created.pedido.id);
-      } catch (err) {
-        toast.error(
-          err instanceof ApiError
-            ? `Pedido creado pero confirmación falló: ${err.message}`
-            : 'Pedido creado pero confirmación falló — revisá stock',
-        );
+
+      // MESA y DELIVERY confirman ahora (envía a cocina + descuenta stock); el
+      // cobro ocurre después en /entregas (MESA) o cuando vuelve el repartidor
+      // (DELIVERY).
+      // MOSTRADOR (fast-food): NO confirma — abre el cobro directo. La
+      // confirmación se dispara dentro de la emisión del comprobante, así la
+      // cocina sólo ve el pedido cuando ya está pagado.
+      if (tipo === 'MESA' || tipo === 'DELIVERY') {
+        try {
+          await confirmarPedido.mutateAsync(created.pedido.id);
+        } catch (err) {
+          toast.error(
+            err instanceof ApiError
+              ? `Pedido creado pero confirmación falló: ${err.message}`
+              : 'Pedido creado pero confirmación falló — revisá stock',
+          );
+        }
       }
+
       // Si es MESA, dejamos la cuenta abierta — no abrimos el modal de cobro,
       // se cobra desde /entregas cuando todo esté entregado.
       if (tipo === 'MESA') {

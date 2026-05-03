@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import { AuthGate } from '@/components/AuthGate';
+import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
 import { FacturaA4 } from '@/components/imprimir/FacturaA4';
 import { TicketTermico } from '@/components/imprimir/TicketTermico';
 import { type ComprobanteDetalle, useComprobante } from '@/hooks/useComprobantes';
@@ -13,8 +13,11 @@ import { type ComprobanteDetalle, useComprobante } from '@/hooks/useComprobantes
 type Formato = 'ticket' | 'factura';
 
 export default function ImprimirComprobantePage() {
+  // La impresión la usa cualquier rol operativo (CAJERO/MESERO emiten desde POS,
+  // GERENTE/ADMIN reimprimen desde el detalle). No se gatea por menú porque
+  // /comprobantes como listado está restringido a admins.
   return (
-    <AuthGate>
+    <AuthGate roles={ROLES_OPERATIVOS}>
       <ImprimirScreen />
     </AuthGate>
   );

@@ -2,6 +2,7 @@
 
 import {
   AlertCircle,
+  BellRing,
   CheckCircle2,
   ChevronLeft,
   Loader2,
@@ -243,6 +244,12 @@ function PedidoEntregaCard({
               <p className="text-sm font-semibold text-muted-foreground">
                 Mesa {pedido.mesa.numero}
               </p>
+            )}
+            {pedido.numeroPager != null && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-sm font-bold text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">
+                <BellRing className="h-3.5 w-3.5" />
+                Pager {pedido.numeroPager}
+              </span>
             )}
           </div>
           <p className="text-xs text-muted-foreground">

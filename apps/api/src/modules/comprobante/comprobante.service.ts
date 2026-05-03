@@ -12,6 +12,12 @@ import {
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { emitPedido } from '../../lib/socketio.js';
+import {
+  aplicarCancelacionInline,
+  aplicarConfirmacionInline,
+  obtenerPedidoParaKds,
+} from '../pedido/pedido.service.js';
 
 import type {
   AnularComprobanteInput,
@@ -94,14 +100,17 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
   if (!pedido) throw Errors.notFound('Pedido no encontrado');
   if (pedido.empresaId !== user.empresaId) throw Errors.tenantMismatch();
   if (pedido.sucursalId !== user.sucursalActivaId) throw Errors.sucursalNoAutorizada();
-  if (pedido.estado === EstadoPedido.FACTURADO) {
-    throw Errors.conflict('El pedido ya fue facturado');
-  }
   if (pedido.estado === EstadoPedido.CANCELADO) {
     throw Errors.conflict('No se puede facturar un pedido cancelado');
   }
-  if (pedido.estado === EstadoPedido.PENDIENTE) {
-    throw Errors.conflict('Confirmá el pedido antes de facturar');
+  // ¿Ya hay un comprobante EMITIDO para este pedido? Bloquea doble emisión sin
+  // depender del estado del pedido (que ahora puede ser CONFIRMADO post-cobro).
+  const yaTieneComprobante =
+    (await prisma.comprobante.count({
+      where: { pedidoId: pedido.id, estado: EstadoComprobante.EMITIDO, deletedAt: null },
+    })) > 0;
+  if (yaTieneComprobante) {
+    throw Errors.conflict('El pedido ya tiene un comprobante emitido');
   }
 
   // Resolver cliente: si no se pasa, usar consumidor final de la empresa
@@ -130,12 +139,24 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
   // Calcular subtotales discriminados por tasa de IVA
   const totales = calcularTotalesComprobante(pedido.items);
 
+  // Estado original del pedido — define el estado final post-emisión:
+  //  PENDIENTE → CONFIRMADO (fast-food: cobrar primero, recién ahora va a cocina)
+  //  ENTREGADO / EN_CAMINO → FACTURADO (flujo MESA: ya se entregó, cierra el ciclo)
+  //  CONFIRMADO / EN_PREP / LISTO → no se toca (caso atípico: cobrar a mitad del servicio)
+  const estadoOriginal = pedido.estado;
+  const estadoFinal =
+    estadoOriginal === EstadoPedido.PENDIENTE
+      ? EstadoPedido.CONFIRMADO
+      : estadoOriginal === EstadoPedido.ENTREGADO || estadoOriginal === EstadoPedido.EN_CAMINO
+        ? EstadoPedido.FACTURADO
+        : estadoOriginal;
+
   // Transacción: numerar + crear comprobante + items + pagos + movimientos de caja + actualizar pedido
   let intento = 0;
   while (true) {
     intento += 1;
     try {
-      return await prisma.$transaction(async (tx) => {
+      const comprobanteCreado = await prisma.$transaction(async (tx) => {
         // Lock + increment del timbrado (atomic)
         const timbrado = await tx.timbrado.findFirst({
           where: {
@@ -256,16 +277,48 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
           });
         }
 
-        // Avanzar pedido a FACTURADO (o ENTREGADO si todavía no llegó)
-        // Tolerante: si está CONFIRMADO/EN_PREP/LISTO/ENTREGADO/EN_CAMINO → FACTURADO
-        await tx.pedido.update({
-          where: { id: pedido.id },
-          data: { estado: EstadoPedido.FACTURADO },
-        });
+        // Si el pedido estaba PENDIENTE, hay que descontar stock y marcarlo
+        // CONFIRMADO antes de emitir. Esto es el flujo fast-food: el cliente
+        // paga primero y recién después la cocina ve el pedido.
+        if (estadoOriginal === EstadoPedido.PENDIENTE) {
+          const pedidoParaConfirmar = await tx.pedido.findUniqueOrThrow({
+            where: { id: pedido.id },
+            include: {
+              items: {
+                include: {
+                  combosOpcion: {
+                    select: {
+                      comboGrupoOpcionId: true,
+                      comboGrupoOpcion: { select: { productoVentaId: true } },
+                    },
+                  },
+                },
+              },
+            },
+          });
+          await aplicarConfirmacionInline(tx, user, pedidoParaConfirmar);
+        }
 
-        // Si era de mesa, liberar la mesa (pasa a LIMPIEZA si querés intermedio,
-        // por simpleza directo a LIBRE)
-        if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
+        // Avanzar pedido al estado final calculado arriba + setear pager si vino.
+        // Sólo updateamos el campo estado si efectivamente cambia, así no
+        // pisamos el CONFIRMADO recién aplicado por aplicarConfirmacionInline.
+        const datosFinales: Prisma.PedidoUpdateInput = {};
+        if (input.numeroPager !== undefined) datosFinales.numeroPager = input.numeroPager;
+        if (estadoFinal !== EstadoPedido.CONFIRMADO || estadoOriginal !== EstadoPedido.PENDIENTE) {
+          if (estadoFinal !== estadoOriginal) datosFinales.estado = estadoFinal;
+        }
+        if (Object.keys(datosFinales).length > 0) {
+          await tx.pedido.update({ where: { id: pedido.id }, data: datosFinales });
+        }
+
+        // Liberar mesa sólo si el ciclo se cerró (FACTURADO). En fast-food
+        // (PENDIENTE → CONFIRMADO) la mesa no aplica; en MESA estado original
+        // ya es ENTREGADO al momento del cobro.
+        if (
+          estadoFinal === EstadoPedido.FACTURADO &&
+          pedido.tipo === TipoPedido.MESA &&
+          pedido.mesaId
+        ) {
           await tx.mesa.update({
             where: { id: pedido.mesaId },
             data: { estado: EstadoMesa.LIBRE },
@@ -291,6 +344,15 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
 
         return comprobante;
       });
+
+      // Post-tx: si confirmamos inline (PENDIENTE → CONFIRMADO), avisar al KDS
+      // por socket para que la cocina vea el pedido al instante.
+      if (estadoOriginal === EstadoPedido.PENDIENTE) {
+        const completo = await obtenerPedidoParaKds(pedido.id);
+        if (completo) emitPedido('pedido.confirmado', completo.sucursalId, completo);
+      }
+
+      return comprobanteCreado;
     } catch (err) {
       if (
         err instanceof Prisma.PrismaClientKnownRequestError &&
@@ -314,65 +376,100 @@ export async function anularComprobante(
   comprobanteId: string,
   input: AnularComprobanteInput,
 ) {
-  return prisma.$transaction(async (tx) => {
-    const comprobante = await tx.comprobante.findUnique({
-      where: { id: comprobanteId },
-      include: { pagos: true, movimientosCaja: true },
-    });
-    if (!comprobante) throw Errors.notFound('Comprobante no encontrado');
-    if (!user.isSuperAdmin && comprobante.empresaId !== user.empresaId) {
-      throw Errors.tenantMismatch();
-    }
-    if (comprobante.estado === EstadoComprobante.ANULADO) {
-      throw Errors.conflict('Ya está anulado');
-    }
-    // Sólo el emisor o roles de gestión
-    const esEmisor = comprobante.emitidoPorId === user.userId;
-    if (!esEmisor && !ROLES_GESTION.includes(user.rol)) {
-      throw Errors.forbidden('Sólo el emisor o un gerente pueden anular');
-    }
+  return prisma
+    .$transaction(async (tx) => {
+      const comprobante = await tx.comprobante.findUnique({
+        where: { id: comprobanteId },
+        include: { pagos: true, movimientosCaja: true },
+      });
+      if (!comprobante) throw Errors.notFound('Comprobante no encontrado');
+      if (!user.isSuperAdmin && comprobante.empresaId !== user.empresaId) {
+        throw Errors.tenantMismatch();
+      }
+      if (comprobante.estado === EstadoComprobante.ANULADO) {
+        throw Errors.conflict('Ya está anulado');
+      }
+      // Sólo el emisor o roles de gestión
+      const esEmisor = comprobante.emitidoPorId === user.userId;
+      if (!esEmisor && !ROLES_GESTION.includes(user.rol)) {
+        throw Errors.forbidden('Sólo el emisor o un gerente pueden anular');
+      }
 
-    const actualizado = await tx.comprobante.update({
-      where: { id: comprobanteId },
-      data: {
-        estado: EstadoComprobante.ANULADO,
-        anuladoEn: new Date(),
-        motivoAnulacion: input.motivo,
-      },
-    });
+      const actualizado = await tx.comprobante.update({
+        where: { id: comprobanteId },
+        data: {
+          estado: EstadoComprobante.ANULADO,
+          anuladoEn: new Date(),
+          motivoAnulacion: input.motivo,
+        },
+      });
 
-    // Reverso de movimientos de caja: si la caja todavía está abierta, eliminamos los movs
-    // VENTA. Si ya cerró, no tocamos (el cierre Z ya quedó histórico — la anulación queda
-    // como evento separado).
-    for (const mov of comprobante.movimientosCaja) {
-      if (mov.aperturaCajaId) {
-        const apertura = await tx.aperturaCaja.findUnique({
-          where: { id: mov.aperturaCajaId },
-          include: { cierre: true },
-        });
-        if (apertura && !apertura.cierre) {
-          await tx.movimientoCaja.delete({ where: { id: mov.id } });
+      // Reverso de movimientos de caja: si la caja todavía está abierta, eliminamos los movs
+      // VENTA. Si ya cerró, no tocamos (el cierre Z ya quedó histórico — la anulación queda
+      // como evento separado).
+      for (const mov of comprobante.movimientosCaja) {
+        if (mov.aperturaCajaId) {
+          const apertura = await tx.aperturaCaja.findUnique({
+            where: { id: mov.aperturaCajaId },
+            include: { cierre: true },
+          });
+          if (apertura && !apertura.cierre) {
+            await tx.movimientoCaja.delete({ where: { id: mov.id } });
+          }
         }
       }
-    }
 
-    await tx.auditLog.create({
-      data: {
-        empresaId: comprobante.empresaId,
-        sucursalId: comprobante.sucursalId,
-        usuarioId: user.userId,
-        accion: 'ANULAR_COMPROBANTE',
-        entidad: 'Comprobante',
-        entidadId: comprobante.id,
-        metadata: {
-          numero: comprobante.numeroDocumento,
-          motivo: input.motivo,
+      // Si el pedido todavía no se entregó al cliente (cocina aún no sacó la
+      // comida o se está preparando), cancelamos el pedido y revertimos stock.
+      // Si ya se entregó, anular = solo evento fiscal (devolución contable).
+      let pedidoCanceladoId: string | null = null;
+      let pedidoCanceladoSucursalId: string | null = null;
+      if (comprobante.pedidoId) {
+        const pedido = await tx.pedido.findUnique({ where: { id: comprobante.pedidoId } });
+        if (
+          pedido &&
+          pedido.estado !== EstadoPedido.CANCELADO &&
+          pedido.estado !== EstadoPedido.FACTURADO &&
+          !pedido.entregadoEn
+        ) {
+          await aplicarCancelacionInline(
+            tx,
+            user,
+            pedido,
+            `Anulación comprobante ${comprobante.numeroDocumento}: ${input.motivo}`,
+          );
+          pedidoCanceladoId = pedido.id;
+          pedidoCanceladoSucursalId = pedido.sucursalId;
+        }
+      }
+
+      await tx.auditLog.create({
+        data: {
+          empresaId: comprobante.empresaId,
+          sucursalId: comprobante.sucursalId,
+          usuarioId: user.userId,
+          accion: 'ANULAR_COMPROBANTE',
+          entidad: 'Comprobante',
+          entidadId: comprobante.id,
+          metadata: {
+            numero: comprobante.numeroDocumento,
+            motivo: input.motivo,
+            pedidoCancelado: pedidoCanceladoId,
+          },
         },
-      },
-    });
+      });
 
-    return actualizado;
-  });
+      return { actualizado, pedidoCanceladoId, pedidoCanceladoSucursalId };
+    })
+    .then(({ actualizado, pedidoCanceladoId, pedidoCanceladoSucursalId }) => {
+      if (pedidoCanceladoId && pedidoCanceladoSucursalId) {
+        emitPedido('pedido.cancelado', pedidoCanceladoSucursalId, {
+          id: pedidoCanceladoId,
+          numero: 0, // el resolver del client refetcheará — el id es lo que importa
+        });
+      }
+      return actualizado;
+    });
 }
 
 // ───────────────────────────────────────────────────────────────────────────

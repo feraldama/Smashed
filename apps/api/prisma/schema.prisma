@@ -1124,6 +1124,10 @@ model Pedido {
   // Observaciones libres (ej "delivery — entregar antes de las 21hs")
   observaciones String?
 
+  // Número de pager físico entregado al cliente (mostrador / para llevar) para llamarlo
+  // cuando su pedido está LISTO. Opcional. Rango 1–50 validado en API.
+  numeroPager   Int?     @map("numero_pager")
+
   // Totales (calculados al confirmar)
   subtotal      BigInt   @default(0)
   totalDescuento BigInt  @default(0) @map("total_descuento")

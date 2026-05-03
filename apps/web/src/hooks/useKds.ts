@@ -49,6 +49,7 @@ export interface KdsPedido {
   tipo: TipoPedido;
   estado: EstadoPedido;
   observaciones: string | null;
+  numeroPager: number | null;
   confirmadoEn: string | null;
   enPreparacionEn: string | null;
   mesa: { id: string; numero: number } | null;

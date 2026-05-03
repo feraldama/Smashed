@@ -200,6 +200,17 @@ export async function agregarItemsAPedido(
     throw Errors.conflict(`No se pueden agregar items a un pedido en estado ${pedido.estado}`);
   }
 
+  // Aunque el estado lo permita, si ya se emitió un comprobante el pedido está
+  // facturado (modelo fast-food: CONFIRMADO + comprobante = ciclo cerrado del
+  // lado fiscal). No se admiten más items sin anular el comprobante primero.
+  const tieneComprobante =
+    (await prisma.comprobante.count({
+      where: { pedidoId, estado: 'EMITIDO', deletedAt: null },
+    })) > 0;
+  if (tieneComprobante) {
+    throw Errors.conflict('No se pueden agregar items: el pedido ya tiene comprobante FACTURADO');
+  }
+
   const {
     itemsParaCrear,
     subtotal: subtotalNuevo,
@@ -352,18 +363,7 @@ export async function confirmarPedido(user: UserCtx, pedidoId: string) {
     .$transaction(async (tx) => {
       const pedido = await tx.pedido.findUnique({
         where: { id: pedidoId },
-        include: {
-          items: {
-            include: {
-              combosOpcion: {
-                select: {
-                  comboGrupoOpcionId: true,
-                  comboGrupoOpcion: { select: { productoVentaId: true } },
-                },
-              },
-            },
-          },
-        },
+        include: PEDIDO_INCLUDE_PARA_CONFIRMAR,
       });
       if (!pedido) throw Errors.notFound('Pedido no encontrado');
       assertTenant(user, pedido);
@@ -373,102 +373,145 @@ export async function confirmarPedido(user: UserCtx, pedidoId: string) {
         );
       }
 
-      // Expandir consumo total de insumos para todo el pedido
-      const consumoTotal = new Map<string, number>();
-
-      for (const item of pedido.items) {
-        // Si es combo: expandir la receta de cada producto elegido en lugar del combo
-        if (item.combosOpcion.length > 0) {
-          for (const eleccion of item.combosOpcion) {
-            const subConsumo = await expandirReceta(
-              tx,
-              eleccion.comboGrupoOpcion.productoVentaId,
-              item.cantidad,
-            );
-            for (const [insumoId, cant] of subConsumo) {
-              consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
-            }
-          }
-        } else {
-          const subConsumo = await expandirReceta(tx, item.productoVentaId, item.cantidad);
-          for (const [insumoId, cant] of subConsumo) {
-            consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
-          }
-        }
-      }
-
-      // Generar movimientos de stock + actualizar StockSucursal por cada insumo
-      for (const [insumoId, cant] of consumoTotal) {
-        const cantDecimal = new Prisma.Decimal(cant.toFixed(3));
-
-        await tx.movimientoStock.create({
-          data: {
-            productoInventarioId: insumoId,
-            sucursalId: pedido.sucursalId,
-            usuarioId: user.userId,
-            tipo: TipoMovimientoStock.SALIDA_VENTA,
-            cantidad: cantDecimal,
-            cantidadSigned: cantDecimal.negated(),
-            motivo: `Venta — pedido #${pedido.numero}`,
-            pedidoId: pedido.id,
-          },
-        });
-
-        // Actualizar stock_actual (atomico via decrement). Si no existe el row, lo creamos.
-        const updated = await tx.stockSucursal.updateMany({
-          where: { productoInventarioId: insumoId, sucursalId: pedido.sucursalId },
-          data: { stockActual: { decrement: cantDecimal } },
-        });
-        if (updated.count === 0) {
-          await tx.stockSucursal.create({
-            data: {
-              productoInventarioId: insumoId,
-              sucursalId: pedido.sucursalId,
-              stockActual: cantDecimal.negated(),
-            },
-          });
-        }
-      }
-
-      const actualizado = await tx.pedido.update({
-        where: { id: pedidoId },
-        data: {
-          estado: EstadoPedido.CONFIRMADO,
-          confirmadoEn: new Date(),
-        },
-      });
-
-      // Si el pedido es de mesa, marcar la mesa como OCUPADA
-      if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
-        await tx.mesa.update({
-          where: { id: pedido.mesaId },
-          data: { estado: EstadoMesa.OCUPADA },
-        });
-      }
-
-      await tx.auditLog.create({
-        data: {
-          empresaId: pedido.empresaId,
-          sucursalId: pedido.sucursalId,
-          usuarioId: user.userId,
-          accion: 'ACTUALIZAR',
-          entidad: 'Pedido',
-          entidadId: pedido.id,
-          metadata: {
-            de: 'PENDIENTE',
-            a: 'CONFIRMADO',
-            insumos_descontados: consumoTotal.size,
-          },
-        },
-      });
-
-      return actualizado;
+      return aplicarConfirmacionInline(tx, user, pedido);
     })
     .then(async (actualizado) => {
       const completo = await obtenerPedidoParaKds(pedidoId);
       if (completo) emitPedido('pedido.confirmado', completo.sucursalId, completo);
       return actualizado;
     });
+}
+
+/**
+ * Shape de pedido necesario para confirmar (descontar stock + cambiar estado).
+ * Lo exportamos como `include` reutilizable así `comprobante.service` puede
+ * fetchear el mismo shape cuando confirme inline al emitir comprobante.
+ */
+export const PEDIDO_INCLUDE_PARA_CONFIRMAR = {
+  items: {
+    include: {
+      combosOpcion: {
+        select: {
+          comboGrupoOpcionId: true,
+          comboGrupoOpcion: { select: { productoVentaId: true } },
+        },
+      },
+    },
+  },
+} satisfies Prisma.PedidoInclude;
+
+type PedidoParaConfirmar = Prisma.PedidoGetPayload<{
+  include: typeof PEDIDO_INCLUDE_PARA_CONFIRMAR;
+}>;
+
+/**
+ * Lógica reutilizable de "confirmar pedido" — descuenta stock con expansión
+ * recursiva, marca mesa OCUPADA si aplica, actualiza estado y crea audit log.
+ *
+ * Se llama desde:
+ *  - `confirmarPedido` (flujo MESA: confirmar antes de cobrar)
+ *  - `comprobante.emitirComprobante` (flujo MOSTRADOR fast-food: cobrar
+ *    primero confirma inline para que la cocina recién vea el pedido tras
+ *    emitir el ticket)
+ *
+ * El caller es responsable de validar que el pedido esté en PENDIENTE antes
+ * de invocar — este helper no chequea estado.
+ */
+export async function aplicarConfirmacionInline(
+  tx: Prisma.TransactionClient,
+  user: UserCtx,
+  pedido: PedidoParaConfirmar,
+) {
+  // Expandir consumo total de insumos para todo el pedido
+  const consumoTotal = new Map<string, number>();
+
+  for (const item of pedido.items) {
+    // Si es combo: expandir la receta de cada producto elegido en lugar del combo
+    if (item.combosOpcion.length > 0) {
+      for (const eleccion of item.combosOpcion) {
+        const subConsumo = await expandirReceta(
+          tx,
+          eleccion.comboGrupoOpcion.productoVentaId,
+          item.cantidad,
+        );
+        for (const [insumoId, cant] of subConsumo) {
+          consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
+        }
+      }
+    } else {
+      const subConsumo = await expandirReceta(tx, item.productoVentaId, item.cantidad);
+      for (const [insumoId, cant] of subConsumo) {
+        consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
+      }
+    }
+  }
+
+  // Generar movimientos de stock + actualizar StockSucursal por cada insumo
+  for (const [insumoId, cant] of consumoTotal) {
+    const cantDecimal = new Prisma.Decimal(cant.toFixed(3));
+
+    await tx.movimientoStock.create({
+      data: {
+        productoInventarioId: insumoId,
+        sucursalId: pedido.sucursalId,
+        usuarioId: user.userId,
+        tipo: TipoMovimientoStock.SALIDA_VENTA,
+        cantidad: cantDecimal,
+        cantidadSigned: cantDecimal.negated(),
+        motivo: `Venta — pedido #${pedido.numero}`,
+        pedidoId: pedido.id,
+      },
+    });
+
+    // Actualizar stock_actual (atomico via decrement). Si no existe el row, lo creamos.
+    const updated = await tx.stockSucursal.updateMany({
+      where: { productoInventarioId: insumoId, sucursalId: pedido.sucursalId },
+      data: { stockActual: { decrement: cantDecimal } },
+    });
+    if (updated.count === 0) {
+      await tx.stockSucursal.create({
+        data: {
+          productoInventarioId: insumoId,
+          sucursalId: pedido.sucursalId,
+          stockActual: cantDecimal.negated(),
+        },
+      });
+    }
+  }
+
+  const actualizado = await tx.pedido.update({
+    where: { id: pedido.id },
+    data: {
+      estado: EstadoPedido.CONFIRMADO,
+      confirmadoEn: new Date(),
+    },
+  });
+
+  // Si el pedido es de mesa, marcar la mesa como OCUPADA
+  if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
+    await tx.mesa.update({
+      where: { id: pedido.mesaId },
+      data: { estado: EstadoMesa.OCUPADA },
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      empresaId: pedido.empresaId,
+      sucursalId: pedido.sucursalId,
+      usuarioId: user.userId,
+      accion: 'ACTUALIZAR',
+      entidad: 'Pedido',
+      entidadId: pedido.id,
+      metadata: {
+        de: 'PENDIENTE',
+        a: 'CONFIRMADO',
+        insumos_descontados: consumoTotal.size,
+      },
+    },
+  });
+
+  return actualizado;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -825,12 +868,14 @@ export async function listarPedidosParaKds(user: UserCtx, sector?: SectorComanda
 
 /**
  * Marca un pedido como entregado al cliente. Setea `entregadoEn = now` para que
- * caiga del KDS de Mostrador. No cambia el estado del pedido — para pedidos
- * MOSTRADOR/DELIVERY el estado típicamente ya está en FACTURADO (cobro inmediato),
- * y el state machine no permite transicionar desde ahí.
+ * caiga del KDS de Mostrador.
  *
- * Para pedidos en estado LISTO (mesa con cuenta abierta que recién terminó cocina),
- * además avanza el estado a ENTREGADO siguiendo la matriz normal.
+ * Estado final del pedido:
+ *  - Si ya tiene comprobante EMITIDO asociado (flujo MOSTRADOR fast-food: se
+ *    cobró antes de cocinar) → FACTURADO + libera mesa si aplica.
+ *  - Si no tiene comprobante (flujo MESA: queda pendiente de cobro) → ENTREGADO
+ *    siempre que la matriz lo permita.
+ *  - Si el pedido ya está FACTURADO (flujo viejo o casos legacy) → no se toca.
  */
 export async function entregarPedido(user: UserCtx, pedidoId: string) {
   return prisma.$transaction(async (tx) => {
@@ -844,15 +889,35 @@ export async function entregarPedido(user: UserCtx, pedidoId: string) {
       throw Errors.conflict('Pedido ya entregado');
     }
 
+    // ¿Hay un comprobante EMITIDO asociado? Eso indica fast-food (cobró primero).
+    const tieneComprobanteEmitido =
+      (await tx.comprobante.count({
+        where: { pedidoId, estado: 'EMITIDO', deletedAt: null },
+      })) > 0;
+
     const ahora = new Date();
     const data: Prisma.PedidoUpdateInput = { entregadoEn: ahora };
-    // Si el flujo del state machine permite avanzar a ENTREGADO, lo hacemos.
-    // (Caso típico: mesa con cuenta abierta que terminó cocina — pedido en LISTO.)
-    if (transicionPermitida(pedido.estado, EstadoPedido.ENTREGADO)) {
+    if (tieneComprobanteEmitido && pedido.estado !== EstadoPedido.FACTURADO) {
+      // Cierra el ciclo: pagado + entregado → FACTURADO
+      data.estado = EstadoPedido.FACTURADO;
+    } else if (transicionPermitida(pedido.estado, EstadoPedido.ENTREGADO)) {
+      // Mesa con cuenta abierta que recién terminó cocina (LISTO → ENTREGADO).
       data.estado = EstadoPedido.ENTREGADO;
     }
 
     const actualizado = await tx.pedido.update({ where: { id: pedidoId }, data });
+
+    // Si pasamos a FACTURADO y el pedido era de mesa, liberamos la mesa.
+    if (
+      data.estado === EstadoPedido.FACTURADO &&
+      pedido.tipo === TipoPedido.MESA &&
+      pedido.mesaId
+    ) {
+      await tx.mesa.update({
+        where: { id: pedido.mesaId },
+        data: { estado: EstadoMesa.LIBRE },
+      });
+    }
 
     await tx.auditLog.create({
       data: {
@@ -902,7 +967,7 @@ const kdsInclude = {
   cliente: { select: { id: true, razonSocial: true } },
 } satisfies Prisma.PedidoInclude;
 
-async function obtenerPedidoParaKds(pedidoId: string) {
+export async function obtenerPedidoParaKds(pedidoId: string) {
   return prisma.pedido.findUnique({
     where: { id: pedidoId },
     include: kdsInclude,
@@ -927,63 +992,7 @@ export async function cancelarPedido(user: UserCtx, pedidoId: string, input: Can
         throw Errors.conflict('No se puede cancelar un pedido FACTURADO. Emití nota de crédito.');
       }
 
-      // Si el stock estaba descontado, revertir
-      if (ESTADOS_CON_STOCK_DESCONTADO.includes(pedido.estado)) {
-        const movimientos = await tx.movimientoStock.findMany({
-          where: { pedidoId, tipo: TipoMovimientoStock.SALIDA_VENTA },
-        });
-
-        for (const mov of movimientos) {
-          // Reverso = ENTRADA_AJUSTE con cantidad positiva
-          await tx.movimientoStock.create({
-            data: {
-              productoInventarioId: mov.productoInventarioId,
-              sucursalId: mov.sucursalId,
-              usuarioId: user.userId,
-              tipo: TipoMovimientoStock.ENTRADA_AJUSTE,
-              cantidad: mov.cantidad,
-              cantidadSigned: mov.cantidad,
-              motivo: `Cancelación pedido #${pedido.numero}: ${input.motivo}`,
-              pedidoId: pedido.id,
-            },
-          });
-          await tx.stockSucursal.updateMany({
-            where: { productoInventarioId: mov.productoInventarioId, sucursalId: mov.sucursalId },
-            data: { stockActual: { increment: mov.cantidad } },
-          });
-        }
-      }
-
-      const actualizado = await tx.pedido.update({
-        where: { id: pedidoId },
-        data: {
-          estado: EstadoPedido.CANCELADO,
-          canceladoEn: new Date(),
-          motivoCancel: input.motivo,
-        },
-      });
-
-      // Si el pedido era de mesa y la mesa estaba OCUPADA por este pedido, liberarla
-      if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
-        await tx.mesa.update({
-          where: { id: pedido.mesaId },
-          data: { estado: EstadoMesa.LIBRE },
-        });
-      }
-
-      await tx.auditLog.create({
-        data: {
-          empresaId: pedido.empresaId,
-          sucursalId: pedido.sucursalId,
-          usuarioId: user.userId,
-          accion: 'ACTUALIZAR',
-          entidad: 'Pedido',
-          entidadId: pedido.id,
-          metadata: { de: pedido.estado, a: 'CANCELADO', motivo: input.motivo },
-        },
-      });
-
-      return actualizado;
+      return aplicarCancelacionInline(tx, user, pedido, input.motivo);
     })
     .then((actualizado) => {
       emitPedido('pedido.cancelado', actualizado.sucursalId, {
@@ -992,6 +1001,91 @@ export async function cancelarPedido(user: UserCtx, pedidoId: string, input: Can
       });
       return actualizado;
     });
+}
+
+/**
+ * Cancela un pedido inline: revierte stock si correspondía, marca CANCELADO,
+ * libera la mesa si aplica y registra auditoría.
+ *
+ * Usado por:
+ *  - `cancelarPedido` (acción explícita del usuario)
+ *  - `comprobante.anularComprobante` (al anular un comprobante de un pedido aún
+ *    no entregado, hay que devolver stock + sacarlo de cocina)
+ *
+ * El caller debe haber validado que el pedido es cancelable (no CANCELADO ni
+ * FACTURADO terminal).
+ */
+export async function aplicarCancelacionInline(
+  tx: Prisma.TransactionClient,
+  user: UserCtx,
+  pedido: {
+    id: string;
+    numero: number;
+    estado: EstadoPedido;
+    empresaId: string;
+    sucursalId: string;
+    tipo: TipoPedido;
+    mesaId: string | null;
+  },
+  motivo: string,
+) {
+  // Si el stock estaba descontado, revertir
+  if (ESTADOS_CON_STOCK_DESCONTADO.includes(pedido.estado)) {
+    const movimientos = await tx.movimientoStock.findMany({
+      where: { pedidoId: pedido.id, tipo: TipoMovimientoStock.SALIDA_VENTA },
+    });
+
+    for (const mov of movimientos) {
+      // Reverso = ENTRADA_AJUSTE con cantidad positiva
+      await tx.movimientoStock.create({
+        data: {
+          productoInventarioId: mov.productoInventarioId,
+          sucursalId: mov.sucursalId,
+          usuarioId: user.userId,
+          tipo: TipoMovimientoStock.ENTRADA_AJUSTE,
+          cantidad: mov.cantidad,
+          cantidadSigned: mov.cantidad,
+          motivo: `Cancelación pedido #${pedido.numero}: ${motivo}`,
+          pedidoId: pedido.id,
+        },
+      });
+      await tx.stockSucursal.updateMany({
+        where: { productoInventarioId: mov.productoInventarioId, sucursalId: mov.sucursalId },
+        data: { stockActual: { increment: mov.cantidad } },
+      });
+    }
+  }
+
+  const actualizado = await tx.pedido.update({
+    where: { id: pedido.id },
+    data: {
+      estado: EstadoPedido.CANCELADO,
+      canceladoEn: new Date(),
+      motivoCancel: motivo,
+    },
+  });
+
+  // Si el pedido era de mesa y la mesa estaba OCUPADA por este pedido, liberarla
+  if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
+    await tx.mesa.update({
+      where: { id: pedido.mesaId },
+      data: { estado: EstadoMesa.LIBRE },
+    });
+  }
+
+  await tx.auditLog.create({
+    data: {
+      empresaId: pedido.empresaId,
+      sucursalId: pedido.sucursalId,
+      usuarioId: user.userId,
+      accion: 'ACTUALIZAR',
+      entidad: 'Pedido',
+      entidadId: pedido.id,
+      metadata: { de: pedido.estado, a: 'CANCELADO', motivo },
+    },
+  });
+
+  return actualizado;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -1027,6 +1121,7 @@ export async function listarPedidos(user: UserCtx, q: ListarPedidosQuery) {
       tipo: true,
       estado: true,
       total: true,
+      numeroPager: true,
       createdAt: true,
       cliente: { select: { id: true, razonSocial: true } },
       mesa: { select: { id: true, numero: true } },

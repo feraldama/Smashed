@@ -66,7 +66,7 @@ async function abrirCajaYHacerPedido(token: string, codigo: string, cantidad = 1
 }
 
 describe('POST /comprobantes — emitir', () => {
-  it('emite TICKET con numeración fiscal correcta + actualiza pedido a FACTURADO', async () => {
+  it('emite TICKET con numeración fiscal correcta + comprobante asociado al pedido', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
     const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
@@ -86,9 +86,11 @@ describe('POST /comprobantes — emitir', () => {
     expect(res.body.comprobante.tipoDocumento).toBe('TICKET');
     expect(res.body.comprobante.total).toBe(total);
 
-    // Pedido pasó a FACTURADO
+    // El pedido del test estaba en CONFIRMADO al cobrar — emitir comprobante
+    // sobre un pedido a mitad de servicio no avanza el estado (el cierre a
+    // FACTURADO ocurre al "Entregar al cliente" si ya hay comprobante).
     const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });
-    expect(pedido?.estado).toBe('FACTURADO');
+    expect(pedido?.estado).toBe('CONFIRMADO');
 
     // MovimientoCaja tipo VENTA creado
     const mov = await prisma.movimientoCaja.findFirst({
@@ -225,7 +227,7 @@ describe('POST /comprobantes — emitir', () => {
     expect(res.body.error.message).toMatch(/caja abierta/);
   });
 
-  it('pedido ya facturado → 409', async () => {
+  it('pedido con comprobante emitido → 409 al intentar emitir otro', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
     const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
@@ -248,9 +250,10 @@ describe('POST /comprobantes — emitir', () => {
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
       });
     expect(res.status).toBe(409);
+    expect(res.body.error.message).toMatch(/comprobante/i);
   });
 
-  it('pedido PENDIENTE (sin confirmar) → 409', async () => {
+  it('pedido PENDIENTE (fast-food MOSTRADOR) → emite + auto-confirma + descuenta stock', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
     const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
@@ -266,6 +269,12 @@ describe('POST /comprobantes — emitir', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad: 1 }] });
 
+    // Snapshot de stock pre-cobro: el pedido quedó PENDIENTE, no se descontó nada.
+    const stockPre = await prisma.movimientoStock.count({
+      where: { pedidoId: crear.body.pedido.id, tipo: 'SALIDA_VENTA' },
+    });
+    expect(stockPre).toBe(0);
+
     const res = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)
@@ -274,8 +283,18 @@ describe('POST /comprobantes — emitir', () => {
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(crear.body.pedido.total) }],
       });
-    expect(res.status).toBe(409);
-    expect(res.body.error.message).toMatch(/Confirmá/);
+    expect(res.status).toBe(201);
+
+    // El pedido pasó a CONFIRMADO (recién ahora va a cocina)
+    const pedido = await prisma.pedido.findUnique({ where: { id: crear.body.pedido.id } });
+    expect(pedido?.estado).toBe('CONFIRMADO');
+    expect(pedido?.confirmadoEn).not.toBeNull();
+
+    // Y el stock se descontó como parte de la emisión (movimiento SALIDA_VENTA)
+    const stockPost = await prisma.movimientoStock.count({
+      where: { pedidoId: crear.body.pedido.id, tipo: 'SALIDA_VENTA' },
+    });
+    expect(stockPost).toBeGreaterThan(0);
   });
 
   it('snapshot de receptor con cliente con RUC', async () => {
@@ -365,6 +384,74 @@ describe('POST /comprobantes/:id/anular', () => {
       where: { comprobanteId: c.body.comprobante.id },
     });
     expect(movs.length).toBe(0);
+  });
+
+  it('anular en pedido no entregado → cancela pedido + revierte stock', async () => {
+    await reset();
+    const token = await login(CAJERO_CENTRO);
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+
+    // Stock inicial post-confirmación
+    const stockTrasConfirmar = await prisma.movimientoStock.count({
+      where: { pedidoId, tipo: 'SALIDA_VENTA' },
+    });
+    expect(stockTrasConfirmar).toBeGreaterThan(0);
+
+    const c = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+      });
+
+    const res = await request(app)
+      .post(`/comprobantes/${c.body.comprobante.id}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivo: 'Cliente cambió de idea' });
+    expect(res.status).toBe(200);
+
+    // Pedido pasó a CANCELADO
+    const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });
+    expect(pedido?.estado).toBe('CANCELADO');
+    expect(pedido?.canceladoEn).not.toBeNull();
+
+    // Hay un movimiento ENTRADA_AJUSTE de reverso
+    const reverso = await prisma.movimientoStock.count({
+      where: { pedidoId, tipo: 'ENTRADA_AJUSTE' },
+    });
+    expect(reverso).toBeGreaterThan(0);
+  });
+
+  it('anular en pedido ya entregado → solo evento fiscal, no cancela pedido', async () => {
+    await reset();
+    const token = await login(CAJERO_CENTRO);
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+
+    const c = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+      });
+
+    // Marcar entregado al cliente
+    await request(app)
+      .post(`/pedidos/${pedidoId}/entregar`)
+      .set('Authorization', `Bearer ${token}`);
+
+    const res = await request(app)
+      .post(`/comprobantes/${c.body.comprobante.id}/anular`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ motivo: 'Devolución contable' });
+    expect(res.status).toBe(200);
+
+    // El pedido queda como estaba — no se cancela porque ya se sirvió
+    const pedido = await prisma.pedido.findUnique({ where: { id: pedidoId } });
+    expect(pedido?.estado).not.toBe('CANCELADO');
   });
 
   it('anular dos veces → 409', async () => {

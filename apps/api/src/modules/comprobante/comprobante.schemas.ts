@@ -19,6 +19,7 @@ export const emitirComprobanteInput = z
     condicionVenta: z.nativeEnum(CondicionVenta).default(CondicionVenta.CONTADO),
     pagos: z.array(pagoComprobanteInput).min(1).max(5),
     notas: z.string().trim().max(500).optional(),
+    numeroPager: z.number().int().min(1).max(50).optional(),
   })
   .refine(
     () => {

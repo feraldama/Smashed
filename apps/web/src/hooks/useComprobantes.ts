@@ -167,6 +167,7 @@ export interface EmitirComprobanteInput {
   condicionVenta?: 'CONTADO' | 'CREDITO';
   pagos: { metodo: MetodoPago; monto: number; referencia?: string }[];
   notas?: string;
+  numeroPager?: number;
 }
 
 export function useEmitirComprobante() {
