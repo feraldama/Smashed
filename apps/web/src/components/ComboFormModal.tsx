@@ -75,7 +75,10 @@ function comboConfigToDrafts(combo: ComboConfig | null): GrupoDraft[] {
 export function ComboFormModal({ productoId, onClose }: Props) {
   const isEdit = Boolean(productoId);
   const detalle = useProductoDetalle(productoId);
-  const productos = useProductos({ esCombo: false });
+  // Para armar un combo necesitamos poder elegir productos vendibles *y*
+  // sub-preparaciones (ej. "Salsa para combo" — no se vende sola pero forma
+  // parte de las opciones). Por eso pasamos incluirNoVendibles=true.
+  const productos = useProductos({ esCombo: false, incluirNoVendibles: true });
   const { data: categorias = [] } = useCategorias();
 
   const crearProducto = useCrearProducto();

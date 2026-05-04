@@ -1295,7 +1295,19 @@ async function construirItemsPedido(args: {
       esCombo: true,
       esVendible: true,
       activo: true,
-      modificadorGrupos: { select: { modificadorGrupoId: true } },
+      modificadorGrupos: {
+        select: {
+          modificadorGrupo: {
+            select: {
+              id: true,
+              nombre: true,
+              obligatorio: true,
+              minSeleccion: true,
+              maxSeleccion: true,
+            },
+          },
+        },
+      },
       combo: {
         select: {
           grupos: {
@@ -1313,7 +1325,19 @@ async function construirItemsPedido(args: {
                     select: {
                       id: true,
                       sectorComanda: true,
-                      modificadorGrupos: { select: { modificadorGrupoId: true } },
+                      modificadorGrupos: {
+                        select: {
+                          modificadorGrupo: {
+                            select: {
+                              id: true,
+                              nombre: true,
+                              obligatorio: true,
+                              minSeleccion: true,
+                              maxSeleccion: true,
+                            },
+                          },
+                        },
+                      },
                     },
                   },
                 },
@@ -1386,22 +1410,47 @@ async function construirItemsPedido(args: {
     }
 
     let extraMod = 0n;
+    // Map de grupos vinculados al item con sus reglas (obligatorio/min/max).
+    // Clave compuesta `${scope}|${grupoId}` donde scope es 'GLOBAL' o el
+    // comboGrupoId del componente del combo. Sirve para validar luego
+    // mín/máx/obligatorio por grupo.
+    type GrupoInfo = {
+      id: string;
+      nombre: string;
+      obligatorio: boolean;
+      minSeleccion: number;
+      maxSeleccion: number | null;
+    };
+    const gruposAplicables = new Map<string, GrupoInfo>();
+    const keyGrupo = (scope: string | null, grupoId: string) => `${scope ?? 'GLOBAL'}|${grupoId}`;
+
     // Grupos válidos al item GLOBAL (modificadores sin comboGrupoId)
-    const gruposItemGlobal = new Set(prod.modificadorGrupos.map((m) => m.modificadorGrupoId));
+    for (const mg of prod.modificadorGrupos) {
+      gruposAplicables.set(keyGrupo(null, mg.modificadorGrupo.id), mg.modificadorGrupo);
+    }
+    const gruposItemGlobal = new Set(prod.modificadorGrupos.map((m) => m.modificadorGrupo.id));
+
     // Grupos válidos POR componente del combo (comboGrupoId → set de modificadorGrupoIds).
-    // Sólo se arma si el item es un combo y el usuario eligió las opciones.
     const gruposPorComponenteCombo = new Map<string, Set<string>>();
     if (prod.esCombo && prod.combo) {
       for (const eleccion of it.combosOpcion ?? []) {
         const grupo = prod.combo.grupos.find((g) => g.id === eleccion.comboGrupoId);
         const opcion = grupo?.opciones.find((o) => o.id === eleccion.comboGrupoOpcionId);
         if (!opcion) continue;
-        gruposPorComponenteCombo.set(
-          eleccion.comboGrupoId,
-          new Set(opcion.productoVenta.modificadorGrupos.map((mg) => mg.modificadorGrupoId)),
-        );
+        const idsComponente = new Set<string>();
+        for (const mg of opcion.productoVenta.modificadorGrupos) {
+          idsComponente.add(mg.modificadorGrupo.id);
+          gruposAplicables.set(
+            keyGrupo(eleccion.comboGrupoId, mg.modificadorGrupo.id),
+            mg.modificadorGrupo,
+          );
+        }
+        gruposPorComponenteCombo.set(eleccion.comboGrupoId, idsComponente);
       }
     }
+
+    // Conteo de opciones elegidas por (scope, grupoId) para validar min/max
+    const conteoPorGrupo = new Map<string, number>();
 
     for (const mod of it.modificadores ?? []) {
       const opcion = modMap.get(mod.modificadorOpcionId);
@@ -1431,7 +1480,32 @@ async function construirItemsPedido(args: {
           throw Errors.validation({ modificadores: 'Esa opción no aplica a este producto' });
         }
       }
+      const k = keyGrupo(mod.comboGrupoId ?? null, opcion.modificadorGrupoId);
+      conteoPorGrupo.set(k, (conteoPorGrupo.get(k) ?? 0) + 1);
       extraMod += opcion.precioExtra;
+    }
+
+    // Validar mín/máx/obligatorio por cada grupo aplicable al item.
+    // Si un grupo es obligatorio y el cliente no eligió nada, error.
+    // Si tiene minSeleccion>0 y eligió menos, error.
+    // Si tiene maxSeleccion!=null y eligió más, error.
+    for (const [k, grupo] of gruposAplicables) {
+      const elegidos = conteoPorGrupo.get(k) ?? 0;
+      if (grupo.obligatorio && elegidos === 0) {
+        throw Errors.validation({
+          modificadores: `Falta elegir una opción en "${grupo.nombre}"`,
+        });
+      }
+      if (grupo.minSeleccion > 0 && elegidos < grupo.minSeleccion) {
+        throw Errors.validation({
+          modificadores: `"${grupo.nombre}" requiere al menos ${grupo.minSeleccion} opción${grupo.minSeleccion === 1 ? '' : 'es'} (elegidas: ${elegidos})`,
+        });
+      }
+      if (grupo.maxSeleccion != null && elegidos > grupo.maxSeleccion) {
+        throw Errors.validation({
+          modificadores: `"${grupo.nombre}" permite máximo ${grupo.maxSeleccion} opción${grupo.maxSeleccion === 1 ? '' : 'es'} (elegidas: ${elegidos})`,
+        });
+      }
     }
 
     const precioUnit = precioBase + extraCombo;

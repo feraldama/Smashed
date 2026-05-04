@@ -9,7 +9,7 @@ import {
   PackageCheck,
   Plus,
   Search,
-  ShoppingCart,
+  Receipt,
   Store,
   Trash2,
   Truck,
@@ -343,7 +343,7 @@ function POSScreen() {
         <aside className="flex w-full flex-col border-l bg-card lg:w-96">
           <div className="border-b px-4 py-3">
             <h2 className="mb-2 flex items-center gap-2 text-sm font-bold uppercase tracking-wide">
-              <ShoppingCart className="h-4 w-4" /> Carrito
+              <Receipt className="h-4 w-4" /> Pedido
               {totalItems > 0 && (
                 <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] text-primary-foreground">
                   {totalItems}
@@ -434,8 +434,8 @@ function POSScreen() {
           <div className="flex-1 overflow-y-auto">
             {cart.items.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 p-6 text-center text-sm text-muted-foreground">
-                <ShoppingCart className="h-10 w-10 opacity-30" />
-                <p>Carrito vacío</p>
+                <Receipt className="h-10 w-10 opacity-30" />
+                <p>Pedido vacío</p>
                 <p className="text-xs">Tocá un producto para agregarlo</p>
               </div>
             ) : (
@@ -532,8 +532,8 @@ function POSScreen() {
                 type="button"
                 onClick={() => {
                   void confirmar({
-                    titulo: 'Vaciar carrito',
-                    mensaje: '¿Seguro que querés vaciar el carrito?',
+                    titulo: 'Vaciar pedido',
+                    mensaje: '¿Seguro que querés vaciar el pedido?',
                     destructivo: true,
                     textoConfirmar: 'Vaciar',
                   }).then((ok) => {
@@ -542,7 +542,7 @@ function POSScreen() {
                 }}
                 className="flex w-full items-center justify-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
               >
-                <Trash2 className="h-3 w-3" /> Vaciar carrito
+                <Trash2 className="h-3 w-3" /> Vaciar pedido
               </button>
             )}
           </div>

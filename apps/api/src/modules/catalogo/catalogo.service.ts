@@ -59,8 +59,10 @@ export async function listarProductos(args: {
     empresaId,
     deletedAt: null,
     activo: true,
-    esPreparacion: false, // no exponemos sub-preparaciones al POS
-    ...(filtros.incluirNoVendibles ? {} : { esVendible: true }),
+    // Por default ocultamos sub-preparaciones e items no vendibles (POS sólo
+    // ve "lo que se vende"). Cuando el admin pide `incluirNoVendibles`, se
+    // muestran todos para poder editarlos / verlos en /productos.
+    ...(filtros.incluirNoVendibles ? {} : { esVendible: true, esPreparacion: false }),
     ...(filtros.categoriaId ? { categoriaId: filtros.categoriaId } : {}),
     ...(filtros.esCombo !== undefined ? { esCombo: filtros.esCombo } : {}),
     ...(filtros.busqueda ? buildBusquedaWhere(filtros.busqueda) : {}),
@@ -622,17 +624,16 @@ export async function setCombo(empresaId: string, productoVentaId: string, input
   }
   const opcionesProductos = await prisma.productoVenta.findMany({
     where: { id: { in: opcionProductoIds }, empresaId, deletedAt: null },
-    select: { id: true, esCombo: true, esVendible: true },
+    select: { id: true, nombre: true, esCombo: true },
   });
   if (opcionesProductos.length !== opcionProductoIds.length) {
     throw Errors.validation({ opciones: 'Algún producto opción no existe o no es de tu empresa' });
   }
-  const noVendibles = opcionesProductos.filter((p) => !p.esVendible).map((p) => p.id);
-  if (noVendibles.length > 0) {
-    throw Errors.validation({
-      opciones: `Productos no vendibles no pueden ser opciones: ${noVendibles.join(', ')}`,
-    });
-  }
+  // Permitimos productos vendibles (ítems del menú a la carta), sub-preparaciones
+  // (insumos intermedios) y productos exclusivos de combo (no vendibles solos).
+  // El admin decide la categorización; si lo agregó al combo es porque tiene
+  // sentido como componente. Lo único que sigue prohibido son los combos
+  // anidados — eso sí es ambiguo de armar (ver abajo).
   const combosAnidados = opcionesProductos.filter((p) => p.esCombo).map((p) => p.id);
   if (combosAnidados.length > 0) {
     throw Errors.validation({

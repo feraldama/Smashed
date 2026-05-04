@@ -32,8 +32,8 @@ interface ModGrupo {
     nombre: string;
     tipo: 'UNICA' | 'MULTIPLE';
     obligatorio: boolean;
-    minSelecciones?: number;
-    maxSelecciones?: number;
+    minSeleccion: number;
+    maxSeleccion: number | null;
     opciones: { id: string; nombre: string; precioExtra?: string | number }[];
   };
 }
@@ -442,7 +442,7 @@ function ModalShellWithProducto({
                 </span>
               )}
               <span className="text-xs font-normal text-muted-foreground">
-                ({g.tipo === 'UNICA' ? 'Elegí 1' : 'Elegí varios'})
+                ({labelSeleccion(g)})
               </span>
             </h3>
             <div className="grid grid-cols-2 gap-2">
@@ -612,7 +612,7 @@ function ComponenteModificadores({
               </span>
             )}
             <span className="text-[10px] font-normal text-muted-foreground">
-              ({g.tipo === 'UNICA' ? 'Elegí 1' : 'Elegí varios'})
+              ({labelSeleccion(g)})
             </span>
           </h4>
           <div className="grid grid-cols-2 gap-1.5">
@@ -657,6 +657,23 @@ function ComponenteModificadores({
 //  Helpers
 // ───────────────────────────────────────────────────────────────────────────
 
+/**
+ * Texto contextual que indica cuántas opciones tiene que elegir el cajero.
+ * UNICA siempre es "Elegí 1" (es radio button). Para MULTIPLE traducimos
+ * la combinación de minSeleccion/maxSeleccion a un texto natural.
+ */
+function labelSeleccion(g: ModGrupo['modificadorGrupo']): string {
+  if (g.tipo === 'UNICA') return 'Elegí 1';
+  const min = g.minSeleccion ?? 0;
+  const max = g.maxSeleccion;
+  if (min > 0 && max != null) {
+    return min === max ? `Elegí ${min}` : `Elegí entre ${min} y ${max}`;
+  }
+  if (min > 0) return `Elegí mínimo ${min}`;
+  if (max != null) return `Elegí hasta ${max}`;
+  return 'Elegí varios';
+}
+
 function validarGrupo(
   g: ModGrupo['modificadorGrupo'],
   sel: Set<string>,
@@ -666,11 +683,11 @@ function validarGrupo(
   if (g.obligatorio && sel.size === 0) {
     return `${prefix}Elegí al menos una opción en "${g.nombre}"`;
   }
-  if (g.minSelecciones && sel.size < g.minSelecciones) {
-    return `${prefix}"${g.nombre}" requiere mínimo ${g.minSelecciones} opciones`;
+  if (g.minSeleccion && sel.size < g.minSeleccion) {
+    return `${prefix}"${g.nombre}" requiere mínimo ${g.minSeleccion} opción${g.minSeleccion === 1 ? '' : 'es'}`;
   }
-  if (g.maxSelecciones && sel.size > g.maxSelecciones) {
-    return `${prefix}"${g.nombre}" permite máximo ${g.maxSelecciones} opciones`;
+  if (g.maxSeleccion != null && sel.size > g.maxSeleccion) {
+    return `${prefix}"${g.nombre}" permite máximo ${g.maxSeleccion} opción${g.maxSeleccion === 1 ? '' : 'es'}`;
   }
   return null;
 }
