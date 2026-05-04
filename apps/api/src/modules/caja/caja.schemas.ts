@@ -33,6 +33,15 @@ export const cajaIdParam = z.object({ cajaId: z.string().cuid() });
 export const aperturaIdParam = z.object({ aperturaId: z.string().cuid() });
 export const cierreIdParam = z.object({ cierreId: z.string().cuid() });
 
+export const listarCierresQuery = z.object({
+  desde: z.coerce.date().optional(),
+  hasta: z.coerce.date().optional(),
+  cajaId: z.string().cuid().optional(),
+  usuarioId: z.string().cuid().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+});
+
 // ───── CRUD admin ─────
 
 export const crearCajaInput = z.object({
@@ -64,3 +73,4 @@ export type CerrarCajaInput = z.infer<typeof cerrarCajaSchema>;
 export type MovimientoCajaInput = z.infer<typeof movimientoCajaSchema>;
 export type CrearCajaInput = z.infer<typeof crearCajaInput>;
 export type ActualizarCajaInput = z.infer<typeof actualizarCajaInput>;
+export type ListarCierresQuery = z.infer<typeof listarCierresQuery>;

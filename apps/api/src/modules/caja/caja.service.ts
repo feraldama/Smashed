@@ -8,6 +8,7 @@ import type {
   ActualizarCajaInput,
   CerrarCajaInput,
   CrearCajaInput,
+  ListarCierresQuery,
   MovimientoCajaInput,
 } from './caja.schemas.js';
 
@@ -488,6 +489,60 @@ export async function obtenerApertura(user: UserCtx, aperturaId: string) {
     ...apertura,
     totales,
   };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  LISTADO DE CIERRES — histórico para auditoría (admin/gerente).
+//  Filtros: rango de fecha, caja, cajero. Paginación clásica.
+//  Tenant: filtra por empresa del usuario; si tiene sucursal activa, también
+//  por esa sucursal (el admin puede no tenerla y ver todas).
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function listarCierres(user: UserCtx, q: ListarCierresQuery) {
+  if (!user.empresaId) {
+    if (!user.isSuperAdmin) throw Errors.forbidden('Usuario sin empresa');
+    return { cierres: [], total: 0, page: q.page, pageSize: q.pageSize };
+  }
+
+  const where: Prisma.CierreCajaWhereInput = {
+    caja: {
+      sucursal: { empresaId: user.empresaId },
+      ...(user.sucursalActivaId ? { sucursalId: user.sucursalActivaId } : {}),
+    },
+    ...(q.cajaId ? { cajaId: q.cajaId } : {}),
+    ...(q.usuarioId ? { usuarioId: q.usuarioId } : {}),
+    ...(q.desde || q.hasta
+      ? {
+          cerradaEn: {
+            ...(q.desde ? { gte: q.desde } : {}),
+            ...(q.hasta ? { lte: q.hasta } : {}),
+          },
+        }
+      : {}),
+  };
+
+  const [cierres, total] = await Promise.all([
+    prisma.cierreCaja.findMany({
+      where,
+      take: q.pageSize,
+      skip: (q.page - 1) * q.pageSize,
+      orderBy: { cerradaEn: 'desc' },
+      select: {
+        id: true,
+        cerradaEn: true,
+        totalEsperadoEfectivo: true,
+        totalContadoEfectivo: true,
+        diferenciaEfectivo: true,
+        totalVentas: true,
+        caja: { select: { id: true, nombre: true } },
+        usuario: { select: { id: true, nombreCompleto: true } },
+        apertura: { select: { abiertaEn: true, montoInicial: true } },
+      },
+    }),
+    prisma.cierreCaja.count({ where }),
+  ]);
+
+  return { cierres, total, page: q.page, pageSize: q.pageSize };
 }
 
 // ───────────────────────────────────────────────────────────────────────────

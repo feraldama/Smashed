@@ -124,6 +124,8 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
     ],
   },
   { path: '/caja', label: 'Caja', grupo: 'Ventas', defaults: ROLES_OPERATIVOS },
+  { path: '/caja/cierres', label: 'Cierres Z', grupo: 'Ventas', defaults: ROLES_ADMIN },
+  { path: '/pedidos', label: 'Pedidos', grupo: 'Ventas', defaults: ROLES_ADMIN },
   {
     path: '/kds',
     label: 'Cocina (KDS)',

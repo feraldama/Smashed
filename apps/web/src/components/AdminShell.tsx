@@ -5,7 +5,9 @@ import {
   Boxes,
   Building2,
   Armchair,
+  Calculator,
   ChefHat,
+  ClipboardList,
   FileText,
   Layers,
   LayoutDashboard,
@@ -53,8 +55,10 @@ const NAV: NavItem[] = [
   { href: '/transferencias', label: 'Transferencias', icon: Truck, group: 'Inventario' },
   { href: '/pos', label: 'POS — Vender', icon: ScanLine, group: 'Ventas' },
   { href: '/caja', label: 'Caja', icon: Wallet, group: 'Ventas' },
+  { href: '/caja/cierres', label: 'Cierres Z', icon: Calculator, group: 'Ventas' },
   { href: '/kds', label: 'Cocina (KDS)', icon: ChefHat, group: 'Ventas' },
   { href: '/entregas', label: 'Entregas', icon: PackageCheck, group: 'Ventas' },
+  { href: '/pedidos', label: 'Pedidos', icon: ClipboardList, group: 'Ventas' },
   { href: '/clientes', label: 'Clientes', icon: Users, group: 'Ventas' },
   { href: '/comprobantes', label: 'Comprobantes', icon: FileText, group: 'Ventas' },
   { href: '/reportes', label: 'Reportes', icon: BarChart3, group: 'Análisis' },
@@ -74,6 +78,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   // Filtrar NAV por permisos del rol actual y agrupar por sección.
   const itemsPermitidos = NAV.filter((item) => puedeAcceder(user?.menusPermitidos, item.href));
+
+  // El href "activo" es el MÁS LARGO que matchea el pathname actual. Así
+  // estando en `/caja/cierres`, sólo se ilumina "Cierres Z" (no "Caja"
+  // también, que también matchea por prefijo).
+  const activeHref = itemsPermitidos.reduce<string | null>((best, item) => {
+    const matches =
+      item.href === '/'
+        ? pathname === '/'
+        : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+    if (!matches) return best;
+    if (best === null || item.href.length > best.length) return item.href;
+    return best;
+  }, null);
   const grupos = itemsPermitidos.reduce<Record<string, NavItem[]>>((acc, item) => {
     const g = item.group ?? 'General';
     (acc[g] ??= []).push(item);
@@ -119,10 +136,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
               <ul className="space-y-0.5">
                 {items.map((item) => {
                   const Icon = item.icon;
-                  const active =
-                    item.href === '/'
-                      ? pathname === '/'
-                      : pathname === item.href || pathname?.startsWith(`${item.href}/`);
+                  const active = item.href === activeHref;
                   return (
                     <li key={item.href}>
                       <Link

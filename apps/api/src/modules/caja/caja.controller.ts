@@ -10,6 +10,7 @@ import {
   cierreIdParam,
   crearCajaInput,
   listarCajasQuery,
+  listarCierresQuery,
   movimientoCajaSchema,
 } from './caja.schemas.js';
 import * as service from './caja.service.js';
@@ -68,6 +69,13 @@ export async function obtenerCierre(req: Request, res: Response) {
   const { cierreId } = cierreIdParam.parse(req.params);
   const cierre = await service.obtenerCierre(ctx, cierreId);
   res.json({ cierre });
+}
+
+export async function listarCierres(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const q = listarCierresQuery.parse(req.query);
+  const result = await service.listarCierres(ctx, q);
+  res.json(result);
 }
 
 export async function abrirCaja(req: Request, res: Response) {

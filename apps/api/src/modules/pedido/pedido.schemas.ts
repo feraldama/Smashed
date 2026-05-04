@@ -79,6 +79,8 @@ export const listarPedidosQuery = z.object({
   tipo: z.nativeEnum(TipoPedido).optional(),
   desde: z.coerce.date().optional(),
   hasta: z.coerce.date().optional(),
+  busqueda: z.string().trim().min(1).optional(),
+  page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
 

@@ -147,6 +147,47 @@ export function useCierre(id: string | null) {
   });
 }
 
+// Listado para histórico/auditoría (admin)
+export interface CierreListItem {
+  id: string;
+  cerradaEn: string;
+  totalEsperadoEfectivo: string;
+  totalContadoEfectivo: string;
+  diferenciaEfectivo: string;
+  totalVentas: string;
+  caja: { id: string; nombre: string };
+  usuario: { id: string; nombreCompleto: string };
+  apertura: { abiertaEn: string; montoInicial: string };
+}
+
+export interface CierresListadoFiltros {
+  desde?: string;
+  hasta?: string;
+  cajaId?: string;
+  usuarioId?: string;
+  page?: number;
+  pageSize?: number;
+}
+
+export function useCierres(filtros: CierresListadoFiltros = {}) {
+  const params = new URLSearchParams();
+  if (filtros.desde) params.set('desde', filtros.desde);
+  if (filtros.hasta) params.set('hasta', filtros.hasta);
+  if (filtros.cajaId) params.set('cajaId', filtros.cajaId);
+  if (filtros.usuarioId) params.set('usuarioId', filtros.usuarioId);
+  params.set('page', String(filtros.page ?? 1));
+  params.set('pageSize', String(filtros.pageSize ?? 50));
+  const qs = params.toString();
+  return useQuery({
+    queryKey: ['admin', 'cierres', filtros],
+    queryFn: () =>
+      api<{ cierres: CierreListItem[]; total: number; page: number; pageSize: number }>(
+        `/cajas/cierres?${qs}`,
+      ),
+    placeholderData: (prev) => prev,
+  });
+}
+
 // ───── Mutations ─────
 
 export function useAbrirCaja() {

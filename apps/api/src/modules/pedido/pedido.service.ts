@@ -1173,27 +1173,44 @@ export async function listarPedidos(user: UserCtx, q: ListarPedidosQuery) {
           createdAt: { ...(q.desde ? { gte: q.desde } : {}), ...(q.hasta ? { lte: q.hasta } : {}) },
         }
       : {}),
+    ...(q.busqueda
+      ? {
+          OR: [
+            // Número de pedido como string (CAST a texto se haría en raw, pero
+            // como `numero` es int, primero intentamos parsearlo).
+            ...(Number.isFinite(Number(q.busqueda))
+              ? [{ numero: Number.parseInt(q.busqueda, 10) }]
+              : []),
+            { cliente: { razonSocial: { contains: q.busqueda, mode: 'insensitive' as const } } },
+          ],
+        }
+      : {}),
   };
 
-  const pedidos = await prisma.pedido.findMany({
-    where,
-    take: q.pageSize,
-    orderBy: { createdAt: 'desc' },
-    select: {
-      id: true,
-      numero: true,
-      tipo: true,
-      estado: true,
-      total: true,
-      numeroPager: true,
-      createdAt: true,
-      cliente: { select: { id: true, razonSocial: true } },
-      mesa: { select: { id: true, numero: true } },
-      _count: { select: { items: true } },
-    },
-  });
+  const [pedidos, total] = await Promise.all([
+    prisma.pedido.findMany({
+      where,
+      take: q.pageSize,
+      skip: (q.page - 1) * q.pageSize,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        numero: true,
+        tipo: true,
+        estado: true,
+        total: true,
+        numeroPager: true,
+        createdAt: true,
+        cliente: { select: { id: true, razonSocial: true } },
+        mesa: { select: { id: true, numero: true } },
+        tomadoPor: { select: { id: true, nombreCompleto: true } },
+        _count: { select: { items: true } },
+      },
+    }),
+    prisma.pedido.count({ where }),
+  ]);
 
-  return { pedidos };
+  return { pedidos, total, page: q.page, pageSize: q.pageSize };
 }
 
 export async function obtenerPedido(user: UserCtx, pedidoId: string) {

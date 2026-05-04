@@ -14,6 +14,7 @@ const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
 router.get('/cajas', asyncH(ctrl.listarCajas));
 router.get('/cajas/aperturas/activa', asyncH(ctrl.aperturaActiva));
 router.get('/cajas/aperturas/:aperturaId', asyncH(ctrl.obtenerApertura));
+router.get('/cajas/cierres', requireAdmin, asyncH(ctrl.listarCierres));
 router.get('/cajas/cierres/:cierreId', asyncH(ctrl.obtenerCierre));
 
 // CRUD admin (gestión de cajas físicas)
