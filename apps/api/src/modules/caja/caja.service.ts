@@ -491,6 +491,49 @@ export async function obtenerApertura(user: UserCtx, aperturaId: string) {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+//  GET DETALLE DE CIERRE — para impresión de ticket Z post-cierre.
+//  Incluye datos del cajero, caja, sucursal, empresa, apertura asociada,
+//  totales por método, diferencia, conteo por denominación.
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function obtenerCierre(user: UserCtx, cierreId: string) {
+  const cierre = await prisma.cierreCaja.findUnique({
+    where: { id: cierreId },
+    include: {
+      caja: {
+        select: {
+          id: true,
+          nombre: true,
+          sucursalId: true,
+          sucursal: {
+            select: {
+              id: true,
+              nombre: true,
+              direccion: true,
+              empresaId: true,
+              empresa: { select: { id: true, razonSocial: true, ruc: true, dv: true } },
+            },
+          },
+        },
+      },
+      usuario: { select: { id: true, nombreCompleto: true, email: true } },
+      apertura: {
+        select: {
+          id: true,
+          montoInicial: true,
+          abiertaEn: true,
+        },
+      },
+    },
+  });
+  if (!cierre) throw Errors.notFound('Cierre no encontrado');
+  if (!user.isSuperAdmin && cierre.caja.sucursal.empresaId !== user.empresaId) {
+    throw Errors.tenantMismatch();
+  }
+  return cierre;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ───────────────────────────────────────────────────────────────────────────
 

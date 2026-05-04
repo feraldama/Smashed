@@ -8,6 +8,7 @@ import {
   ReceiptText,
   Wallet,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
@@ -21,7 +22,12 @@ import {
   useCajas,
   useMiAperturaActiva,
 } from '@/hooks/useCaja';
+import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+
+/** Roles que pueden ver totales/ventas en tiempo real (modo supervisión).
+ * El cajero NO los ve — sólo cuenta el efectivo y recibe el ticket Z al cerrar. */
+const ROLES_SUPERVISION = new Set(['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN']);
 
 export default function CajaPage() {
   return (
@@ -34,6 +40,10 @@ export default function CajaPage() {
 }
 
 function CajaScreen() {
+  const user = useAuthStore((s) => s.user);
+  const esSupervision = user ? ROLES_SUPERVISION.has(user.rol) : false;
+  const router = useRouter();
+
   const { data: cajas = [], isLoading: cajasLoading } = useCajas();
   const { data: miApertura, isLoading: aperturaLoading } = useMiAperturaActiva();
   const { data: aperturaDetalle } = useApertura(miApertura?.id ?? null);
@@ -80,7 +90,11 @@ function CajaScreen() {
       {!miApertura ? (
         <SinCajaAbierta cajas={cajas} onAbrir={() => setShowAbrir(true)} />
       ) : aperturaDetalle ? (
-        <CajaAbiertaPanel apertura={aperturaDetalle} />
+        esSupervision ? (
+          <CajaAbiertaPanel apertura={aperturaDetalle} />
+        ) : (
+          <CajaAbiertaPanelCajero apertura={aperturaDetalle} />
+        )
       ) : (
         <div className="flex h-32 items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -91,12 +105,68 @@ function CajaScreen() {
       {showAbrir && (
         <AbrirCajaModal
           cajasDisponibles={cajas.filter((c) => c.estado === 'CERRADA')}
+          // El cajero abre caja para empezar a vender — lo llevamos directo al
+          // POS. Admin/gerente quedan en /caja para supervisar.
+          onSuccess={
+            esSupervision
+              ? undefined
+              : () => {
+                  setShowAbrir(false);
+                  router.push('/pos');
+                }
+          }
           onClose={() => setShowAbrir(false)}
         />
       )}
       {showCerrar && aperturaDetalle && (
-        <CerrarCajaModal apertura={aperturaDetalle} onClose={() => setShowCerrar(false)} />
+        <CerrarCajaModal
+          apertura={aperturaDetalle}
+          modoCajero={!esSupervision}
+          onCierreExitoso={(cierreId) => {
+            setShowCerrar(false);
+            // Abrir el ticket Z en otra pestaña para imprimirlo / verlo.
+            window.open(`/caja/cierres/${cierreId}/imprimir`, '_blank');
+          }}
+          onClose={() => setShowCerrar(false)}
+        />
       )}
+    </div>
+  );
+}
+
+/**
+ * Vista para CAJERO: muestra sólo lo mínimo (caja, monto inicial, hora de
+ * apertura). Sin totales de venta ni movimientos — esa info la verá únicamente
+ * en el ticket Z al cerrar.
+ */
+function CajaAbiertaPanelCajero({ apertura }: { apertura: AperturaDetalle }) {
+  return (
+    <div className="rounded-lg border bg-card p-6">
+      <h2 className="mb-4 flex items-center gap-2 text-sm font-bold uppercase tracking-wide">
+        <Wallet className="h-4 w-4" /> Tu turno
+      </h2>
+      <dl className="grid gap-4 sm:grid-cols-3">
+        <div>
+          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Caja</dt>
+          <dd className="text-base font-semibold">{apertura.caja.nombre}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">Abierta el</dt>
+          <dd className="text-sm">{formatFecha(apertura.abiertaEn)}</dd>
+        </div>
+        <div>
+          <dt className="text-[10px] uppercase tracking-wide text-muted-foreground">
+            Monto inicial
+          </dt>
+          <dd className="text-base font-semibold tabular-nums">
+            {formatGs(apertura.montoInicial)}
+          </dd>
+        </div>
+      </dl>
+      <p className="mt-6 rounded-md border border-dashed bg-muted/20 p-4 text-sm text-muted-foreground">
+        Cuando termines el turno, tocá <strong>Cerrar caja Z</strong>. Vas a tener que contar el
+        efectivo en caja y el sistema te va a entregar el ticket Z con el resultado del cierre.
+      </p>
     </div>
   );
 }

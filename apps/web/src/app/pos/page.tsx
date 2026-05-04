@@ -6,6 +6,7 @@ import {
   Loader2,
   MapPin,
   Minus,
+  PackageCheck,
   Plus,
   Search,
   ShoppingCart,
@@ -149,7 +150,22 @@ function POSScreen() {
     toast.success(`+ ${p.nombre}`);
   }
 
-  async function handleConfirmarPedido() {
+  /**
+   * Confirma el pedido y decide qué pasa según tipo + opción:
+   *
+   *  - MOSTRADOR (fast-food): crea PENDIENTE → abre modal cobro. La emisión del
+   *    comprobante confirma + manda a cocina + descuenta stock.
+   *
+   *  - MESA: crea + confirma (cocina ya prepara) → NO abre cobro. Se cobra
+   *    desde /entregas cuando la mesa terminó.
+   *
+   *  - DELIVERY_PROPIO con `cobroInmediato=true` (prepago): igual a MOSTRADOR.
+   *    Útil para clientes que pagan al hacer el pedido (web/app/tarjeta).
+   *
+   *  - DELIVERY_PROPIO con `cobroInmediato=false` (pago contra entrega): igual
+   *    a MESA. Cocina prepara, repartidor sale, cobro al volver desde /entregas.
+   */
+  async function handleConfirmarPedido(opts: { cobroInmediato?: boolean } = {}) {
     if (cart.items.length === 0) return;
     if (tipo === 'MESA' && !mesa) {
       toast.error('Seleccioná una mesa primero');
@@ -183,13 +199,13 @@ function POSScreen() {
         mesaId: tipo === 'MESA' ? mesa?.id : undefined,
       });
 
-      // MESA y DELIVERY confirman ahora (envía a cocina + descuenta stock); el
-      // cobro ocurre después en /entregas (MESA) o cuando vuelve el repartidor
-      // (DELIVERY).
-      // MOSTRADOR (fast-food): NO confirma — abre el cobro directo. La
-      // confirmación se dispara dentro de la emisión del comprobante, así la
-      // cocina sólo ve el pedido cuando ya está pagado.
-      if (tipo === 'MESA' || tipo === 'DELIVERY') {
+      // ¿Hay que confirmar (mandar a cocina) ahora? Sí para MESA y para
+      // DELIVERY con cobro contra entrega. NO para MOSTRADOR ni para DELIVERY
+      // con cobro inmediato — en esos casos la confirmación ocurre dentro de
+      // la emisión del comprobante.
+      const confirmaAhora = tipo === 'MESA' || (tipo === 'DELIVERY_PROPIO' && !opts.cobroInmediato);
+
+      if (confirmaAhora) {
         try {
           await confirmarPedido.mutateAsync(created.pedido.id);
         } catch (err) {
@@ -201,9 +217,12 @@ function POSScreen() {
         }
       }
 
-      // Si es MESA, dejamos la cuenta abierta — no abrimos el modal de cobro,
-      // se cobra desde /entregas cuando todo esté entregado.
-      if (tipo === 'MESA') {
+      // ¿Abrir el modal de cobro acá? Sí para MOSTRADOR y DELIVERY con cobro
+      // inmediato. Para MESA y DELIVERY contra entrega el cobro va a /entregas.
+      const cobrarAhora =
+        tipo === 'MOSTRADOR' || (tipo === 'DELIVERY_PROPIO' && opts.cobroInmediato === true);
+
+      if (!cobrarAhora) {
         toast.success(`Pedido #${created.pedido.numero} enviado a cocina`);
         dispatch({ type: 'CLEAR' });
         setMesa(null);
@@ -211,7 +230,7 @@ function POSScreen() {
         setTipo('MOSTRADOR');
         return;
       }
-      // MOSTRADOR/DELIVERY: cobrar inmediato
+
       setPedidoConfirmado({ id: created.pedido.id, total: Number(created.pedido.total) });
       setShowCobrar(true);
     } catch (err) {
@@ -253,6 +272,14 @@ function POSScreen() {
           <span className="hidden text-xs text-muted-foreground sm:inline">
             {user?.nombreCompleto}
           </span>
+          <Link
+            href="/entregas"
+            className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+            title="Ir a entregas (cobrar pedidos listos, mesa/delivery)"
+          >
+            <PackageCheck className="h-3.5 w-3.5" />
+            Entregas
+          </Link>
           <Link
             href="/caja"
             className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
@@ -342,10 +369,10 @@ function POSScreen() {
                 onClick={() => setTipo('MESA')}
               />
               <ModoBtn
-                active={tipo === 'DELIVERY'}
+                active={tipo === 'DELIVERY_PROPIO'}
                 icon={<Truck className="h-3.5 w-3.5" />}
                 label="Delivery"
-                onClick={() => setTipo('DELIVERY')}
+                onClick={() => setTipo('DELIVERY_PROPIO')}
               />
             </div>
 
@@ -382,7 +409,7 @@ function POSScreen() {
               </>
             )}
 
-            {(tipo === 'DELIVERY' || tipo === 'MOSTRADOR') && (
+            {(tipo === 'DELIVERY_PROPIO' || tipo === 'MOSTRADOR') && (
               <button
                 type="button"
                 onClick={() => setShowClienteSel(true)}
@@ -435,36 +462,71 @@ function POSScreen() {
                 Gs. {total.toLocaleString('es-PY')}
               </span>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                void handleConfirmarPedido();
-              }}
-              disabled={
-                cart.items.length === 0 ||
-                crearPedido.isPending ||
-                agregarItems.isPending ||
-                (tipo === 'MESA' && !mesa)
-              }
-              className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-base font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
-            >
-              {crearPedido.isPending || agregarItems.isPending ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
-              ) : pedidoExistenteId ? (
-                <>
-                  <Plus className="h-5 w-5" /> Agregar a Mesa {mesa?.numero} (#
-                  {pedidoExistenteNumero})
-                </>
-              ) : tipo === 'MESA' ? (
-                <>
-                  <Utensils className="h-5 w-5" /> Enviar a cocina
-                </>
-              ) : (
-                <>
-                  <Wallet className="h-5 w-5" /> Cobrar
-                </>
-              )}
-            </button>
+            {tipo === 'DELIVERY_PROPIO' && !pedidoExistenteId ? (
+              // Delivery: dos botones — el cajero decide si cobra ahora (prepago)
+              // o si cobra el repartidor al entregar (pago contra entrega).
+              <div className="space-y-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleConfirmarPedido({ cobroInmediato: false });
+                  }}
+                  disabled={cart.items.length === 0 || crearPedido.isPending}
+                  className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-base font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+                  title="Pago contra entrega — el repartidor cobra al entregar"
+                >
+                  {crearPedido.isPending ? (
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                  ) : (
+                    <>
+                      <Truck className="h-5 w-5" /> Enviar (cobra repartidor)
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleConfirmarPedido({ cobroInmediato: true });
+                  }}
+                  disabled={cart.items.length === 0 || crearPedido.isPending}
+                  className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-primary bg-card px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5 disabled:opacity-50"
+                  title="Cobrar ahora (prepago) — la emisión del comprobante manda el pedido a cocina"
+                >
+                  <Wallet className="h-4 w-4" /> Cobrar ahora (prepago)
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleConfirmarPedido();
+                }}
+                disabled={
+                  cart.items.length === 0 ||
+                  crearPedido.isPending ||
+                  agregarItems.isPending ||
+                  (tipo === 'MESA' && !mesa)
+                }
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-base font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+              >
+                {crearPedido.isPending || agregarItems.isPending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : pedidoExistenteId ? (
+                  <>
+                    <Plus className="h-5 w-5" /> Agregar a Mesa {mesa?.numero} (#
+                    {pedidoExistenteNumero})
+                  </>
+                ) : tipo === 'MESA' ? (
+                  <>
+                    <Utensils className="h-5 w-5" /> Enviar a cocina
+                  </>
+                ) : (
+                  <>
+                    <Wallet className="h-5 w-5" /> Cobrar
+                  </>
+                )}
+              </button>
+            )}
             {cart.items.length > 0 && (
               <button
                 type="button"

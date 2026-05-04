@@ -109,6 +109,44 @@ export function useApertura(id: string | null) {
   });
 }
 
+export interface CierreDetalle {
+  id: string;
+  cajaId: string;
+  aperturaCajaId: string;
+  usuarioId: string;
+  totalEsperadoEfectivo: string;
+  totalContadoEfectivo: string;
+  diferenciaEfectivo: string;
+  totalVentas: string;
+  totalesPorMetodo: Record<string, string>;
+  conteoEfectivo: Record<string, number> | null;
+  notas: string | null;
+  cerradaEn: string;
+  caja: {
+    id: string;
+    nombre: string;
+    sucursalId: string;
+    sucursal: {
+      id: string;
+      nombre: string;
+      direccion: string | null;
+      empresaId: string;
+      empresa: { id: string; razonSocial: string; ruc: string; dv: string };
+    };
+  };
+  usuario: { id: string; nombreCompleto: string; email: string };
+  apertura: { id: string; montoInicial: string; abiertaEn: string };
+}
+
+export function useCierre(id: string | null) {
+  return useQuery({
+    queryKey: ['admin', 'cierre', id],
+    queryFn: () => api<{ cierre: CierreDetalle }>(`/cajas/cierres/${id ?? ''}`),
+    enabled: Boolean(id),
+    select: (d) => d.cierre,
+  });
+}
+
 // ───── Mutations ─────
 
 export function useAbrirCaja() {

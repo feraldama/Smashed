@@ -7,6 +7,7 @@ import {
   cajaAdminIdParam,
   cajaIdParam,
   cerrarCajaSchema,
+  cierreIdParam,
   crearCajaInput,
   listarCajasQuery,
   movimientoCajaSchema,
@@ -60,6 +61,13 @@ export async function obtenerApertura(req: Request, res: Response) {
   const { aperturaId } = aperturaIdParam.parse(req.params);
   const apertura = await service.obtenerApertura(ctx, aperturaId);
   res.json({ apertura });
+}
+
+export async function obtenerCierre(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { cierreId } = cierreIdParam.parse(req.params);
+  const cierre = await service.obtenerCierre(ctx, cierreId);
+  res.json({ cierre });
 }
 
 export async function abrirCaja(req: Request, res: Response) {

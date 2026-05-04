@@ -35,7 +35,9 @@ import { cn } from '@/lib/utils';
 const TIPO_ICON = {
   MOSTRADOR: Store,
   MESA: Utensils,
-  DELIVERY: Truck,
+  DELIVERY_PROPIO: Truck,
+  DELIVERY_PEDIDOSYA: Truck,
+  RETIRO_LOCAL: Store,
 } as const;
 
 export default function EntregasPage() {
@@ -108,6 +110,14 @@ function EntregasScreen() {
             <strong className="text-foreground">{entregados.length}</strong> por cobrar
           </span>
           <span className="hidden sm:inline">{user?.nombreCompleto}</span>
+          <Link
+            href="/pos"
+            className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
+            title="Volver al POS"
+          >
+            <Store className="h-3.5 w-3.5" />
+            POS
+          </Link>
           <LogoutButton compact />
         </div>
       </header>

@@ -31,6 +31,7 @@ export const movimientoCajaSchema = z.object({
 
 export const cajaIdParam = z.object({ cajaId: z.string().cuid() });
 export const aperturaIdParam = z.object({ aperturaId: z.string().cuid() });
+export const cierreIdParam = z.object({ cierreId: z.string().cuid() });
 
 // ───── CRUD admin ─────
 

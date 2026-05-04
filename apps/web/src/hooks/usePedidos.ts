@@ -2,7 +2,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 
-export type TipoPedido = 'MESA' | 'MOSTRADOR' | 'DELIVERY';
+export type TipoPedido =
+  | 'MOSTRADOR'
+  | 'MESA'
+  | 'DELIVERY_PROPIO'
+  | 'DELIVERY_PEDIDOSYA'
+  | 'RETIRO_LOCAL';
 export type EstadoPedido =
   | 'PENDIENTE'
   | 'CONFIRMADO'

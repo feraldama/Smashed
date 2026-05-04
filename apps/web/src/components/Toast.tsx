@@ -25,13 +25,50 @@ const ToastSwal = Swal.mixin({
   timer: 3500,
   timerProgressBar: true,
   showCloseButton: true,
+  // Toast no debe tocar `<html>` ni marcar `inert`/`aria-hidden` en el resto
+  // de la app — si no, los inputs detrás dejan de recibir clicks/teclas cuando
+  // el toast queda "huérfano" tras una navegación.
+  heightAuto: false,
+  backdrop: false,
   didOpen: (el) => {
     el.addEventListener('mouseenter', Swal.stopTimer);
     el.addEventListener('mouseleave', Swal.resumeTimer);
   },
+  didDestroy: () => limpiarRestosSwal(),
 });
 
+/**
+ * Limpieza preventiva: SweetAlert2 a veces deja `inert` o `aria-hidden`
+ * pegados en hijos del `<body>` cuando un swal queda huérfano por navegación
+ * o re-render. Eso bloquea clicks/teclado en toda la app sin signos visibles.
+ * Este helper se llama en cada toast y modal — inocuo si no hay nada pegado.
+ */
+function limpiarRestosSwal() {
+  if (typeof document === 'undefined') return;
+  // Si NO hay un swal-container en el DOM, sacar cualquier inert/aria-hidden
+  // que pueda haber quedado de un swal que ya cerró.
+  const swalAbierto = document.querySelector('.swal2-container');
+  if (swalAbierto) return;
+  document.querySelectorAll('[inert], [aria-hidden="true"]').forEach((el) => {
+    // Sólo limpiamos los que SweetAlert pone en hijos directos del body.
+    if (el.parentElement === document.body) {
+      el.removeAttribute('inert');
+      el.removeAttribute('aria-hidden');
+    }
+  });
+  // Estilos que swal le pone al <html> con heightAuto: true
+  if (document.documentElement.style.overflow === 'hidden') {
+    document.documentElement.style.removeProperty('overflow');
+  }
+  if (document.documentElement.style.paddingRight) {
+    document.documentElement.style.removeProperty('padding-right');
+  }
+  document.body.classList.remove('swal2-shown', 'swal2-height-auto');
+  document.documentElement.classList.remove('swal2-shown', 'swal2-height-auto');
+}
+
 function fireToast(icon: SweetAlertIcon, message: string) {
+  limpiarRestosSwal();
   void ToastSwal.fire({ icon, title: message });
 }
 
@@ -58,6 +95,7 @@ export interface ConfirmarOptions {
 }
 
 export async function confirmar(opts: ConfirmarOptions): Promise<boolean> {
+  limpiarRestosSwal();
   const result = await Swal.fire({
     title: opts.titulo,
     text: opts.html ? undefined : opts.mensaje,
@@ -70,6 +108,12 @@ export async function confirmar(opts: ConfirmarOptions): Promise<boolean> {
     cancelButtonColor: '#6b7280' /* gray-500 */,
     reverseButtons: true,
     focusCancel: opts.destructivo,
+    // Importante: NO tocar los estilos del <html> (padding-right + overflow:hidden)
+    // que SweetAlert agrega por default para evitar scroll-shift. En ciertos
+    // timings (modal sobre modal, doble click) esos estilos quedan pegados y
+    // bloquean la interacción con inputs detrás.
+    heightAuto: false,
+    didDestroy: () => limpiarRestosSwal(),
   });
   return result.isConfirmed;
 }
@@ -83,6 +127,7 @@ export interface MensajeOptions {
 }
 
 export async function mensaje(opts: MensajeOptions): Promise<void> {
+  limpiarRestosSwal();
   await Swal.fire({
     title: opts.titulo,
     text: opts.html ? undefined : opts.mensaje,
@@ -90,5 +135,7 @@ export async function mensaje(opts: MensajeOptions): Promise<void> {
     icon: opts.icon ?? 'info',
     confirmButtonText: opts.textoOk ?? 'OK',
     confirmButtonColor: '#0891b2',
+    heightAuto: false,
+    didDestroy: () => limpiarRestosSwal(),
   });
 }

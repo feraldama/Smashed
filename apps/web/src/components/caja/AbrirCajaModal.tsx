@@ -10,10 +10,14 @@ import { cn } from '@/lib/utils';
 
 interface Props {
   cajasDisponibles: CajaListItem[];
+  /** Llamado tras un alta exitosa. Si lo manejás vos (ej. para redirigir a otra
+   * página), el modal NO llama a `onClose` — asumimos que la navegación
+   * desmonta el componente. Si no lo pasás, se cierra el modal y listo. */
+  onSuccess?: () => void;
   onClose: () => void;
 }
 
-export function AbrirCajaModal({ cajasDisponibles, onClose }: Props) {
+export function AbrirCajaModal({ cajasDisponibles, onSuccess, onClose }: Props) {
   const [cajaId, setCajaId] = useState<string>(cajasDisponibles[0]?.id ?? '');
   const [montoInicial, setMontoInicial] = useState<string>('100000');
   const [notas, setNotas] = useState('');
@@ -34,7 +38,11 @@ export function AbrirCajaModal({ cajasDisponibles, onClose }: Props) {
     try {
       await abrir.mutateAsync({ cajaId, montoInicial: monto, notas: notas.trim() || undefined });
       toast.success('Caja abierta');
-      onClose();
+      if (onSuccess) {
+        onSuccess();
+      } else {
+        onClose();
+      }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Error al abrir caja');
     }

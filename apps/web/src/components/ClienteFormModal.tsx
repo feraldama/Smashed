@@ -1,16 +1,22 @@
 'use client';
 
+import { calcularDvRuc } from '@smash/shared-utils';
 import { Loader2, Save, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
+import { SwitchField } from '@/components/ui/Switch';
 import { type Cliente, useActualizarCliente, useCrearCliente } from '@/hooks/useClientes';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 interface ClienteFormModalProps {
   cliente?: Cliente;
+  /** Si lo pasás, se llama tras un alta exitosa con el cliente creado.
+   * Útil para flujos como POS → "Elegí un cliente" → "+ Nuevo" donde querés
+   * preseleccionar el cliente recién creado en el selector. */
+  onCreado?: (cliente: Cliente) => void;
   onClose: () => void;
 }
 
@@ -20,20 +26,34 @@ const TIPOS = [
   { value: 'EXTRANJERO', label: 'Extranjero' },
 ] as const;
 
-export function ClienteFormModal({ cliente, onClose }: ClienteFormModalProps) {
+export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModalProps) {
   const crear = useCrearCliente();
   const actualizar = useActualizarCliente();
   const isPending = crear.isPending || actualizar.isPending;
   const isEdit = Boolean(cliente);
 
-  const [tipo, setTipo] = useState<(typeof TIPOS)[number]['value']>(
-    (cliente?.tipoContribuyente as (typeof TIPOS)[number]['value']) ?? 'PERSONA_FISICA',
-  );
+  const tipoInicial =
+    (cliente?.tipoContribuyente as (typeof TIPOS)[number]['value']) ?? 'PERSONA_FISICA';
+  const [tipo, setTipo] = useState<(typeof TIPOS)[number]['value']>(tipoInicial);
   const [razonSocial, setRazonSocial] = useState(cliente?.razonSocial ?? '');
   const [nombreFantasia, setNombreFantasia] = useState(cliente?.nombreFantasia ?? '');
   const [ruc, setRuc] = useState(cliente?.ruc ?? '');
-  const [dv, setDv] = useState(cliente?.dv ?? '');
-  const [documento, setDocumento] = useState(cliente?.documento ?? '');
+  // Para persona física, el "documento" del form es la CI: si en BD no hay
+  // `documento` pero sí `ruc` (porque el RUC PF en Paraguay es la misma CI),
+  // mostramos el RUC como CI para que el cajero pueda editarlo.
+  const [documento, setDocumento] = useState(
+    cliente?.documento ?? (tipoInicial === 'PERSONA_FISICA' ? (cliente?.ruc ?? '') : ''),
+  );
+  // En PF activamos esto si el cliente quiere RUC para que le emitan factura.
+  // En PJ siempre se manda RUC (tiene sentido por definición).
+  const [tieneRuc, setTieneRuc] = useState(Boolean(cliente?.ruc));
+
+  // El DV se calcula automáticamente con el algoritmo módulo 11 (que es
+  // exactamente lo que valida el backend). Antes lo tipeaba el cajero pero
+  // era propenso a errores y no aporta — el DV es determinístico.
+  const numeroParaDv = tipo === 'PERSONA_JURIDICA' ? ruc : documento;
+  const dvCalculado =
+    numeroParaDv && /^\d+$/.test(numeroParaDv) ? String(calcularDvRuc(numeroParaDv)) : '';
   const [email, setEmail] = useState(cliente?.email ?? '');
   const [telefono, setTelefono] = useState(cliente?.telefono ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -43,13 +63,40 @@ export function ClienteFormModal({ cliente, onClose }: ClienteFormModalProps) {
     setError(null);
     if (!razonSocial.trim()) return setError('Razón social requerida');
 
+    // En Paraguay el RUC de persona física es la CI + un DV. Por eso para
+    // PERSONA_FISICA usamos un único campo "Cédula" + DV opcional. Si el
+    // cajero carga DV, se manda como RUC (con CI como documento). Si no, se
+    // manda sólo como documento.
+    let rucFinal: string | undefined;
+    let dvFinal: string | undefined;
+    let docFinal: string | undefined;
+
+    if (tipo === 'PERSONA_FISICA') {
+      const cedula = documento.trim();
+      docFinal = cedula || undefined;
+      if (cedula && tieneRuc && /^\d+$/.test(cedula)) {
+        rucFinal = cedula;
+        dvFinal = String(calcularDvRuc(cedula));
+      }
+    } else if (tipo === 'PERSONA_JURIDICA') {
+      const rucNum = ruc.trim();
+      if (!rucNum || !/^\d+$/.test(rucNum)) {
+        return setError('RUC requerido (sólo números)');
+      }
+      rucFinal = rucNum;
+      dvFinal = String(calcularDvRuc(rucNum));
+    } else {
+      // EXTRANJERO: sólo documento (pasaporte / DNI extranjero)
+      docFinal = documento.trim() || undefined;
+    }
+
     const body = {
       tipoContribuyente: tipo,
       razonSocial: razonSocial.trim(),
       nombreFantasia: nombreFantasia.trim() || undefined,
-      ruc: ruc.trim() || undefined,
-      dv: dv.trim() || undefined,
-      documento: documento.trim() || undefined,
+      ruc: rucFinal,
+      dv: dvFinal,
+      documento: docFinal,
       email: email.trim() || undefined,
       telefono: telefono.trim() || undefined,
     };
@@ -58,11 +105,13 @@ export function ClienteFormModal({ cliente, onClose }: ClienteFormModalProps) {
       if (cliente) {
         await actualizar.mutateAsync({ id: cliente.id, ...body });
         toast.success('Cliente actualizado');
+        onClose();
       } else {
-        await crear.mutateAsync(body);
+        const res = await crear.mutateAsync(body);
         toast.success('Cliente creado');
+        if (onCreado) onCreado(res.cliente);
+        else onClose();
       }
-      onClose();
     } catch (err) {
       const apiErr = err instanceof ApiError ? err : null;
       const msg = apiErr?.message ?? 'Error al guardar';
@@ -147,34 +196,64 @@ export function ClienteFormModal({ cliente, onClose }: ClienteFormModalProps) {
             </Field>
           )}
 
-          <div className="grid gap-3 sm:grid-cols-[1fr_80px]">
-            <Field label="RUC (sin DV)">
-              <Input
-                value={ruc}
-                onChange={(e) => setRuc(e.target.value.replace(/\D/g, ''))}
-                className="font-mono"
-                placeholder="80012345"
-                maxLength={8}
-              />
-            </Field>
-            <Field label="DV">
-              <Input
-                value={dv}
-                onChange={(e) => setDv(e.target.value.replace(/\D/g, '').slice(0, 1))}
-                className="text-center font-mono"
-                placeholder="0"
-                maxLength={1}
-              />
-            </Field>
-          </div>
-
           {tipo === 'PERSONA_FISICA' && (
-            <Field label="Documento (CI)">
+            <>
+              <div className="grid gap-3 sm:grid-cols-[1fr_80px]">
+                <Field label="Cédula de identidad" required>
+                  <Input
+                    value={documento}
+                    onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
+                    className="font-mono"
+                    placeholder="1234567"
+                  />
+                </Field>
+                <Field label="DV" hint="Calculado automático">
+                  <Input
+                    value={tieneRuc ? dvCalculado : ''}
+                    readOnly
+                    className="bg-muted/40 text-center font-mono"
+                    placeholder="—"
+                  />
+                </Field>
+              </div>
+              <SwitchField
+                label="Tiene RUC para factura"
+                description="Activá si el cliente solicita FACTURA. El RUC PF en Paraguay es la CI + DV."
+                checked={tieneRuc}
+                onCheckedChange={setTieneRuc}
+              />
+            </>
+          )}
+
+          {tipo === 'PERSONA_JURIDICA' && (
+            <div className="grid gap-3 sm:grid-cols-[1fr_80px]">
+              <Field label="RUC (sin DV)" required>
+                <Input
+                  value={ruc}
+                  onChange={(e) => setRuc(e.target.value.replace(/\D/g, ''))}
+                  className="font-mono"
+                  placeholder="80012345"
+                  maxLength={8}
+                />
+              </Field>
+              <Field label="DV" hint="Calculado automático">
+                <Input
+                  value={dvCalculado}
+                  readOnly
+                  className="bg-muted/40 text-center font-mono"
+                  placeholder="—"
+                />
+              </Field>
+            </div>
+          )}
+
+          {tipo === 'EXTRANJERO' && (
+            <Field label="Documento (pasaporte / DNI)">
               <Input
                 value={documento}
                 onChange={(e) => setDocumento(e.target.value)}
                 className="font-mono"
-                placeholder="1234567"
+                placeholder="AB123456"
               />
             </Field>
           )}

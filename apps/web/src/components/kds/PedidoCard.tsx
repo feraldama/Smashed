@@ -35,7 +35,9 @@ interface Props {
 const TIPO_ICON = {
   MOSTRADOR: Store,
   MESA: Utensils,
-  DELIVERY: Truck,
+  DELIVERY_PROPIO: Truck,
+  DELIVERY_PEDIDOSYA: Truck,
+  RETIRO_LOCAL: HandPlatter,
 } as const;
 
 /**
@@ -122,12 +124,10 @@ function ordenSector(s: SectorComanda | null): number {
  */
 function armarGruposKdsConListos(tareas: Tarea[]): {
   combos: GrupoKds[];
-  sueltosActivos: Tarea[];
-  sueltosListos: Tarea[];
+  sueltos: Tarea[];
 } {
   const combosByItemId = new Map<string, Tarea[]>();
-  const sueltosActivos: Tarea[] = [];
-  const sueltosListos: Tarea[] = [];
+  const sueltos: Tarea[] = [];
 
   for (const t of tareas) {
     if (t.kind === 'opcion') {
@@ -135,8 +135,7 @@ function armarGruposKdsConListos(tareas: Tarea[]): {
       arr.push(t);
       combosByItemId.set(t.parent.id, arr);
     } else {
-      if (tareaEstado(t) === 'LISTO') sueltosListos.push(t);
-      else sueltosActivos.push(t);
+      sueltos.push(t);
     }
   }
 
@@ -151,10 +150,18 @@ function armarGruposKdsConListos(tareas: Tarea[]): {
     combos.push({ kind: 'combo', parent, tareas: opciones });
   }
 
-  sueltosActivos.sort((a, b) => ordenSector(tareaSector(a)) - ordenSector(tareaSector(b)));
-  sueltosListos.sort((a, b) => ordenSector(tareaSector(a)) - ordenSector(tareaSector(b)));
+  // Sueltos: pendientes/preparando primero, listos al final. Dentro de cada
+  // bloque, ordenamos por sector (cocina → bar). Los listos se quedan en la
+  // misma lista (con su tachado + botón Deshacer), no van a una sección aparte,
+  // así si el cajero/cocinero marcó listo por error puede revertir.
+  sueltos.sort((a, b) => {
+    const aListo = tareaEstado(a) === 'LISTO' ? 1 : 0;
+    const bListo = tareaEstado(b) === 'LISTO' ? 1 : 0;
+    if (aListo !== bListo) return aListo - bListo;
+    return ordenSector(tareaSector(a)) - ordenSector(tareaSector(b));
+  });
 
-  return { combos, sueltosActivos, sueltosListos };
+  return { combos, sueltos };
 }
 
 export function PedidoCard({ pedido, sector }: Props) {
@@ -306,12 +313,14 @@ export function PedidoCard({ pedido, sector }: Props) {
         />
       </header>
 
-      {/* Tareas — sub-fichas de combos (con TODAS sus opciones, listas o activas)
-          + items sueltos. Los sueltos listos van compactos abajo. */}
+      {/* Tareas — sub-fichas de combos + items sueltos. Las opciones del combo
+          listas se quedan en la sub-ficha (con check + Deshacer); los items
+          sueltos listos quedan en la lista de sueltos abajo (con tachado +
+          Deshacer), así también se pueden revertir si se marcaron por error. */}
       <div className="flex-1">
         <div className="divide-y">
           {(() => {
-            const { combos, sueltosActivos, sueltosListos } = armarGruposKdsConListos(tareas);
+            const { combos, sueltos } = armarGruposKdsConListos(tareas);
             return (
               <>
                 {combos.map((g, i) =>
@@ -327,9 +336,9 @@ export function PedidoCard({ pedido, sector }: Props) {
                     />
                   ) : null,
                 )}
-                {sueltosActivos.length > 0 && (
+                {sueltos.length > 0 && (
                   <ul className="divide-y">
-                    {sueltosActivos.map((t) => (
+                    {sueltos.map((t) => (
                       <TareaRowKds
                         key={tareaKey(t)}
                         tarea={t}
@@ -339,20 +348,6 @@ export function PedidoCard({ pedido, sector }: Props) {
                       />
                     ))}
                   </ul>
-                )}
-                {sueltosListos.length > 0 && (
-                  <div className="bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/20">
-                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                      Listos sueltos: {sueltosListos.length}
-                    </p>
-                    <ul className="text-xs text-muted-foreground">
-                      {sueltosListos.map((t) => (
-                        <li key={tareaKey(t)} className="truncate">
-                          ✓ {tareaResumen(t)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
                 )}
                 {tareas.length === 0 && (
                   <p className="px-3 py-3 text-center text-xs text-muted-foreground">
@@ -725,19 +720,18 @@ function TareaRowKds({
   );
 }
 
-function tareaResumen(t: Tarea): string {
-  if (t.kind === 'item') return `${t.item.cantidad}× ${t.item.productoVenta.nombre}`;
-  return `${t.parent.productoVenta.nombre} · ${t.opcion.comboGrupoOpcion.productoVenta.nombre}`;
-}
-
 function labelTipo(t: string): string {
   switch (t) {
     case 'MESA':
       return 'Mesa';
     case 'MOSTRADOR':
       return 'Mostrador';
-    case 'DELIVERY':
+    case 'DELIVERY_PROPIO':
       return 'Delivery';
+    case 'DELIVERY_PEDIDOSYA':
+      return 'PedidosYa';
+    case 'RETIRO_LOCAL':
+      return 'Retiro';
     default:
       return t;
   }
