@@ -24,7 +24,7 @@ export interface KdsItemCombo {
   id: string;
   estado: EstadoItem;
   sectorComanda: SectorComanda | null;
-  comboGrupo: { id: string; nombre: string };
+  comboGrupo: { id: string; nombre: string; orden: number };
   comboGrupoOpcion: {
     productoVenta: { nombre: string; sectorComanda: SectorComanda | null };
   };

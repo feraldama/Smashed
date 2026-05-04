@@ -84,6 +84,79 @@ function expandirTareas(pedido: KdsPedido, sector: SectorComanda | null): Tarea[
   return out;
 }
 
+/**
+ * Estructura de la vista Mostrador: cada combo es una sub-ficha que agrupa sus
+ * componentes (hamburguesa → acompañamiento → bebida según `comboGrupo.orden`),
+ * y al final se listan los productos sueltos ordenados por sector.
+ */
+type GrupoKds =
+  | { kind: 'combo'; parent: KdsItem; tareas: Tarea[] }
+  | { kind: 'sueltos'; tareas: Tarea[] };
+
+// Orden de los sectores para los items sueltos: cocina (hamburguesas/postres)
+// arriba, bar al final. Coincide con la secuencia natural de armado de un pedido.
+const ORDEN_SECTOR: Record<SectorComanda, number> = {
+  COCINA_CALIENTE: 1,
+  PARRILLA: 2,
+  COCINA_FRIA: 3,
+  POSTRES: 4,
+  CAFETERIA: 5,
+  BAR: 6,
+};
+
+function ordenSector(s: SectorComanda | null): number {
+  return s ? ORDEN_SECTOR[s] : 99;
+}
+
+/**
+ * Agrupa las tareas del pedido para la vista del KDS (Mostrador y estación):
+ *  1) Sub-fichas de combos primero, con TODAS sus opciones (activas + listas)
+ *     ordenadas por `comboGrupo.orden` (hamburguesa → acompañamiento → bebida).
+ *     Las opciones listas se quedan en la sub-ficha con check + botón Deshacer.
+ *  2) Items sueltos activos (no listos), ordenados por sector.
+ *  3) Items sueltos listos en una sección compacta abajo.
+ *
+ * En vista de estación, las tareas ya vienen filtradas por sector — se siguen
+ * agrupando los combos para que la cocina vea "1× COMBO SMASH · Smash Clásica"
+ * con su contexto, en vez de una línea suelta.
+ */
+function armarGruposKdsConListos(tareas: Tarea[]): {
+  combos: GrupoKds[];
+  sueltosActivos: Tarea[];
+  sueltosListos: Tarea[];
+} {
+  const combosByItemId = new Map<string, Tarea[]>();
+  const sueltosActivos: Tarea[] = [];
+  const sueltosListos: Tarea[] = [];
+
+  for (const t of tareas) {
+    if (t.kind === 'opcion') {
+      const arr = combosByItemId.get(t.parent.id) ?? [];
+      arr.push(t);
+      combosByItemId.set(t.parent.id, arr);
+    } else {
+      if (tareaEstado(t) === 'LISTO') sueltosListos.push(t);
+      else sueltosActivos.push(t);
+    }
+  }
+
+  const combos: GrupoKds[] = [];
+  for (const [, opciones] of combosByItemId) {
+    opciones.sort((a, b) => {
+      if (a.kind !== 'opcion' || b.kind !== 'opcion') return 0;
+      return a.opcion.comboGrupo.orden - b.opcion.comboGrupo.orden;
+    });
+    const parent = opciones[0]?.kind === 'opcion' ? opciones[0].parent : null;
+    if (!parent) continue;
+    combos.push({ kind: 'combo', parent, tareas: opciones });
+  }
+
+  sueltosActivos.sort((a, b) => ordenSector(tareaSector(a)) - ordenSector(tareaSector(b)));
+  sueltosListos.sort((a, b) => ordenSector(tareaSector(a)) - ordenSector(tareaSector(b)));
+
+  return { combos, sueltosActivos, sueltosListos };
+}
+
 export function PedidoCard({ pedido, sector }: Props) {
   const transicionItem = useTransicionarItem();
   const transicionOpcion = useTransicionarComboOpcion();
@@ -99,7 +172,6 @@ export function PedidoCard({ pedido, sector }: Props) {
 
   const tareas = expandirTareas(pedido, sector);
   const activas = tareas.filter((t) => tareaEstado(t) !== 'LISTO');
-  const listas = tareas.filter((t) => tareaEstado(t) === 'LISTO');
 
   async function marcarTarea(t: Tarea, estado: 'EN_PREPARACION' | 'LISTO') {
     try {
@@ -117,6 +189,11 @@ export function PedidoCard({ pedido, sector }: Props) {
     }
   }
 
+  // Wrapper sync para pasar como prop sin que ESLint se queje del Promise.
+  const onMarcar = (t: Tarea, estado: 'EN_PREPARACION' | 'LISTO') => {
+    void marcarTarea(t, estado);
+  };
+
   async function handleMarcarTodoListo() {
     if (activas.length === 0) return;
     try {
@@ -129,6 +206,47 @@ export function PedidoCard({ pedido, sector }: Props) {
         sector
           ? `Listo lo de ${labelSector(sector)} en pedido #${pedido.numero}`
           : `Pedido #${pedido.numero} listo`,
+      );
+    } catch {
+      // marcarTarea ya muestra toast en error
+    }
+  }
+
+  // Tareas pendientes (ni en preparación, ni listas) — son las únicas que
+  // tiene sentido mover masivamente a EN_PREPARACION.
+  const pendientes = activas.filter((t) => tareaEstado(t) === 'PENDIENTE');
+
+  // Tareas que el cajero (Mostrador) puede marcar listo: BAR y POSTRES son
+  // "tomar y entregar". El resto (cocina, parrilla, etc.) lo marca la estación.
+  const activasMostrador = activas.filter((t) => {
+    const s = tareaSector(t);
+    return s === 'BAR' || s === 'POSTRES';
+  });
+
+  async function handleMarcarTodoPreparando() {
+    if (pendientes.length === 0) return;
+    try {
+      for (const t of pendientes) {
+        await marcarTarea(t, 'EN_PREPARACION');
+      }
+      toast.success(
+        sector
+          ? `${pendientes.length} en preparación en ${labelSector(sector)}`
+          : `Pedido #${pedido.numero} en preparación`,
+      );
+    } catch {
+      // marcarTarea ya muestra toast en error
+    }
+  }
+
+  async function handleMarcarMostradorListo() {
+    if (activasMostrador.length === 0) return;
+    try {
+      for (const t of activasMostrador) {
+        await marcarTarea(t, 'LISTO');
+      }
+      toast.success(
+        `${activasMostrador.length} bebidas/postres listas en pedido #${pedido.numero}`,
       );
     } catch {
       // marcarTarea ya muestra toast en error
@@ -188,54 +306,63 @@ export function PedidoCard({ pedido, sector }: Props) {
         />
       </header>
 
-      {/* Tareas activas */}
+      {/* Tareas — sub-fichas de combos (con TODAS sus opciones, listas o activas)
+          + items sueltos. Los sueltos listos van compactos abajo. */}
       <div className="flex-1">
-        <ul className="divide-y">
-          {activas.map((t) => {
-            // En Mostrador, las bebidas (BAR) y los postres pre-armados son
-            // "tomar y entregar" — el cajero las marca listo directamente sin
-            // pasar por la estación. Para todo lo demás en Mostrador, sólo se
-            // ve el estado (cocina/bar marcan desde su tab).
-            const tSector = tareaSector(t);
-            const mostradorPuedeMarcar =
-              isMostrador && (tSector === 'BAR' || tSector === 'POSTRES');
-            const tareaReadOnly = isMostrador && !mostradorPuedeMarcar;
+        <div className="divide-y">
+          {(() => {
+            const { combos, sueltosActivos, sueltosListos } = armarGruposKdsConListos(tareas);
             return (
-              <TareaRow
-                key={tareaKey(t)}
-                tarea={t}
-                loading={loading}
-                readOnly={tareaReadOnly}
-                soloListo={mostradorPuedeMarcar}
-                onMarcarPreparando={() => {
-                  void marcarTarea(t, 'EN_PREPARACION');
-                }}
-                onMarcarListo={() => {
-                  void marcarTarea(t, 'LISTO');
-                }}
-              />
+              <>
+                {combos.map((g, i) =>
+                  g.kind === 'combo' ? (
+                    <ComboSubficha
+                      key={`c:${g.parent.id}`}
+                      parent={g.parent}
+                      tareas={g.tareas}
+                      loading={loading}
+                      isMostrador={isMostrador}
+                      alt={i % 2 === 1}
+                      onMarcar={onMarcar}
+                    />
+                  ) : null,
+                )}
+                {sueltosActivos.length > 0 && (
+                  <ul className="divide-y">
+                    {sueltosActivos.map((t) => (
+                      <TareaRowKds
+                        key={tareaKey(t)}
+                        tarea={t}
+                        loading={loading}
+                        isMostrador={isMostrador}
+                        onMarcar={onMarcar}
+                      />
+                    ))}
+                  </ul>
+                )}
+                {sueltosListos.length > 0 && (
+                  <div className="bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/20">
+                    <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                      Listos sueltos: {sueltosListos.length}
+                    </p>
+                    <ul className="text-xs text-muted-foreground">
+                      {sueltosListos.map((t) => (
+                        <li key={tareaKey(t)} className="truncate">
+                          ✓ {tareaResumen(t)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {tareas.length === 0 && (
+                  <p className="px-3 py-3 text-center text-xs text-muted-foreground">
+                    Nada para este sector
+                  </p>
+                )}
+              </>
             );
-          })}
-          {listas.length > 0 && (
-            <li className="bg-emerald-50 px-3 py-1.5 dark:bg-emerald-950/20">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
-                Listos: {listas.length}
-              </p>
-              <ul className="mt-0.5 text-xs text-muted-foreground">
-                {listas.map((t) => (
-                  <li key={tareaKey(t)} className="truncate">
-                    ✓ {tareaResumen(t)}
-                  </li>
-                ))}
-              </ul>
-            </li>
-          )}
-          {tareas.length === 0 && (
-            <li className="px-3 py-3 text-center text-xs text-muted-foreground">
-              Nada para este sector
-            </li>
-          )}
-        </ul>
+          })()}
+        </div>
       </div>
 
       {/* Observaciones del pedido */}
@@ -264,6 +391,29 @@ export function PedidoCard({ pedido, sector }: Props) {
               )}
               Entregar al cliente
             </button>
+          ) : activasMostrador.length > 0 ? (
+            <div className="flex flex-col gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  void handleMarcarMostradorListo();
+                }}
+                disabled={loading}
+                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4" />
+                )}
+                Listo bebidas/postres ({activasMostrador.length})
+              </button>
+              {activas.length > activasMostrador.length && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  Falta cocina: {activas.length - activasMostrador.length}
+                </p>
+              )}
+            </div>
           ) : (
             <div className="flex w-full items-center justify-center gap-1.5 rounded-md bg-muted px-3 py-2 text-sm font-bold text-muted-foreground">
               <CheckCircle2 className="h-4 w-4" />
@@ -271,23 +421,42 @@ export function PedidoCard({ pedido, sector }: Props) {
             </div>
           )
         ) : (
-          <button
-            type="button"
-            onClick={() => {
-              void handleMarcarTodoListo();
-            }}
-            disabled={activas.length === 0 || loading}
-            className="flex w-full items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
-          >
-            {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="h-4 w-4" />
+          <div className="flex gap-2">
+            {pendientes.length > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleMarcarTodoPreparando();
+                }}
+                disabled={loading}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-50 dark:bg-amber-950/30 dark:text-amber-200"
+              >
+                {loading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ChefHat className="h-4 w-4" />
+                )}
+                Todo preparando ({pendientes.length})
+              </button>
             )}
-            {activas.length === 0
-              ? `Listo en ${labelSector(sector)}`
-              : `Marcar todo listo (${activas.length})`}
-          </button>
+            <button
+              type="button"
+              onClick={() => {
+                void handleMarcarTodoListo();
+              }}
+              disabled={activas.length === 0 || loading}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-3 py-2 text-sm font-bold text-white shadow hover:bg-emerald-700 disabled:opacity-50"
+            >
+              {loading ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="h-4 w-4" />
+              )}
+              {activas.length === 0
+                ? `Listo en ${labelSector(sector)}`
+                : `Todo listo (${activas.length})`}
+            </button>
+          </div>
         )}
       </footer>
     </article>
@@ -299,6 +468,7 @@ function TareaRow({
   loading,
   readOnly,
   soloListo = false,
+  enComboSubficha = false,
   onMarcarPreparando,
   onMarcarListo,
 }: {
@@ -307,15 +477,25 @@ function TareaRow({
   readOnly: boolean;
   /** Si true, oculta el botón "Preparando" (uso típico: bebidas en Mostrador). */
   soloListo?: boolean;
+  /** Si true, omite el prefijo "1× Combo Smash · " porque ya está en el header
+   * de la sub-ficha del combo. */
+  enComboSubficha?: boolean;
   onMarcarPreparando: () => void;
   onMarcarListo: () => void;
 }) {
   const estado = tareaEstado(tarea);
   const enPrep = estado === 'EN_PREPARACION';
+  const isListo = estado === 'LISTO';
   const sector = tareaSector(tarea);
 
   return (
-    <li className={cn('px-3 py-2', enPrep && 'bg-amber-50 dark:bg-amber-950/20')}>
+    <li
+      className={cn(
+        'px-3 py-2',
+        enPrep && 'bg-amber-50 dark:bg-amber-950/20',
+        isListo && 'bg-emerald-50/60 dark:bg-emerald-950/20',
+      )}
+    >
       <div className="flex items-start gap-2">
         {tarea.kind === 'item' ? (
           <span className="shrink-0 rounded-md bg-primary/10 px-1.5 text-base font-bold tabular-nums text-primary">
@@ -328,14 +508,31 @@ function TareaRow({
         )}
         <div className="flex-1">
           {tarea.kind === 'item' ? (
-            <p className="font-semibold">{tarea.item.productoVenta.nombre}</p>
+            <p
+              className={cn(
+                'font-semibold',
+                isListo &&
+                  'text-emerald-800 line-through decoration-emerald-500/40 dark:text-emerald-300',
+              )}
+            >
+              {tarea.item.productoVenta.nombre}
+            </p>
           ) : (
             <>
               <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                {tarea.parent.cantidad}× {tarea.parent.productoVenta.nombre} ·{' '}
-                {tarea.opcion.comboGrupo.nombre}
+                {enComboSubficha
+                  ? tarea.opcion.comboGrupo.nombre
+                  : `${tarea.parent.cantidad}× ${tarea.parent.productoVenta.nombre} · ${tarea.opcion.comboGrupo.nombre}`}
               </p>
-              <p className="font-semibold">{tarea.opcion.comboGrupoOpcion.productoVenta.nombre}</p>
+              <p
+                className={cn(
+                  'font-semibold',
+                  isListo &&
+                    'text-emerald-800 line-through decoration-emerald-500/40 dark:text-emerald-300',
+                )}
+              >
+                {tarea.opcion.comboGrupoOpcion.productoVenta.nombre}
+              </p>
             </>
           )}
 
@@ -372,7 +569,7 @@ function TareaRow({
             </span>
           )}
 
-          {!readOnly && (
+          {!readOnly && !isListo && (
             <div className="mt-1.5 flex gap-1.5">
               {!enPrep && !soloListo && (
                 <button
@@ -394,9 +591,27 @@ function TareaRow({
               </button>
             </div>
           )}
+          {/* Estado LISTO con opción de deshacer (revertir a EN_PREPARACION).
+              Útil cuando se marca por accidente. */}
+          {!readOnly && isListo && (
+            <div className="mt-1.5 flex items-center gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                ✓ Listo
+              </span>
+              <button
+                type="button"
+                onClick={onMarcarPreparando}
+                disabled={loading}
+                className="rounded border border-input bg-background px-2 py-0.5 text-[11px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50"
+                title="Volver a EN_PREPARACION"
+              >
+                ↶ Deshacer
+              </button>
+            </div>
+          )}
           {readOnly && (
             <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-wide">
-              {estado === 'LISTO' ? (
+              {isListo ? (
                 <span className="text-emerald-700 dark:text-emerald-400">✓ Listo</span>
               ) : enPrep ? (
                 <span className="text-amber-700 dark:text-amber-400">En preparación</span>
@@ -408,6 +623,105 @@ function TareaRow({
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Sub-ficha visual para un combo en el KDS (Mostrador o estación).
+ * Muestra el header con el nombre del combo y debajo sus opciones, ordenadas
+ * según `comboGrupo.orden` (hamburguesa → acompañamiento → bebida).
+ */
+function ComboSubficha({
+  parent,
+  tareas,
+  loading,
+  isMostrador,
+  alt,
+  onMarcar,
+}: {
+  parent: KdsItem;
+  tareas: Tarea[];
+  loading: boolean;
+  isMostrador: boolean;
+  /** Si true, usa la paleta alternativa (violeta) para zebra-striping entre combos. */
+  alt?: boolean;
+  onMarcar: (t: Tarea, estado: 'EN_PREPARACION' | 'LISTO') => void;
+}) {
+  // Dos paletas claras intercaladas para que combos contiguos se distingan
+  // de un vistazo. Ambas son "frías" (azul/violeta) — no chocan con los
+  // estados amber (preparando) ni emerald (listo).
+  const palette = alt
+    ? {
+        wrapper:
+          'border-violet-300 bg-violet-50/30 dark:border-violet-900/50 dark:bg-violet-950/10',
+        badge: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200',
+      }
+    : {
+        wrapper: 'border-blue-300 bg-blue-50/30 dark:border-blue-900/50 dark:bg-blue-950/10',
+        badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200',
+      };
+  return (
+    <div className={cn('border-l-4', palette.wrapper)}>
+      <div className="flex items-center gap-2 px-3 py-1.5">
+        <span
+          className={cn(
+            'rounded-md px-1.5 text-[11px] font-bold uppercase tracking-wide',
+            palette.badge,
+          )}
+        >
+          combo
+        </span>
+        <p className="text-sm font-bold">
+          {parent.cantidad}× {parent.productoVenta.nombre}
+        </p>
+      </div>
+      <ul className="divide-y">
+        {tareas.map((t) => (
+          <TareaRowKds
+            key={tareaKey(t)}
+            tarea={t}
+            loading={loading}
+            isMostrador={isMostrador}
+            onMarcar={onMarcar}
+            enComboSubficha
+          />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Render de una tarea aplicando la política según el contexto:
+ *  - Mostrador: BAR/POSTRES son marcables; el resto es read-only (lo marca la estación).
+ *  - Estación: todas las tareas se pueden marcar (Preparando / Listo).
+ */
+function TareaRowKds({
+  tarea,
+  loading,
+  isMostrador,
+  onMarcar,
+  enComboSubficha = false,
+}: {
+  tarea: Tarea;
+  loading: boolean;
+  isMostrador: boolean;
+  onMarcar: (t: Tarea, estado: 'EN_PREPARACION' | 'LISTO') => void;
+  enComboSubficha?: boolean;
+}) {
+  const tSector = tareaSector(tarea);
+  const mostradorPuedeMarcar = isMostrador && (tSector === 'BAR' || tSector === 'POSTRES');
+  const readOnly = isMostrador && !mostradorPuedeMarcar;
+  return (
+    <TareaRow
+      tarea={tarea}
+      loading={loading}
+      readOnly={readOnly}
+      soloListo={mostradorPuedeMarcar}
+      enComboSubficha={enComboSubficha}
+      onMarcarPreparando={() => onMarcar(tarea, 'EN_PREPARACION')}
+      onMarcarListo={() => onMarcar(tarea, 'LISTO')}
+    />
   );
 }
 

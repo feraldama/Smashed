@@ -584,6 +584,15 @@ export async function cambiarEstadoItem(
       if (item.pedido.estado === EstadoPedido.CANCELADO) {
         throw Errors.conflict('Pedido cancelado');
       }
+      // Bloquear deshacer si el pedido ya pasó la fase de cocina (entregado/facturado/etc.).
+      if (
+        nuevoEstado === 'EN_PREPARACION' &&
+        item.pedido.estado !== EstadoPedido.CONFIRMADO &&
+        item.pedido.estado !== EstadoPedido.EN_PREPARACION &&
+        item.pedido.estado !== EstadoPedido.LISTO
+      ) {
+        throw Errors.conflict('No se puede deshacer: el pedido ya salió de cocina');
+      }
       if (item.combosOpcion.length > 0) {
         // Items combo se transicionan a través de sus opciones para que cada sector
         // (cocina, bar, parrilla) marque sólo lo suyo.
@@ -595,7 +604,11 @@ export async function cambiarEstadoItem(
       const ahora = new Date();
       const itemUpdateData: Prisma.ItemPedidoUpdateInput = { estado: nuevoEstado };
       if (nuevoEstado === 'LISTO') itemUpdateData.listoEn = ahora;
-      if (nuevoEstado === 'EN_PREPARACION') itemUpdateData.enPreparacionEn = ahora;
+      if (nuevoEstado === 'EN_PREPARACION') {
+        itemUpdateData.enPreparacionEn = ahora;
+        // Limpiar el timestamp de listo cuando se deshace.
+        itemUpdateData.listoEn = null;
+      }
       await tx.itemPedido.update({ where: { id: itemId }, data: itemUpdateData });
 
       const pedidoEstadoNuevo = await recalcularEstadoPedido(
@@ -666,11 +679,22 @@ export async function cambiarEstadoComboOpcion(
       if (opcion.itemPedido.pedido.estado === EstadoPedido.CANCELADO) {
         throw Errors.conflict('Pedido cancelado');
       }
+      if (
+        nuevoEstado === 'EN_PREPARACION' &&
+        opcion.itemPedido.pedido.estado !== EstadoPedido.CONFIRMADO &&
+        opcion.itemPedido.pedido.estado !== EstadoPedido.EN_PREPARACION &&
+        opcion.itemPedido.pedido.estado !== EstadoPedido.LISTO
+      ) {
+        throw Errors.conflict('No se puede deshacer: el pedido ya salió de cocina');
+      }
 
       const ahora = new Date();
       const opcionUpdate: Prisma.ItemPedidoComboOpcionUpdateInput = { estado: nuevoEstado };
       if (nuevoEstado === 'LISTO') opcionUpdate.listoEn = ahora;
-      if (nuevoEstado === 'EN_PREPARACION') opcionUpdate.enPreparacionEn = ahora;
+      if (nuevoEstado === 'EN_PREPARACION') {
+        opcionUpdate.enPreparacionEn = ahora;
+        opcionUpdate.listoEn = null;
+      }
       await tx.itemPedidoComboOpcion.update({
         where: { id: comboOpcionId },
         data: opcionUpdate,
@@ -744,6 +768,15 @@ async function recalcularEstadoItemDesdeOpciones(
     });
     return EstadoPedido.LISTO;
   }
+  // Downgrade: si el item estaba LISTO pero alguna opción ya no lo está
+  // (deshacer), bajamos el item a EN_PREPARACION para que vuelva al KDS.
+  if (!todasListas && estadoActual === EstadoPedido.LISTO) {
+    await tx.itemPedido.update({
+      where: { id: itemId },
+      data: { estado: EstadoPedido.EN_PREPARACION, listoEn: null },
+    });
+    return EstadoPedido.EN_PREPARACION;
+  }
   if (
     algunaEnMarcha &&
     (estadoActual === EstadoPedido.PENDIENTE || estadoActual === EstadoPedido.CONFIRMADO)
@@ -770,8 +803,13 @@ async function recalcularEstadoPedido(
   estadoActual: EstadoPedido,
   ahora: Date,
 ): Promise<EstadoPedido | null> {
+  // Permitimos recalcular también desde LISTO para soportar el "deshacer":
+  // si todos los items siguen listos no cambia nada; si alguno volvió a EN_PREPARACION
+  // bajamos el pedido a EN_PREPARACION.
   const enCocina =
-    estadoActual === EstadoPedido.CONFIRMADO || estadoActual === EstadoPedido.EN_PREPARACION;
+    estadoActual === EstadoPedido.CONFIRMADO ||
+    estadoActual === EstadoPedido.EN_PREPARACION ||
+    estadoActual === EstadoPedido.LISTO;
   if (!enCocina) return null;
 
   const items = await tx.itemPedido.findMany({
@@ -783,12 +821,21 @@ async function recalcularEstadoPedido(
   const todosListos = items.every(
     (i) => i.estado === EstadoPedido.LISTO || i.estado === EstadoPedido.CANCELADO,
   );
-  if (todosListos) {
+  if (todosListos && estadoActual !== EstadoPedido.LISTO) {
     await tx.pedido.update({
       where: { id: pedidoId },
       data: { estado: EstadoPedido.LISTO, listoEn: ahora },
     });
     return EstadoPedido.LISTO;
+  }
+  // Downgrade: si el pedido estaba LISTO y ahora algún item ya no lo está
+  // (porque se deshizo), bajamos a EN_PREPARACION.
+  if (!todosListos && estadoActual === EstadoPedido.LISTO) {
+    await tx.pedido.update({
+      where: { id: pedidoId },
+      data: { estado: EstadoPedido.EN_PREPARACION, listoEn: null },
+    });
+    return EstadoPedido.EN_PREPARACION;
   }
   if (estadoActual === EstadoPedido.CONFIRMADO) {
     const algunoEnMarcha = items.some(
@@ -968,7 +1015,9 @@ const kdsInclude = {
         include: {
           // id es necesario para emparejar modificadores que apuntan a este
           // ComboGrupo (B+ — modificadores por componente del combo).
-          comboGrupo: { select: { id: true, nombre: true } },
+          // orden permite al KDS Mostrador ordenar las sub-tareas del combo
+          // según la configuración del combo (Hamburguesa → Acompañamiento → Bebida).
+          comboGrupo: { select: { id: true, nombre: true, orden: true } },
           comboGrupoOpcion: {
             include: {
               productoVenta: { select: { nombre: true, sectorComanda: true } },
