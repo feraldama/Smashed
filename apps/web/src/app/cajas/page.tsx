@@ -1,16 +1,30 @@
 'use client';
 
-import { CheckCircle2, Loader2, Pencil, Plus, Trash2, Wallet, XCircle } from 'lucide-react';
+import {
+  Calculator,
+  CheckCircle2,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  Wallet,
+  XCircle,
+} from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
+import { CerrarCajaModal } from '@/components/caja/CerrarCajaModal';
 import { CajaFormModal } from '@/components/CajaFormModal';
 import { confirmar, toast } from '@/components/Toast';
-import { type CajaListItem, useCajas, useEliminarCaja } from '@/hooks/useCaja';
+import { type CajaListItem, useApertura, useCajas, useEliminarCaja } from '@/hooks/useCaja';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+
+/** Roles que pueden cerrar la caja de otro cajero (forzar cierre supervisado). */
+const ROLES_GESTION_CAJA = new Set(['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN']);
 
 export default function CajasPage() {
   return (
@@ -23,15 +37,19 @@ export default function CajasPage() {
 }
 
 function CajasScreen() {
-  const sucursalActivaId = useAuthStore((s) => s.user?.sucursalActivaId ?? null);
-  const sucursales = useAuthStore((s) => s.user?.sucursales ?? []);
+  const user = useAuthStore((s) => s.user);
+  const sucursalActivaId = user?.sucursalActivaId ?? null;
+  const sucursales = user?.sucursales ?? [];
   const sucursalActiva = sucursales.find((s) => s.id === sucursalActivaId);
+  const puedeForzarCierre = user ? ROLES_GESTION_CAJA.has(user.rol) : false;
+  const router = useRouter();
 
   const [incluirInactivas, setIncluirInactivas] = useState(false);
   const { data: cajas = [], isLoading } = useCajas({ incluirInactivas });
   const eliminar = useEliminarCaja();
 
   const [modal, setModal] = useState<CajaListItem | 'NEW' | null>(null);
+  const [forzarCierreAperturaId, setForzarCierreAperturaId] = useState<string | null>(null);
 
   async function handleEliminar(c: CajaListItem) {
     const ok = await confirmar({
@@ -106,16 +124,29 @@ function CajasScreen() {
         </div>
       ) : (
         <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-          {cajas.map((caja) => (
-            <CajaCard
-              key={caja.id}
-              caja={caja}
-              onEdit={() => setModal(caja)}
-              onDelete={() => {
-                void handleEliminar(caja);
-              }}
-            />
-          ))}
+          {cajas.map((caja) => {
+            // Mostramos el botón "Cerrar caja (forzar)" si:
+            //  - la caja está abierta
+            //  - el usuario tiene rol de gestión (gerente/admin)
+            //  - la caja NO está abierta por el usuario actual (para "su" turno
+            //    usa /caja, que tiene el flujo normal — sin modo supervisión).
+            const apertura = caja.sesionActiva;
+            const esMiTurno = apertura?.usuario.id === user?.id;
+            const puedeForzar =
+              caja.estado === 'ABIERTA' && puedeForzarCierre && !esMiTurno && apertura;
+            return (
+              <CajaCard
+                key={caja.id}
+                caja={caja}
+                puedeForzarCierre={Boolean(puedeForzar)}
+                onEdit={() => setModal(caja)}
+                onDelete={() => {
+                  void handleEliminar(caja);
+                }}
+                onForzarCierre={() => apertura && setForzarCierreAperturaId(apertura.aperturaId)}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -126,18 +157,76 @@ function CajasScreen() {
           onClose={() => setModal(null)}
         />
       )}
+
+      {forzarCierreAperturaId && (
+        <CerrarCajaForzadoLoader
+          aperturaId={forzarCierreAperturaId}
+          onClose={() => setForzarCierreAperturaId(null)}
+          onCierreExitoso={(cierreId) => {
+            setForzarCierreAperturaId(null);
+            // Abrir el ticket Z post-cierre (el supervisor lo entrega al cajero
+            // o lo guarda como respaldo de auditoría).
+            window.open(`/caja/cierres/${cierreId}/imprimir`, '_blank');
+            // Refresh para que el listado de cajas muestre el nuevo estado.
+            router.refresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+/**
+ * Wrapper que carga el detalle de la apertura por id y monta el CerrarCajaModal
+ * cuando los datos están listos. Usamos modo supervisión (modoCajero=false) —
+ * el gerente ve totales esperados, diferencia y puede agregar nota.
+ */
+function CerrarCajaForzadoLoader({
+  aperturaId,
+  onClose,
+  onCierreExitoso,
+}: {
+  aperturaId: string;
+  onClose: () => void;
+  onCierreExitoso: (cierreId: string) => void;
+}) {
+  const { data: apertura, isLoading, isError } = useApertura(aperturaId);
+
+  if (isLoading) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+        <Loader2 className="h-6 w-6 animate-spin text-white" />
+      </div>
+    );
+  }
+  if (isError || !apertura) {
+    // Cerramos en silencio si no se pudo cargar — el toast del hook ya muestra
+    // el error si vino del API.
+    onClose();
+    return null;
+  }
+  return (
+    <CerrarCajaModal
+      apertura={apertura}
+      modoCajero={false}
+      onCierreExitoso={onCierreExitoso}
+      onClose={onClose}
+    />
   );
 }
 
 function CajaCard({
   caja,
+  puedeForzarCierre,
   onEdit,
   onDelete,
+  onForzarCierre,
 }: {
   caja: CajaListItem;
+  puedeForzarCierre: boolean;
   onEdit: () => void;
   onDelete: () => void;
+  onForzarCierre: () => void;
 }) {
   const abierta = caja.estado === 'ABIERTA';
   return (
@@ -212,6 +301,16 @@ function CajaCard({
             <p className="text-[10px] text-muted-foreground">
               desde {new Date(caja.sesionActiva.abiertaEn).toLocaleString('es-PY')}
             </p>
+            {puedeForzarCierre && (
+              <button
+                type="button"
+                onClick={onForzarCierre}
+                className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-semibold text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200"
+                title="Cerrar la caja sin el cajero (modo supervisión)"
+              >
+                <Calculator className="h-3 w-3" /> Forzar cierre Z
+              </button>
+            )}
           </div>
         )}
       </div>
