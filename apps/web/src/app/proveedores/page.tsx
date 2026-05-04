@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { ProveedorFormModal } from '@/components/ProveedorFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type Proveedor, useEliminarProveedor, useProveedores } from '@/hooks/useProveedores';
 import { ApiError } from '@/lib/api';
 
@@ -28,7 +28,13 @@ function ProveedoresScreen() {
   const eliminar = useEliminarProveedor();
 
   async function handleEliminar(p: Proveedor) {
-    if (!confirm(`Eliminar el proveedor "${p.razonSocial}"?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar proveedor',
+      mensaje: `¿Eliminar el proveedor "${p.razonSocial}"?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(p.id);
       toast.success('Proveedor eliminado');

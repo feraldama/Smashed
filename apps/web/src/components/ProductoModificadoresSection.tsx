@@ -4,7 +4,7 @@ import { ChevronDown, ChevronUp, Loader2, Plus, Sliders, Trash2 } from 'lucide-r
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type ProductoDetalle } from '@/hooks/useCatalogo';
 import {
   useDesvincularModificadorDeProducto,
@@ -50,7 +50,13 @@ export function ProductoModificadoresSection({ producto }: Props) {
   }
 
   async function handleDesvincular(grupoId: string, nombre: string) {
-    if (!confirm(`¿Desvincular "${nombre}" de este producto?`)) return;
+    const ok = await confirmar({
+      titulo: 'Desvincular grupo',
+      mensaje: `¿Desvincular "${nombre}" de este producto?`,
+      destructivo: true,
+      textoConfirmar: 'Desvincular',
+    });
+    if (!ok) return;
     try {
       await desvincular.mutateAsync({ grupoId, productoVentaId: producto.id });
       toast.success('Grupo desvinculado');

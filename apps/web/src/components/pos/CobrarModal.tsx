@@ -15,7 +15,7 @@ import {
 import { useMemo, useState } from 'react';
 
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { Input } from '@/components/ui/Input';
 import { type Cliente } from '@/hooks/useClientes';
 import {
@@ -106,7 +106,13 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
       return;
     }
     if (tipoDoc === 'FACTURA' && cliente && !cliente.ruc) {
-      if (!confirm('El cliente no tiene RUC. ¿Emitir FACTURA igual?')) return;
+      const ok = await confirmar({
+        titulo: 'Cliente sin RUC',
+        mensaje: 'El cliente no tiene RUC. ¿Emitir FACTURA igual?',
+        icon: 'warning',
+        textoConfirmar: 'Emitir igual',
+      });
+      if (!ok) return;
     }
     if (insuficiente) {
       toast.error('Falta efectivo / pago');

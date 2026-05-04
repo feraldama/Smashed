@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { ProductoModificadoresSection } from '@/components/ProductoModificadoresSection';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
 import {
@@ -109,7 +109,13 @@ export function ProductoForm({ producto }: ProductoFormProps) {
 
   async function handleEliminarImagenSubida() {
     if (!producto?.imagen) return;
-    if (!confirm('¿Eliminar la imagen subida?')) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar imagen',
+      mensaje: '¿Eliminar la imagen subida?',
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminarImagen.mutateAsync(producto.id);
       toast.success('Imagen eliminada');

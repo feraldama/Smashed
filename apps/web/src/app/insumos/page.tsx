@@ -17,7 +17,7 @@ import { AdminShell } from '@/components/AdminShell';
 import { AjusteStockModal } from '@/components/AjusteStockModal';
 import { AuthGate } from '@/components/AuthGate';
 import { InsumoFormModal } from '@/components/InsumoFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type Insumo, useEliminarInsumo, useInsumos } from '@/hooks/useInventario';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
@@ -42,7 +42,13 @@ function InsumosScreen() {
   const eliminar = useEliminarInsumo();
 
   async function handleEliminar(i: Insumo) {
-    if (!confirm(`Eliminar el insumo "${i.nombre}"?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar insumo',
+      mensaje: `¿Eliminar el insumo "${i.nombre}"?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(i.id);
       toast.success('Insumo eliminado');

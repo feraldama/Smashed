@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { ComboFormModal } from '@/components/ComboFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type ProductoListado, useEliminarProducto, useProductos } from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
 
@@ -29,7 +29,13 @@ function CombosScreen() {
   const eliminar = useEliminarProducto();
 
   async function handleEliminar(c: ProductoListado) {
-    if (!confirm(`¿Eliminar el combo "${c.nombre}"? Esta acción es lógica.`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar combo',
+      mensaje: `¿Eliminar el combo "${c.nombre}"? Esta acción es lógica.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(c.id);
       toast.success(`${c.nombre} eliminado`);

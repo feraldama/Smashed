@@ -19,7 +19,7 @@ import { useEffect, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import {
   productoImagenSrc,
   useCategorias,
@@ -72,7 +72,13 @@ function ProductosScreen() {
   const eliminar = useEliminarProducto();
 
   async function handleEliminar(id: string, nombre: string) {
-    if (!confirm(`Eliminar "${nombre}"? Quedará oculto pero el histórico se preserva.`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar producto',
+      mensaje: `¿Eliminar "${nombre}"? Quedará oculto pero el histórico se preserva.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(id);
       toast.success(`"${nombre}" eliminado`);

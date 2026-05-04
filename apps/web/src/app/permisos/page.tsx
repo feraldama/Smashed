@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import {
   type MatrizMenuRol,
   useGuardarMatriz,
@@ -115,13 +115,14 @@ function PermisosScreen() {
   }
 
   async function handleReset() {
-    if (
-      !confirm(
+    const ok = await confirmar({
+      titulo: 'Restaurar permisos',
+      mensaje:
         '¿Restaurar la matriz a los valores por defecto? Se perderá la configuración personalizada.',
-      )
-    ) {
-      return;
-    }
+      destructivo: true,
+      textoConfirmar: 'Restaurar',
+    });
+    if (!ok) return;
     try {
       await resetear.mutateAsync();
       toast.success('Matriz restaurada a los defaults');

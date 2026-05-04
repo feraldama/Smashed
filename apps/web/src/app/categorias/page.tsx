@@ -5,7 +5,7 @@ import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import {
   type Categoria,
   useActualizarCategoria,
@@ -130,7 +130,13 @@ function CategoriaRow({
   }
 
   async function handleEliminar() {
-    if (!confirm(`Eliminar la categoría "${c.nombre}"?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar categoría',
+      mensaje: `¿Eliminar la categoría "${c.nombre}"?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(c.id);
       toast.success(`"${c.nombre}" eliminada`);

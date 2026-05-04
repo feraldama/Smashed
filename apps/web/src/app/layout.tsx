@@ -2,7 +2,6 @@ import { Inter } from 'next/font/google';
 
 import type { Metadata } from 'next';
 
-import { ToastContainer } from '@/components/Toast';
 import { AppProviders } from '@/providers/AppProviders';
 
 import './globals.css';
@@ -18,10 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="es-PY" suppressHydrationWarning>
       <body className={`${inter.variable} font-sans antialiased`}>
-        <AppProviders>
-          {children}
-          <ToastContainer />
-        </AppProviders>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

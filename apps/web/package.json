@@ -11,10 +11,10 @@
     "clean": "rimraf .next .turbo *.tsbuildinfo"
   },
   "dependencies": {
-    "@smash/shared-types": "workspace:*",
-    "@smash/shared-utils": "workspace:*",
     "@hookform/resolvers": "^3.9.0",
     "@radix-ui/react-slot": "^1.1.0",
+    "@smash/shared-types": "workspace:*",
+    "@smash/shared-utils": "workspace:*",
     "@tanstack/react-query": "^5.59.0",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
@@ -26,6 +26,7 @@
     "react-hook-form": "^7.53.0",
     "recharts": "^2.13.0",
     "socket.io-client": "^4.8.0",
+    "sweetalert2": "^11.26.24",
     "tailwind-merge": "^2.5.4",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.23.8",

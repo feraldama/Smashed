@@ -1,70 +1,94 @@
 'use client';
 
-import { CheckCircle2, X, XCircle } from 'lucide-react';
-import { create } from 'zustand';
+import Swal, { type SweetAlertIcon } from 'sweetalert2';
 
-import { cn } from '@/lib/utils';
+/**
+ * Capa única de mensajes de la app — todo va por SweetAlert2.
+ *
+ * - `toast.success/error/info/warn(msg)` — toast pequeño arriba a la derecha,
+ *   no bloqueante, autocierra a los 3.5 s.
+ * - `confirmar({ titulo, mensaje, ... })` — modal confirmación destructiva,
+ *   devuelve Promise<boolean>.
+ * - `mensaje({ titulo, mensaje, icon })` — modal informativo con un solo
+ *   botón OK, devuelve Promise<void>.
+ *
+ * El componente <ToastContainer/> ya no es necesario — Swal monta su propio
+ * portal en <body>.
+ */
 
-interface ToastItem {
-  id: string;
-  type: 'success' | 'error';
-  message: string;
+// ───── Toasts ─────
+
+const ToastSwal = Swal.mixin({
+  toast: true,
+  position: 'top-end',
+  showConfirmButton: false,
+  timer: 3500,
+  timerProgressBar: true,
+  showCloseButton: true,
+  didOpen: (el) => {
+    el.addEventListener('mouseenter', Swal.stopTimer);
+    el.addEventListener('mouseleave', Swal.resumeTimer);
+  },
+});
+
+function fireToast(icon: SweetAlertIcon, message: string) {
+  void ToastSwal.fire({ icon, title: message });
 }
-
-interface ToastState {
-  items: ToastItem[];
-  show: (type: 'success' | 'error', message: string) => void;
-  dismiss: (id: string) => void;
-}
-
-const useToastStore = create<ToastState>((set) => ({
-  items: [],
-  show: (type, message) =>
-    set((s) => {
-      const id = `t_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
-      const item = { id, type, message };
-      setTimeout(() => {
-        set((curr) => ({ items: curr.items.filter((i) => i.id !== id) }));
-      }, 3500);
-      return { items: [...s.items, item] };
-    }),
-  dismiss: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
-}));
 
 export const toast = {
-  success: (message: string) => useToastStore.getState().show('success', message),
-  error: (message: string) => useToastStore.getState().show('error', message),
+  success: (message: string) => fireToast('success', message),
+  error: (message: string) => fireToast('error', message),
+  info: (message: string) => fireToast('info', message),
+  warn: (message: string) => fireToast('warning', message),
 };
 
-export function ToastContainer() {
-  const items = useToastStore((s) => s.items);
-  const dismiss = useToastStore((s) => s.dismiss);
-  return (
-    <div className="pointer-events-none fixed inset-x-0 top-4 z-50 flex flex-col items-center gap-2 px-4">
-      {items.map((it) => (
-        <div
-          key={it.id}
-          className={cn(
-            'pointer-events-auto flex w-full max-w-sm items-center gap-3 rounded-lg border bg-card px-4 py-3 shadow-lg',
-            it.type === 'success' && 'border-emerald-500/40 bg-emerald-50',
-            it.type === 'error' && 'border-destructive/40 bg-destructive/5',
-          )}
-        >
-          {it.type === 'success' ? (
-            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
-          ) : (
-            <XCircle className="h-5 w-5 shrink-0 text-destructive" />
-          )}
-          <p className="flex-1 text-sm font-medium">{it.message}</p>
-          <button
-            type="button"
-            onClick={() => dismiss(it.id)}
-            className="rounded-md p-1 hover:bg-black/5"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      ))}
-    </div>
-  );
+// ───── Modales: confirmación + aviso ─────
+
+export interface ConfirmarOptions {
+  titulo: string;
+  /** Texto principal. Acepta plain string. Para HTML usá `html` en su lugar. */
+  mensaje?: string;
+  html?: string;
+  /** "warning" (default), "question", "info", "error", "success" */
+  icon?: SweetAlertIcon;
+  textoConfirmar?: string;
+  textoCancelar?: string;
+  /** Si true, el botón confirmar se pinta rojo (acción destructiva). */
+  destructivo?: boolean;
+}
+
+export async function confirmar(opts: ConfirmarOptions): Promise<boolean> {
+  const result = await Swal.fire({
+    title: opts.titulo,
+    text: opts.html ? undefined : opts.mensaje,
+    html: opts.html,
+    icon: opts.icon ?? 'warning',
+    showCancelButton: true,
+    confirmButtonText: opts.textoConfirmar ?? 'Confirmar',
+    cancelButtonText: opts.textoCancelar ?? 'Cancelar',
+    confirmButtonColor: opts.destructivo ? '#dc2626' /* red-600 */ : '#0891b2' /* cyan-600 */,
+    cancelButtonColor: '#6b7280' /* gray-500 */,
+    reverseButtons: true,
+    focusCancel: opts.destructivo,
+  });
+  return result.isConfirmed;
+}
+
+export interface MensajeOptions {
+  titulo: string;
+  mensaje?: string;
+  html?: string;
+  icon?: SweetAlertIcon;
+  textoOk?: string;
+}
+
+export async function mensaje(opts: MensajeOptions): Promise<void> {
+  await Swal.fire({
+    title: opts.titulo,
+    text: opts.html ? undefined : opts.mensaje,
+    html: opts.html,
+    icon: opts.icon ?? 'info',
+    confirmButtonText: opts.textoOk ?? 'OK',
+    confirmButtonColor: '#0891b2',
+  });
 }

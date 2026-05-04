@@ -3,7 +3,7 @@
 import { Calculator, Loader2, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import {
   type AperturaDetalle,
   DENOMINACIONES_PYG,
@@ -35,14 +35,24 @@ export function CerrarCajaModal({ apertura, onClose }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    if (totalContado === 0 && !confirm('¿Cerrar caja con efectivo contado en 0?')) {
-      return;
+    if (totalContado === 0) {
+      const ok = await confirmar({
+        titulo: 'Cierre con efectivo en 0',
+        mensaje: '¿Cerrar la caja con efectivo contado en 0?',
+        icon: 'warning',
+        textoConfirmar: 'Cerrar igual',
+      });
+      if (!ok) return;
     }
 
     if (Math.abs(diferencia) > 0 && !notas.trim()) {
-      if (!confirm(`Diferencia de Gs. ${diferencia.toLocaleString('es-PY')}. ¿Cerrar sin nota?`)) {
-        return;
-      }
+      const ok = await confirmar({
+        titulo: 'Cierre con diferencia',
+        mensaje: `Diferencia de Gs. ${diferencia.toLocaleString('es-PY')}. ¿Cerrar sin nota?`,
+        icon: 'warning',
+        textoConfirmar: 'Cerrar sin nota',
+      });
+      if (!ok) return;
     }
 
     try {

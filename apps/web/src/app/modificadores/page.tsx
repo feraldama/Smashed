@@ -17,7 +17,7 @@ import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { GrupoModificadorFormModal } from '@/components/GrupoModificadorFormModal';
 import { OpcionModificadorFormModal } from '@/components/OpcionModificadorFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import {
   type ModificadorGrupo,
   type ModificadorOpcion,
@@ -60,13 +60,13 @@ function ModificadoresScreen() {
   }
 
   async function handleEliminarGrupo(g: ModificadorGrupo) {
-    if (
-      !confirm(
-        `¿Eliminar el grupo "${g.nombre}"? Se va a desvincular de los productos. El histórico de pedidos no se altera.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await confirmar({
+      titulo: 'Eliminar grupo de modificadores',
+      mensaje: `¿Eliminar el grupo "${g.nombre}"? Se va a desvincular de los productos. El histórico de pedidos no se altera.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminarGrupo.mutateAsync(g.id);
       toast.success(`Grupo "${g.nombre}" eliminado`);
@@ -186,7 +186,13 @@ function GrupoCard({
   const eliminar = useEliminarOpcion(grupo.id);
 
   async function handleEliminarOpcion(o: ModificadorOpcion) {
-    if (!confirm(`¿Eliminar la opción "${o.nombre}"?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar opción',
+      mensaje: `¿Eliminar la opción "${o.nombre}"?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(o.id);
       toast.success(`"${o.nombre}" eliminada`);

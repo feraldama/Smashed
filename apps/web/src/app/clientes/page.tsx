@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { ClienteFormModal } from '@/components/ClienteFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type Cliente, useClientes, useEliminarCliente } from '@/hooks/useClientes';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -33,7 +33,13 @@ function ClientesScreen() {
       toast.error('No se puede eliminar el cliente "consumidor final"');
       return;
     }
-    if (!confirm(`Eliminar a "${c.razonSocial}"?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar cliente',
+      mensaje: `¿Eliminar a "${c.razonSocial}"?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(c.id);
       toast.success('Cliente eliminado');

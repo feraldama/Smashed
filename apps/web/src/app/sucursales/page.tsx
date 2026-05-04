@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { SucursalFormModal } from '@/components/SucursalFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type Sucursal, useEliminarSucursal, useSucursales } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -27,11 +27,13 @@ function SucursalesScreen() {
   const eliminar = useEliminarSucursal();
 
   async function handleEliminar(s: Sucursal) {
-    if (
-      !confirm(`¿Eliminar la sucursal "${s.nombre}"? Esta acción es lógica (no toca histórico).`)
-    ) {
-      return;
-    }
+    const ok = await confirmar({
+      titulo: 'Eliminar sucursal',
+      mensaje: `¿Eliminar la sucursal "${s.nombre}"? Esta acción es lógica (no toca histórico).`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(s.id);
       toast.success(`${s.nombre} eliminada`);

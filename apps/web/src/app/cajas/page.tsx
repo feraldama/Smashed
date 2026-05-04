@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { CajaFormModal } from '@/components/CajaFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { type CajaListItem, useCajas, useEliminarCaja } from '@/hooks/useCaja';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
@@ -34,9 +34,13 @@ function CajasScreen() {
   const [modal, setModal] = useState<CajaListItem | 'NEW' | null>(null);
 
   async function handleEliminar(c: CajaListItem) {
-    if (!confirm(`¿Desactivar la caja "${c.nombre}"? Sus comprobantes históricos no se alteran.`)) {
-      return;
-    }
+    const ok = await confirmar({
+      titulo: 'Desactivar caja',
+      mensaje: `¿Desactivar la caja "${c.nombre}"? Sus comprobantes históricos no se alteran.`,
+      destructivo: true,
+      textoConfirmar: 'Desactivar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(c.id);
       toast.success(`Caja "${c.nombre}" desactivada`);

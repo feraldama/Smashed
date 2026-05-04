@@ -3,7 +3,7 @@
 import { ChefHat, Loader2, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { Field, Input, Select } from '@/components/ui/Input';
 import { useProductos, type ProductoDetalle } from '@/hooks/useCatalogo';
 import {
@@ -171,12 +171,14 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
   }
 
   async function handleEliminarReceta() {
-    if (
-      !confirm(
+    const ok = await confirmar({
+      titulo: 'Eliminar receta',
+      mensaje:
         '¿Eliminar la receta de este producto? El descuento de stock al vender no se aplicará.',
-      )
-    )
-      return;
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminarReceta.mutateAsync(producto.id);
       setItems([]);

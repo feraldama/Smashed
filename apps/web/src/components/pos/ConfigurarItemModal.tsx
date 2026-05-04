@@ -3,6 +3,7 @@
 import { Loader2, Minus, Plus, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { toast } from '@/components/Toast';
 import { productoImagenSrc, useProductoDetalle } from '@/hooks/useCatalogo';
 import {
   type ItemCarrito,
@@ -292,7 +293,7 @@ function ModalShellWithProducto({
   function handleConfirm() {
     const err = validar();
     if (err) {
-      alert(err);
+      toast.error(err);
       return;
     }
 

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { MesaFormModal } from '@/components/MesaFormModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { ZonaFormModal } from '@/components/ZonaFormModal';
 import {
   type EstadoMesa,
@@ -43,7 +43,13 @@ function SalonScreen() {
   const [mesaModal, setMesaModal] = useState<{ mesa?: Mesa; zonaActualId: string } | null>(null);
 
   async function handleEliminarZona(z: ZonaMesa) {
-    if (!confirm(`¿Eliminar la zona "${z.nombre}"? Sólo se puede si no tiene mesas.`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar zona',
+      mensaje: `¿Eliminar la zona "${z.nombre}"? Sólo se puede si no tiene mesas.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminarZona.mutateAsync(z.id);
       toast.success(`Zona "${z.nombre}" eliminada`);
@@ -53,7 +59,13 @@ function SalonScreen() {
   }
 
   async function handleEliminarMesa(m: Mesa) {
-    if (!confirm(`¿Eliminar la mesa #${m.numero}?`)) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar mesa',
+      mensaje: `¿Eliminar la mesa #${m.numero}?`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminarMesa.mutateAsync(m.id);
       toast.success(`Mesa #${m.numero} eliminada`);

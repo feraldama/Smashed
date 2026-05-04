@@ -27,7 +27,7 @@ import { CobrarModal } from '@/components/pos/CobrarModal';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
 import { MesaSelector } from '@/components/pos/MesaSelector';
 import { ProductoCard } from '@/components/pos/ProductoCard';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { LogoutButton } from '@/components/ui/LogoutButton';
 import { useMiAperturaActiva } from '@/hooks/useCaja';
 import {
@@ -469,7 +469,14 @@ function POSScreen() {
               <button
                 type="button"
                 onClick={() => {
-                  if (confirm('¿Vaciar el carrito?')) dispatch({ type: 'CLEAR' });
+                  void confirmar({
+                    titulo: 'Vaciar carrito',
+                    mensaje: '¿Seguro que querés vaciar el carrito?',
+                    destructivo: true,
+                    textoConfirmar: 'Vaciar',
+                  }).then((ok) => {
+                    if (ok) dispatch({ type: 'CLEAR' });
+                  });
                 }}
                 className="flex w-full items-center justify-center gap-1.5 rounded-md border border-input px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
               >

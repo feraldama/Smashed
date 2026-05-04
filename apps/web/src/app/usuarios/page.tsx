@@ -18,7 +18,7 @@ import { useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { ResetPasswordModal } from '@/components/ResetPasswordModal';
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { Input, Select } from '@/components/ui/Input';
 import { UsuarioFormModal } from '@/components/UsuarioFormModal';
 import {
@@ -63,11 +63,13 @@ function UsuariosScreen() {
       toast.error('No podés eliminar tu propio usuario');
       return;
     }
-    if (
-      !confirm(`¿Eliminar a ${u.nombreCompleto}? Esto cierra sus sesiones y le bloquea el login.`)
-    ) {
-      return;
-    }
+    const ok = await confirmar({
+      titulo: 'Eliminar usuario',
+      mensaje: `¿Eliminar a ${u.nombreCompleto}? Esto cierra sus sesiones y le bloquea el login.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
     try {
       await eliminar.mutateAsync(u.id);
       toast.success(`${u.nombreCompleto} eliminado`);
