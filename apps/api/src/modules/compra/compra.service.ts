@@ -231,3 +231,79 @@ export async function crear(user: UserCtx, input: CrearCompraInput) {
     return compra;
   });
 }
+
+// ═════════════════════════════════════════════════════════════════════════
+//  ELIMINAR (revierte stock + borra movimientos + borra compra)
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * Elimina una compra cargada por error. La operación es atómica:
+ *  - Decrementa el stock de cada insumo en la sucursal de la compra
+ *    (puede dejar stock negativo — está permitido por diseño)
+ *  - Borra los MovimientoStock que registraron las entradas de esa compra
+ *  - Borra la Compra (cascada borra ItemCompra)
+ *  - Loggea acción ELIMINAR en auditoría
+ *
+ * Pensado para corregir errores de carga reciente. Si parte del stock ya se
+ * consumió (recetas, transferencias), igual se permite — el resultado es
+ * stock negativo, que el admin debe regularizar con un ajuste manual.
+ */
+export async function eliminar(user: UserCtx, id: string) {
+  const empresaId = requireEmpresa(user);
+
+  const compra = await prisma.compra.findFirst({
+    where: { id, sucursal: { empresaId } },
+    include: { items: true, sucursal: { select: { id: true } } },
+  });
+  if (!compra) throw Errors.notFound('Compra no encontrada');
+
+  if (!user.isSuperAdmin && user.sucursalActivaId && user.sucursalActivaId !== compra.sucursalId) {
+    throw Errors.sucursalNoAutorizada();
+  }
+
+  return prisma.$transaction(async (tx) => {
+    for (const item of compra.items) {
+      const stock = await tx.stockSucursal.findUnique({
+        where: {
+          productoInventarioId_sucursalId: {
+            productoInventarioId: item.productoInventarioId,
+            sucursalId: compra.sucursalId,
+          },
+        },
+      });
+      if (stock) {
+        await tx.stockSucursal.update({
+          where: { id: stock.id },
+          data: { stockActual: { decrement: item.cantidad } },
+        });
+      }
+      // Si no existe el StockSucursal lo dejamos pasar — significa que ya se
+      // borró la fila en algún otro flujo y no hay nada que revertir.
+    }
+
+    // Borrar movimientos asociados a esta compra. compraId no tiene FK formal,
+    // pero el campo se setea sólo en MovimientoStock.create dentro de `crear`.
+    await tx.movimientoStock.deleteMany({ where: { compraId: id } });
+
+    // Borrar compra (cascada borra ItemCompra)
+    await tx.compra.delete({ where: { id } });
+
+    await tx.auditLog.create({
+      data: {
+        empresaId,
+        sucursalId: compra.sucursalId,
+        usuarioId: user.userId,
+        accion: 'ELIMINAR',
+        entidad: 'Compra',
+        entidadId: id,
+        metadata: {
+          numero: compra.numero,
+          proveedorId: compra.proveedorId,
+          numeroFactura: compra.numeroFactura,
+          total: compra.total.toString(),
+          items: compra.items.length,
+        },
+      },
+    });
+  });
+}

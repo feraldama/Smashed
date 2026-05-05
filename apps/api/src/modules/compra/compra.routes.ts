@@ -12,6 +12,7 @@ const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
 router.get('/', requireAdmin, asyncH(ctrl.listar));
 router.get('/:id', requireAdmin, asyncH(ctrl.obtener));
 router.post('/', requireAdmin, asyncH(ctrl.crear));
+router.delete('/:id', requireAdmin, asyncH(ctrl.eliminar));
 
 export default router;
 

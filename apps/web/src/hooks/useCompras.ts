@@ -106,3 +106,16 @@ export function useCrearCompra() {
     },
   });
 }
+
+export function useEliminarCompra() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api<void>(`/compras/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'compras'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'compra'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'insumos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'inventario'] });
+    },
+  });
+}

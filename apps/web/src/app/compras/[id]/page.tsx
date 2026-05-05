@@ -1,12 +1,23 @@
 'use client';
 
-import { ArrowLeft, Building2, Calendar, FileText, Loader2, Package, Receipt } from 'lucide-react';
+import {
+  ArrowLeft,
+  Building2,
+  Calendar,
+  FileText,
+  Loader2,
+  Package,
+  Receipt,
+  Trash2,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
-import { useCompra } from '@/hooks/useCompras';
+import { confirmar, toast } from '@/components/Toast';
+import { useCompra, useEliminarCompra } from '@/hooks/useCompras';
+import { ApiError } from '@/lib/api';
 import { formatGs } from '@/lib/utils';
 
 export default function CompraDetallePage() {
@@ -21,7 +32,32 @@ export default function CompraDetallePage() {
 
 function CompraDetalleScreen() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const { data: compra, isLoading, isError } = useCompra(id);
+  const eliminar = useEliminarCompra();
+
+  async function handleEliminar() {
+    if (!compra) return;
+    const itemsTxt = `${compra.items.length} item${compra.items.length !== 1 ? 's' : ''}`;
+    const ok = await confirmar({
+      titulo: `Eliminar compra #${compra.numero}`,
+      mensaje:
+        `¿Eliminar esta compra? Se descontará el stock que esta compra agregó ` +
+        `(${itemsTxt}) en ${compra.sucursal.nombre}. ` +
+        `Si parte del stock ya se consumió, el saldo puede quedar negativo y deberás ` +
+        `regularizarlo con un ajuste manual. Esta acción no se puede deshacer.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
+    try {
+      await eliminar.mutateAsync(compra.id);
+      toast.success(`Compra #${compra.numero} eliminada — stock revertido`);
+      router.push('/compras');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al eliminar compra');
+    }
+  }
 
   if (isLoading) {
     return (
@@ -51,13 +87,28 @@ function CompraDetalleScreen() {
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Volver al listado
         </Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-2xl font-bold tracking-tight">
-            Compra <span className="font-mono text-primary">#{compra.numero}</span>
-          </h1>
-          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
-            Registrada
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl font-bold tracking-tight">
+              Compra <span className="font-mono text-primary">#{compra.numero}</span>
+            </h1>
+            <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold uppercase tracking-wide text-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+              Registrada
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => void handleEliminar()}
+            disabled={eliminar.isPending}
+            className="flex items-center gap-1.5 rounded-md border border-destructive/30 px-3 py-1.5 text-sm font-medium text-destructive hover:bg-destructive/10 disabled:opacity-50"
+          >
+            {eliminar.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="h-3.5 w-3.5" />
+            )}
+            Eliminar
+          </button>
         </div>
       </header>
 

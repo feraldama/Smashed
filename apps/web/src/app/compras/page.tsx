@@ -1,14 +1,21 @@
 'use client';
 
-import { Loader2, Package, Plus, Search, ShoppingCart, X } from 'lucide-react';
+import { Eye, Loader2, Package, Plus, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
-import { useCompras, type ListarComprasFiltros } from '@/hooks/useCompras';
+import { confirmar, toast } from '@/components/Toast';
+import {
+  type CompraResumen,
+  useCompras,
+  useEliminarCompra,
+  type ListarComprasFiltros,
+} from '@/hooks/useCompras';
 import { useProveedores } from '@/hooks/useProveedores';
-import { formatGs } from '@/lib/utils';
+import { ApiError } from '@/lib/api';
+import { cn, formatGs } from '@/lib/utils';
 
 export default function ComprasPage() {
   return (
@@ -29,8 +36,29 @@ function ComprasScreen() {
     numeroFactura: busqFactura.trim() || undefined,
   });
   const { data: proveedores = [] } = useProveedores();
+  const eliminar = useEliminarCompra();
 
   const totalPeriodo = compras.reduce((sum, c) => sum + Number.parseInt(c.total, 10), 0);
+
+  async function handleEliminar(c: CompraResumen) {
+    const ok = await confirmar({
+      titulo: `Eliminar compra #${c.numero}`,
+      mensaje:
+        `¿Eliminar esta compra? Se descontará el stock que esta compra agregó ` +
+        `en ${c.sucursal.nombre}. Si parte del stock ya se consumió, el saldo puede ` +
+        `quedar negativo y deberás regularizarlo con un ajuste manual. ` +
+        `Esta acción no se puede deshacer.`,
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
+    try {
+      await eliminar.mutateAsync(c.id);
+      toast.success(`Compra #${c.numero} eliminada — stock revertido`);
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al eliminar compra');
+    }
+  }
 
   return (
     <div>
@@ -139,6 +167,7 @@ function ComprasScreen() {
                 <th className="px-3 py-2 text-left font-semibold">Factura</th>
                 <th className="px-3 py-2 text-right font-semibold">Items</th>
                 <th className="px-3 py-2 text-right font-semibold">Total</th>
+                <th className="px-3 py-2 text-right font-semibold">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -162,6 +191,33 @@ function ComprasScreen() {
                   <td className="px-3 py-2 text-right">{c._count.items}</td>
                   <td className="px-3 py-2 text-right font-mono font-semibold">
                     {formatGs(Number.parseInt(c.total, 10))}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <Link
+                        href={`/compras/${c.id}`}
+                        className="rounded-md p-1.5 text-muted-foreground hover:bg-accent"
+                        aria-label="Ver detalle"
+                        title="Ver detalle"
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void handleEliminar(c);
+                        }}
+                        disabled={eliminar.isPending}
+                        className={cn(
+                          'rounded-md p-1.5 text-destructive hover:bg-destructive/10',
+                          eliminar.isPending && 'opacity-50',
+                        )}
+                        aria-label="Eliminar"
+                        title="Eliminar (descuenta el stock)"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

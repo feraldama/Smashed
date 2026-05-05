@@ -30,3 +30,10 @@ export async function crear(req: Request, res: Response) {
   const compra = await service.crear(c, input);
   res.status(201).json({ compra });
 }
+
+export async function eliminar(req: Request, res: Response) {
+  const c = ctx(req);
+  const { id } = compraIdParam.parse(req.params);
+  await service.eliminar(c, id);
+  res.status(204).end();
+}
