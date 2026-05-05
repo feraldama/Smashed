@@ -60,28 +60,21 @@ describe('crearPedidoInput superRefine', () => {
     }
   });
 
-  it('DELIVERY_PROPIO sin clienteId es rechazado', () => {
+  it('DELIVERY_PROPIO sin cliente ni dirección es válido (toma rápida; se completa al despacho)', () => {
     const r = crearPedidoInput.safeParse({
       tipo: 'DELIVERY_PROPIO',
-      direccionEntregaId: cuid(2),
       items: [itemBase],
     });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.flatten().fieldErrors.clienteId).toBeDefined();
-    }
+    expect(r.success).toBe(true);
   });
 
-  it('DELIVERY_PROPIO sin direccionEntregaId es rechazado', () => {
+  it('DELIVERY_PROPIO con cliente solo (sin dirección) es válido', () => {
     const r = crearPedidoInput.safeParse({
       tipo: 'DELIVERY_PROPIO',
       clienteId: cuid(3),
       items: [itemBase],
     });
-    expect(r.success).toBe(false);
-    if (!r.success) {
-      expect(r.error.flatten().fieldErrors.direccionEntregaId).toBeDefined();
-    }
+    expect(r.success).toBe(true);
   });
 
   it('DELIVERY_PROPIO con cliente y dirección es válido', () => {
@@ -94,20 +87,14 @@ describe('crearPedidoInput superRefine', () => {
     expect(r.success).toBe(true);
   });
 
-  it('DELIVERY_PEDIDOSYA aplica las mismas reglas que DELIVERY_PROPIO', () => {
-    const r1 = crearPedidoInput.safeParse({
-      tipo: 'DELIVERY_PEDIDOSYA',
-      items: [itemBase],
-    });
-    expect(r1.success).toBe(false);
-
-    const r2 = crearPedidoInput.safeParse({
+  it('DELIVERY_PEDIDOSYA con cliente y dirección es válido', () => {
+    const r = crearPedidoInput.safeParse({
       tipo: 'DELIVERY_PEDIDOSYA',
       clienteId: cuid(3),
       direccionEntregaId: cuid(2),
       items: [itemBase],
     });
-    expect(r2.success).toBe(true);
+    expect(r.success).toBe(true);
   });
 
   it('direccionEntregaId sin clienteId es rechazado (no podemos validar pertenencia)', () => {
@@ -118,7 +105,7 @@ describe('crearPedidoInput superRefine', () => {
     });
     expect(r.success).toBe(false);
     if (!r.success) {
-      // Falta clienteId (delivery lo requiere) y la regla cross-field también dispara.
+      // Falla la regla cross-field: si hay dirección, también debe haber cliente.
       expect(r.error.flatten().fieldErrors.clienteId).toBeDefined();
     }
   });

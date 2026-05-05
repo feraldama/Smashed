@@ -43,24 +43,11 @@ export const crearPedidoInput = z
         message: 'Pedidos de tipo MESA requieren `mesaId`',
       });
     }
-    // Delivery exige cliente + dirección — sin esto el repartidor no sabe
-    // adónde ir y el comprobante queda con receptor "consumidor final"
-    // sin sentido logístico.
-    const esDelivery = d.tipo === 'DELIVERY_PROPIO' || d.tipo === 'DELIVERY_PEDIDOSYA';
-    if (esDelivery && !d.clienteId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['clienteId'],
-        message: 'Pedidos de delivery requieren `clienteId`',
-      });
-    }
-    if (esDelivery && !d.direccionEntregaId) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['direccionEntregaId'],
-        message: 'Pedidos de delivery requieren `direccionEntregaId`',
-      });
-    }
+    // Nota: NO exigimos `clienteId`/`direccionEntregaId` en delivery acá.
+    // En la operatoria real (toma de pedido por teléfono, ventana de
+    // mostrador) la dirección y el cliente suelen completarse al despacho,
+    // no al tomar la orden. Sólo validamos coherencia entre los campos
+    // cuando vienen.
     // Si llega `direccionEntregaId` sin `clienteId`, no podemos validar
     // pertenencia (la dirección cuelga del cliente).
     if (d.direccionEntregaId && !d.clienteId) {
