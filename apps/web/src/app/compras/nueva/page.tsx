@@ -14,7 +14,7 @@ import { useInsumos } from '@/hooks/useInventario';
 import { useProveedores } from '@/hooks/useProveedores';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
-import { formatGs } from '@/lib/utils';
+import { formatGs, localId } from '@/lib/utils';
 
 interface ItemDraft {
   key: string;
@@ -49,7 +49,7 @@ function NuevaCompraScreen() {
   const [numeroFactura, setNumeroFactura] = useState('');
   const [notas, setNotas] = useState('');
   const [items, setItems] = useState<ItemDraft[]>([
-    { key: crypto.randomUUID(), productoInventarioId: '', cantidad: '', costoUnitario: '' },
+    { key: localId(), productoInventarioId: '', cantidad: '', costoUnitario: '' },
   ]);
   const [error, setError] = useState<string | null>(null);
 
@@ -62,7 +62,7 @@ function NuevaCompraScreen() {
   function addItem() {
     setItems((prev) => [
       ...prev,
-      { key: crypto.randomUUID(), productoInventarioId: '', cantidad: '', costoUnitario: '' },
+      { key: localId(), productoInventarioId: '', cantidad: '', costoUnitario: '' },
     ]);
   }
   function removeItem(key: string) {

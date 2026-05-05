@@ -13,6 +13,7 @@ import { useInsumos } from '@/hooks/useInventario';
 import { useCrearTransferencia } from '@/hooks/useTransferencias';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import { localId } from '@/lib/utils';
 
 interface ItemDraft {
   key: string;
@@ -45,7 +46,7 @@ function NuevaTransferenciaScreen() {
   const [sucursalDestinoId, setSucursalDestinoId] = useState('');
   const [notas, setNotas] = useState('');
   const [items, setItems] = useState<ItemDraft[]>([
-    { key: crypto.randomUUID(), productoInventarioId: '', cantidad: '' },
+    { key: localId(), productoInventarioId: '', cantidad: '' },
   ]);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,10 +60,7 @@ function NuevaTransferenciaScreen() {
     setItems((prev) => prev.map((it) => (it.key === key ? { ...it, ...patch } : it)));
   }
   function addItem() {
-    setItems((prev) => [
-      ...prev,
-      { key: crypto.randomUUID(), productoInventarioId: '', cantidad: '' },
-    ]);
+    setItems((prev) => [...prev, { key: localId(), productoInventarioId: '', cantidad: '' }]);
   }
   function removeItem(key: string) {
     setItems((prev) => (prev.length > 1 ? prev.filter((it) => it.key !== key) : prev));

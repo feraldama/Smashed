@@ -17,6 +17,7 @@ import { useEffect, useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { DateRangePicker, type DateRange } from '@/components/DateRangePicker';
+import { Input, Select } from '@/components/ui/Input';
 import {
   type EstadoPedido,
   type PedidoListItem,
@@ -106,48 +107,42 @@ function PedidosScreen() {
       </header>
 
       {/* Filtros */}
-      <div className="mb-4 grid gap-3 rounded-lg border bg-card p-3 lg:grid-cols-[1fr_180px_180px_240px]">
+      <div className="mb-4 space-y-3 rounded-lg border bg-card p-3">
         <DateRangePicker value={rango} onChange={setRango} />
-        <select
-          value={estado}
-          onChange={(e) => setEstado(e.target.value as EstadoPedido | '')}
-          className="rounded-md border border-input bg-background px-2 py-2 text-sm"
-        >
-          {ESTADOS.map((e) => (
-            <option key={e.value} value={e.value}>
-              {e.label}
-            </option>
-          ))}
-        </select>
-        <select
-          value={tipo}
-          onChange={(e) => setTipo(e.target.value as TipoPedido | '')}
-          className="rounded-md border border-input bg-background px-2 py-2 text-sm"
-        >
-          {TIPOS.map((t) => (
-            <option key={t.value} value={t.value}>
-              {t.label}
-            </option>
-          ))}
-        </select>
-        <div className="relative">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
-            type="search"
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Nº de pedido o cliente…"
-            className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-9 text-sm"
-          />
-          {busqueda && (
-            <button
-              type="button"
-              onClick={() => setBusqueda('')}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-muted"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[200px_200px_1fr]">
+          <Select value={estado} onChange={(e) => setEstado(e.target.value as EstadoPedido | '')}>
+            {ESTADOS.map((e) => (
+              <option key={e.value} value={e.value}>
+                {e.label}
+              </option>
+            ))}
+          </Select>
+          <Select value={tipo} onChange={(e) => setTipo(e.target.value as TipoPedido | '')}>
+            {TIPOS.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </Select>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              type="search"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+              placeholder="Nº de pedido o cliente…"
+              className="pl-9 pr-9"
+            />
+            {busqueda && (
+              <button
+                type="button"
+                onClick={() => setBusqueda('')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-sm p-1 text-muted-foreground hover:bg-muted"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 

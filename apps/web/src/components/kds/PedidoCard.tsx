@@ -543,7 +543,7 @@ function TareaRow({
                   );
             if (mods.length === 0) return null;
             return (
-              <ul className="mt-0.5 text-[11px] text-amber-900 dark:text-amber-300">
+              <ul className="mt-0.5 text-[11px] font-medium text-red-700 dark:text-red-400">
                 {mods.map((m) => (
                   <li key={m.id}>+ {m.modificadorOpcion.nombre}</li>
                 ))}

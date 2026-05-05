@@ -1,23 +1,28 @@
 'use client';
 
-import { Loader2, Plus, Save, Trash2, X } from 'lucide-react';
+import { ImageOff, Loader2, Plus, Save, Trash2, Upload, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-import { toast } from '@/components/Toast';
+import { confirmar, toast } from '@/components/Toast';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
 import {
   type ComboConfig,
+  productoImagenSrc,
   type ProductoListado,
   type SetComboInput,
   useActualizarProducto,
   useCategorias,
   useCrearProducto,
+  useEliminarImagenProducto,
   useProductoDetalle,
   useProductos,
   useSetCombo,
+  useSubirImagenProducto,
 } from '@/hooks/useCatalogo';
 import { ApiError } from '@/lib/api';
+
+const TAMANO_MAX_MB = 5;
 
 interface Props {
   productoId: string | null;
@@ -84,7 +89,14 @@ export function ComboFormModal({ productoId, onClose }: Props) {
   const crearProducto = useCrearProducto();
   const actualizarProducto = useActualizarProducto();
   const setCombo = useSetCombo();
-  const isPending = crearProducto.isPending || actualizarProducto.isPending || setCombo.isPending;
+  const subirImagen = useSubirImagenProducto();
+  const eliminarImagen = useEliminarImagenProducto();
+  const isPending =
+    crearProducto.isPending ||
+    actualizarProducto.isPending ||
+    setCombo.isPending ||
+    subirImagen.isPending ||
+    eliminarImagen.isPending;
 
   const [nombre, setNombre] = useState('');
   const [codigo, setCodigo] = useState('');
@@ -94,6 +106,10 @@ export function ComboFormModal({ productoId, onClose }: Props) {
   const [grupos, setGrupos] = useState<GrupoDraft[]>([grupoVacio()]);
   const [hidratado, setHidratado] = useState(!isEdit);
   const [error, setError] = useState<string | null>(null);
+  // Imagen: archivo seleccionado localmente (se sube recién al guardar) + flag de error de carga.
+  const [archivoLocal, setArchivoLocal] = useState<File | null>(null);
+  const [archivoPreview, setArchivoPreview] = useState<string | null>(null);
+  const [imagenError, setImagenError] = useState(false);
 
   // Al crear un combo nuevo, defaulteamos la categoría a la primera con base COMBO
   // para que aparezca bajo el tab "Combos" del POS sin que el usuario tenga que pensarlo.
@@ -164,6 +180,60 @@ export function ComboFormModal({ productoId, onClose }: Props) {
           : it,
       ),
     );
+  }
+
+  // ─── Imagen ─────────────────────────────────────────────────────────────
+  // Liberar el ObjectURL del preview cuando se reemplace o se desmonte el form.
+  useEffect(() => {
+    return () => {
+      if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    };
+  }, [archivoPreview]);
+
+  const productoActual = detalle.data ?? null;
+  const imagenSrcActual =
+    archivoPreview ?? (productoActual ? productoImagenSrc(productoActual) : null);
+  const tieneImagenSubida = Boolean(productoActual?.imagen);
+
+  function handleArchivoChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('El archivo no es una imagen');
+      return;
+    }
+    if (file.size > TAMANO_MAX_MB * 1024 * 1024) {
+      toast.error(`Imagen demasiado grande (máx ${TAMANO_MAX_MB} MB)`);
+      return;
+    }
+    if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    setArchivoLocal(file);
+    setArchivoPreview(URL.createObjectURL(file));
+    setImagenError(false);
+  }
+
+  function descartarArchivoSeleccionado() {
+    if (archivoPreview) URL.revokeObjectURL(archivoPreview);
+    setArchivoLocal(null);
+    setArchivoPreview(null);
+  }
+
+  async function handleEliminarImagenSubida() {
+    if (!productoActual?.imagen) return;
+    const ok = await confirmar({
+      titulo: 'Eliminar imagen',
+      mensaje: '¿Eliminar la imagen subida del combo?',
+      destructivo: true,
+      textoConfirmar: 'Eliminar',
+    });
+    if (!ok) return;
+    try {
+      await eliminarImagen.mutateAsync(productoActual.id);
+      toast.success('Imagen eliminada');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al eliminar imagen');
+    }
   }
 
   function marcarDefault(grupoKey: string, opcionKey: string) {
@@ -260,6 +330,18 @@ export function ComboFormModal({ productoId, onClose }: Props) {
         id = created.producto.id;
       }
       await setCombo.mutateAsync({ id, input: result });
+
+      // Si seleccionaron archivo, lo subimos después de crear/actualizar el combo.
+      // Si falla la subida, no rompemos el flujo — el combo ya quedó guardado.
+      if (archivoLocal) {
+        try {
+          await subirImagen.mutateAsync({ id, archivo: archivoLocal });
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : 'Error al subir imagen');
+        }
+        descartarArchivoSeleccionado();
+      }
+
       toast.success(isEdit ? 'Combo actualizado' : 'Combo creado');
       onClose();
     } catch (err) {
@@ -352,6 +434,58 @@ export function ComboFormModal({ productoId, onClose }: Props) {
                   placeholder="Armá tu combo eligiendo hamburguesa, acompañamiento y bebida"
                 />
               </Field>
+
+              <div>
+                <span className="mb-1 block text-xs font-medium text-muted-foreground">Imagen</span>
+                <div className="flex items-start gap-3">
+                  {imagenSrcActual && !imagenError ? (
+                    <img
+                      src={imagenSrcActual}
+                      alt={nombre || 'Combo'}
+                      className="h-20 w-20 shrink-0 rounded-md border bg-muted object-cover"
+                      onError={() => setImagenError(true)}
+                      onLoad={() => setImagenError(false)}
+                    />
+                  ) : (
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-md border border-dashed bg-muted/30 text-muted-foreground">
+                      <ImageOff className="h-6 w-6 opacity-40" />
+                    </div>
+                  )}
+                  <div className="flex-1 space-y-1.5">
+                    <label className="flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs font-medium hover:bg-muted/40">
+                      <Upload className="h-3.5 w-3.5" />
+                      {archivoLocal ? archivoLocal.name : 'Subir imagen desde mi PC'}
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={handleArchivoChange}
+                      />
+                    </label>
+                    {archivoLocal && (
+                      <p className="text-[11px] text-muted-foreground">
+                        Se subirá al guardar.{' '}
+                        <button
+                          type="button"
+                          onClick={descartarArchivoSeleccionado}
+                          className="underline hover:text-foreground"
+                        >
+                          descartar
+                        </button>
+                      </p>
+                    )}
+                    {tieneImagenSubida && !archivoLocal && (
+                      <button
+                        type="button"
+                        onClick={() => void handleEliminarImagenSubida()}
+                        className="flex w-full items-center justify-center gap-1 rounded-md border border-destructive/30 px-2 py-1 text-[11px] text-destructive hover:bg-destructive/5"
+                      >
+                        <Trash2 className="h-3 w-3" /> Eliminar imagen subida
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </section>
 
             <section className="space-y-3">
