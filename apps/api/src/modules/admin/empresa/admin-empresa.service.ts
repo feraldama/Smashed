@@ -126,6 +126,46 @@ export async function crearEmpresa(user: SuperAdminCtx, input: CrearEmpresaInput
       });
     }
 
+    // Sucursal inicial opcional (wizard de onboarding). Si viene, también
+    // creamos su punto de expedición default `001` y asociamos al admin como
+    // principal — así el cliente puede operar el POS sin pasos extra.
+    let sucursalCreada: { id: string; nombre: string; codigo: string } | null = null;
+    if (input.sucursalInicial) {
+      const s = input.sucursalInicial;
+      const sucursal = await tx.sucursal.create({
+        data: {
+          empresaId: empresa.id,
+          nombre: s.nombre,
+          codigo: s.codigo,
+          establecimiento: s.establecimiento,
+          direccion: s.direccion,
+          ciudad: s.ciudad,
+          departamento: s.departamento,
+          telefono: s.telefono,
+          email: s.email,
+        },
+        select: { id: true, nombre: true, codigo: true },
+      });
+
+      await tx.puntoExpedicion.create({
+        data: {
+          sucursalId: sucursal.id,
+          codigo: '001',
+          descripcion: 'Caja principal',
+        },
+      });
+
+      await tx.usuarioSucursal.create({
+        data: {
+          usuarioId: admin.id,
+          sucursalId: sucursal.id,
+          esPrincipal: true,
+        },
+      });
+
+      sucursalCreada = sucursal;
+    }
+
     await tx.auditLog.create({
       data: {
         empresaId: empresa.id,
@@ -133,16 +173,21 @@ export async function crearEmpresa(user: SuperAdminCtx, input: CrearEmpresaInput
         accion: 'CREAR',
         entidad: 'Empresa',
         entidadId: empresa.id,
-        metadata: { ruc: empresa.ruc, adminEmail: admin.email },
+        metadata: {
+          ruc: empresa.ruc,
+          adminEmail: admin.email,
+          sucursalInicial: sucursalCreada?.codigo ?? null,
+        },
       },
     });
 
-    return { empresa, admin };
+    return { empresa, admin, sucursal: sucursalCreada };
   });
 
   return {
     empresa: empresaCreada.empresa,
     admin: empresaCreada.admin,
+    sucursal: empresaCreada.sucursal,
     passwordInicial: passwordGenerada ? passwordPlano : null,
   };
 }

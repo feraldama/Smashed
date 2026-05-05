@@ -24,14 +24,70 @@ export const itemPedidoInput = z.object({
   combosOpcion: z.array(itemComboOpcionInput).max(20).optional(),
 });
 
-export const crearPedidoInput = z.object({
-  tipo: z.nativeEnum(TipoPedido),
-  clienteId: z.string().cuid().optional(),
-  mesaId: z.string().cuid().optional(),
-  direccionEntregaId: z.string().cuid().optional(),
-  observaciones: z.string().trim().max(500).optional(),
-  items: z.array(itemPedidoInput).min(1).max(100),
-});
+export const crearPedidoInput = z
+  .object({
+    tipo: z.nativeEnum(TipoPedido),
+    clienteId: z.string().cuid().optional(),
+    mesaId: z.string().cuid().optional(),
+    direccionEntregaId: z.string().cuid().optional(),
+    observaciones: z.string().trim().max(500).optional(),
+    items: z.array(itemPedidoInput).min(1).max(100),
+  })
+  .superRefine((d, ctx) => {
+    // Pedidos en MESA exigen mesaId — si no, no hay forma de cobrar la
+    // cuenta abierta ni de mostrar el pedido en el plano de salón.
+    if (d.tipo === 'MESA' && !d.mesaId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['mesaId'],
+        message: 'Pedidos de tipo MESA requieren `mesaId`',
+      });
+    }
+    // Delivery exige cliente + dirección — sin esto el repartidor no sabe
+    // adónde ir y el comprobante queda con receptor "consumidor final"
+    // sin sentido logístico.
+    const esDelivery = d.tipo === 'DELIVERY_PROPIO' || d.tipo === 'DELIVERY_PEDIDOSYA';
+    if (esDelivery && !d.clienteId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['clienteId'],
+        message: 'Pedidos de delivery requieren `clienteId`',
+      });
+    }
+    if (esDelivery && !d.direccionEntregaId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['direccionEntregaId'],
+        message: 'Pedidos de delivery requieren `direccionEntregaId`',
+      });
+    }
+    // Si llega `direccionEntregaId` sin `clienteId`, no podemos validar
+    // pertenencia (la dirección cuelga del cliente).
+    if (d.direccionEntregaId && !d.clienteId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['clienteId'],
+        message: '`direccionEntregaId` requiere también `clienteId` para verificar pertenencia',
+      });
+    }
+    // Mesa no debería tener dirección de entrega — el cliente come en el
+    // local. Permitirlo crea data sucia que confunde reportes y delivery.
+    if (d.tipo === 'MESA' && d.direccionEntregaId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['direccionEntregaId'],
+        message: 'Un pedido de MESA no puede tener `direccionEntregaId`',
+      });
+    }
+    // Mostrador/Retiro tampoco usan dirección de entrega.
+    if ((d.tipo === 'MOSTRADOR' || d.tipo === 'RETIRO_LOCAL') && d.direccionEntregaId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['direccionEntregaId'],
+        message: 'Solo los pedidos de delivery pueden llevar `direccionEntregaId`',
+      });
+    }
+  });
 
 export const transicionEstadoInput = z.object({
   estado: z.enum(['CONFIRMADO', 'EN_PREPARACION', 'LISTO', 'EN_CAMINO', 'ENTREGADO', 'FACTURADO']),

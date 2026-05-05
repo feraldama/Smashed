@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { io, type Socket } from 'socket.io-client';
 
 import { api } from '@/lib/api';
@@ -46,10 +46,14 @@ export interface KdsPedido {
   items: KdsItem[];
 }
 
-export function useKdsPedidos() {
+export function useKdsPedidos(sector?: Sector | null) {
+  // Pasamos `sector` al backend para que filtre allá y no traiga pedidos
+  // que la tab actual no necesita (hay un solo lookup; sin esto el KDS
+  // pega 1 fetch por tab cambio igual, pero trae todo el catálogo).
+  const qs = sector ? `?sector=${sector}` : '';
   return useQuery({
-    queryKey: ['kds', 'pedidos'],
-    queryFn: () => api<{ pedidos: KdsPedido[] }>('/pedidos/kds'),
+    queryKey: ['kds', 'pedidos', sector ?? 'TODOS'],
+    queryFn: () => api<{ pedidos: KdsPedido[] }>(`/pedidos/kds${qs}`),
     select: (d) => d.pedidos,
     staleTime: 2_000,
   });
@@ -87,6 +91,7 @@ export function useCambiarEstadoItem() {
 export function useKdsSocket(onPedidoNuevo?: () => void) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const qc = useQueryClient();
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (!accessToken) return;
@@ -98,12 +103,18 @@ export function useKdsSocket(onPedidoNuevo?: () => void) {
       transports: ['websocket', 'polling'],
     });
 
+    // Debounce: en sucursales con muchos pedidos llegan ráfagas de eventos
+    // (ej: cocina marca varios items en 1 segundo). Sin esto refetcheamos por
+    // cada uno; con 250ms colapsamos la ráfaga en una sola query.
     const refetch = () => {
-      void qc.invalidateQueries({ queryKey: ['kds', 'pedidos'] });
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: ['kds', 'pedidos'] });
+        debounceRef.current = null;
+      }, 250);
     };
 
     socket.on('connect_error', (err) => {
-       
       console.warn('[ws] connect_error:', err.message);
     });
 
@@ -115,8 +126,13 @@ export function useKdsSocket(onPedidoNuevo?: () => void) {
     socket.on('pedido.actualizado', refetch);
     socket.on('pedido.cancelado', refetch);
     socket.on('pedido.item.estado', refetch);
+    // Cuando otro KDS marca lista una opción de combo, queremos enterarnos
+    // (un combo cocinado por cocina+bar: si bar termina su parte primero,
+    // cocina necesita refetchear para ver la opción ya en LISTO).
+    socket.on('pedido.combo-opcion.estado', refetch);
 
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
       socket.removeAllListeners();
       socket.disconnect();
     };

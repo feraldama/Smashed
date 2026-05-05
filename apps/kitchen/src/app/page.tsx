@@ -23,6 +23,7 @@ const SECTORES: Array<{ codigo: Sector; label: string; emoji: string }> = [
   { codigo: 'COCINA_FRIA', label: 'Cocina fría', emoji: '🥗' },
   { codigo: 'PARRILLA', label: 'Parrilla', emoji: '🥩' },
   { codigo: 'BAR', label: 'Bar', emoji: '🍺' },
+  { codigo: 'CAFETERIA', label: 'Cafetería', emoji: '☕' },
   { codigo: 'POSTRES', label: 'Postres', emoji: '🍦' },
 ];
 
@@ -33,7 +34,7 @@ function KdsScreen() {
   const [filtroSector, setFiltroSector] = useState<Sector | null>('COCINA_CALIENTE');
   const [sonidoOn, setSonidoOn] = useState(true);
 
-  const { data: pedidos = [], isLoading, isError } = useKdsPedidos();
+  const { data: pedidos = [], isLoading, isError } = useKdsPedidos(filtroSector);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   // Beep generado en runtime via WebAudio (sin asset externo)
@@ -64,7 +65,10 @@ function KdsScreen() {
 
   const sucursalActual = user?.sucursales.find((s) => s.id === user.sucursalActivaId);
 
-  // Conteos por sector
+  // Conteos por sector. Nota: con el filtrado server-side por sector activo,
+  // los contadores de OTRAS tabs son aproximados (solo cuentan items de
+  // pedidos que ya pasaron el filtro del sector activo). Al cambiar de tab,
+  // el contador de la nueva tab se vuelve exacto.
   const conteosPorSector = useMemo(() => {
     const map = new Map<Sector | 'TODOS', number>();
     map.set('TODOS', 0);

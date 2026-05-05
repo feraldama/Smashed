@@ -110,6 +110,18 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
     });
     if (!cliente) throw Errors.validation({ clienteId: 'Cliente no encontrado' });
   }
+  // La dirección debe ser del cliente del pedido (Zod ya validó que si viene
+  // direccionEntregaId también vino clienteId). Cierra el agujero de pasar
+  // una dirección de otro cliente o de otra empresa.
+  if (input.direccionEntregaId && input.clienteId) {
+    const direccion = await prisma.direccionCliente.findFirst({
+      where: { id: input.direccionEntregaId, clienteId: input.clienteId },
+      select: { id: true },
+    });
+    if (!direccion) {
+      throw Errors.validation({ direccionEntregaId: 'Dirección no pertenece al cliente' });
+    }
+  }
 
   // 5) Crear pedido en transacción. El número correlativo viene de un
   //    `UPDATE ... RETURNING` atómico sobre Sucursal.ultimoNumeroPedido — Postgres

@@ -44,6 +44,16 @@ export interface CrearEmpresaInput {
     nombreCompleto: string;
     password?: string;
   };
+  sucursalInicial?: {
+    nombre: string;
+    codigo: string;
+    establecimiento: string;
+    direccion: string;
+    ciudad?: string;
+    departamento?: string;
+    telefono?: string;
+    email?: string;
+  };
 }
 
 export interface CrearEmpresaResultado {
@@ -54,6 +64,7 @@ export interface CrearEmpresaResultado {
     nombreCompleto: string;
     rol: string;
   };
+  sucursal: { id: string; nombre: string; codigo: string } | null;
   passwordInicial: string | null;
 }
 

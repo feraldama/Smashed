@@ -41,10 +41,17 @@ export async function listarCajas(user: UserCtx, opts: { incluirInactivas?: bool
   if (!user.sucursalActivaId && !user.isSuperAdmin) {
     throw Errors.forbidden('Seleccioná una sucursal activa');
   }
+  // Defensa en profundidad: además de filtrar por sucursalId activa, exigimos
+  // que la sucursal pertenezca a la empresa del usuario. Cierra el caso edge
+  // donde un token "viejo" sigue trayendo una `sucursalActivaId` de una
+  // empresa distinta (ej: usuario movido entre empresas, hint manipulado).
   const where: Prisma.CajaWhereInput =
     user.isSuperAdmin && !user.sucursalActivaId
       ? {}
-      : { sucursalId: user.sucursalActivaId ?? undefined };
+      : {
+          sucursalId: user.sucursalActivaId ?? undefined,
+          ...(user.empresaId ? { sucursal: { empresaId: user.empresaId } } : {}),
+        };
 
   const cajas = await prisma.caja.findMany({
     where: { ...where, ...(opts.incluirInactivas ? {} : { activa: true }) },

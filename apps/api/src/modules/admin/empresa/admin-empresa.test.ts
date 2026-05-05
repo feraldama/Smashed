@@ -109,6 +109,92 @@ describe('POST /admin/empresas', () => {
       .send(bodyEmpresaBase());
     expect(res.status).toBe(403);
   });
+
+  it('crea empresa + sucursal inicial + punto de expedición y asocia al admin', async () => {
+    const token = await loginAsSuper();
+    const res = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ...bodyEmpresaBase(),
+        sucursalInicial: {
+          nombre: 'Sucursal Central',
+          codigo: 'cen',
+          establecimiento: '001',
+          direccion: 'Av. España 1234',
+          ciudad: 'Asunción',
+        },
+      });
+
+    expect(res.status).toBe(201);
+    const empresaId = res.body.empresa.id as string;
+    empresasCreadasIds.push(empresaId);
+
+    expect(res.body.sucursal).toBeTruthy();
+    expect(res.body.sucursal.codigo).toBe('CEN'); // uppercase aplicado por el schema
+
+    // Sucursal en BD con punto de expedición default
+    const sucursales = await prisma.sucursal.findMany({
+      where: { empresaId },
+      include: { puntosExpedicion: true },
+    });
+    expect(sucursales).toHaveLength(1);
+    const sucursal = sucursales[0];
+    if (!sucursal) throw new Error('sucursal no creada');
+    expect(sucursal.codigo).toBe('CEN');
+    expect(sucursal.establecimiento).toBe('001');
+    expect(sucursal.puntosExpedicion).toHaveLength(1);
+    expect(sucursal.puntosExpedicion[0]?.codigo).toBe('001');
+
+    // Admin asociado a la sucursal como principal
+    const link = await prisma.usuarioSucursal.findFirst({
+      where: { sucursalId: sucursal.id },
+      include: { usuario: { select: { email: true, rol: true } } },
+    });
+    expect(link?.esPrincipal).toBe(true);
+    expect(link?.usuario.email).toBe('admin-test@empresatest.com.py');
+    expect(link?.usuario.rol).toBe('ADMIN_EMPRESA');
+
+    // Login del admin nuevo: debe tener la sucursal como activa por default
+    const login = await request(app).post('/auth/login').send({
+      email: 'admin-test@empresatest.com.py',
+      password: res.body.passwordInicial,
+    });
+    expect(login.status).toBe(200);
+    expect(login.body.user.sucursales).toHaveLength(1);
+    expect(login.body.user.sucursalActivaId).toBe(sucursal.id);
+  });
+
+  it('sin sucursalInicial el flujo sigue funcionando como antes', async () => {
+    const token = await loginAsSuper();
+    const res = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send(bodyEmpresaBase());
+    expect(res.status).toBe(201);
+    expect(res.body.sucursal).toBeNull();
+    empresasCreadasIds.push(res.body.empresa.id);
+
+    const count = await prisma.sucursal.count({ where: { empresaId: res.body.empresa.id } });
+    expect(count).toBe(0);
+  });
+
+  it('rechaza sucursalInicial con establecimiento inválido (no 3 dígitos)', async () => {
+    const token = await loginAsSuper();
+    const res = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        ...bodyEmpresaBase(),
+        sucursalInicial: {
+          nombre: 'Sucursal',
+          codigo: 'CEN',
+          establecimiento: '01', // inválido
+          direccion: 'Calle 123',
+        },
+      });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe('PATCH /admin/empresas/:id/activa', () => {

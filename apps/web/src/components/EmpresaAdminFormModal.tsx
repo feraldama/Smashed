@@ -1,10 +1,12 @@
 'use client';
 
+import { calcularDvRuc } from '@smash/shared-utils';
 import { Copy, Loader2, Save, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
+import { SwitchField } from '@/components/ui/Switch';
 import { type CrearEmpresaResultado, useCrearAdminEmpresa } from '@/hooks/useAdminEmpresas';
 import { ApiError } from '@/lib/api';
 
@@ -21,7 +23,9 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
   const [nombreFantasia, setNombreFantasia] = useState('');
   const [razonSocial, setRazonSocial] = useState('');
   const [ruc, setRuc] = useState('');
-  const [dv, setDv] = useState('');
+  // El DV se calcula automáticamente con el algoritmo módulo 11 (mismo que
+  // valida el backend). Lo derivamos del RUC en cada render — no es state.
+  const dv = ruc && /^\d+$/.test(ruc) ? String(calcularDvRuc(ruc)) : '';
   const [direccion, setDireccion] = useState('');
   const [telefono, setTelefono] = useState('');
   const [email, setEmail] = useState('');
@@ -30,6 +34,17 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
   const [adminNombre, setAdminNombre] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
+
+  // Sucursal inicial (opcional, se activa con un switch)
+  const [conSucursal, setConSucursal] = useState(true);
+  const [sucNombre, setSucNombre] = useState('');
+  const [sucCodigo, setSucCodigo] = useState('');
+  const [sucEstablecimiento, setSucEstablecimiento] = useState('001');
+  const [sucDireccion, setSucDireccion] = useState('');
+  const [sucCiudad, setSucCiudad] = useState('');
+  const [sucDepartamento, setSucDepartamento] = useState('');
+  const [sucTelefono, setSucTelefono] = useState('');
+  const [sucEmail, setSucEmail] = useState('');
 
   const [error, setError] = useState<string | null>(null);
 
@@ -43,6 +58,15 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
     if (!/^\d$/.test(dv)) return setError('DV debe ser un dígito');
     if (adminNombre.trim().length < 2) return setError('Nombre del admin requerido');
     if (!adminEmail.trim()) return setError('Email del admin requerido');
+
+    if (conSucursal) {
+      if (sucNombre.trim().length < 2) return setError('Nombre de la sucursal requerido');
+      if (sucCodigo.trim().length < 2) return setError('Código de sucursal requerido');
+      if (!/^\d{3}$/.test(sucEstablecimiento)) {
+        return setError('Establecimiento debe ser exactamente 3 dígitos');
+      }
+      if (sucDireccion.trim().length < 3) return setError('Dirección de la sucursal requerida');
+    }
 
     try {
       const r = await crear.mutateAsync({
@@ -58,6 +82,18 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
           email: adminEmail.trim().toLowerCase(),
           password: adminPassword.trim() || undefined,
         },
+        sucursalInicial: conSucursal
+          ? {
+              nombre: sucNombre.trim(),
+              codigo: sucCodigo.trim().toUpperCase(),
+              establecimiento: sucEstablecimiento,
+              direccion: sucDireccion.trim(),
+              ciudad: sucCiudad.trim() || undefined,
+              departamento: sucDepartamento.trim() || undefined,
+              telefono: sucTelefono.trim() || undefined,
+              email: sucEmail.trim().toLowerCase() || undefined,
+            }
+          : undefined,
       });
       setResultado(r);
       onCreado?.(r);
@@ -142,13 +178,13 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
                         maxLength={8}
                       />
                     </Field>
-                    <Field label="DV" required>
+                    <Field label="DV" hint="Calculado automático">
                       <Input
                         value={dv}
-                        onChange={(e) => setDv(e.target.value.replace(/\D/g, '').slice(0, 1))}
-                        className="text-center font-mono"
-                        placeholder="0"
-                        maxLength={1}
+                        readOnly
+                        tabIndex={-1}
+                        className="cursor-not-allowed bg-muted text-center font-mono"
+                        placeholder="—"
                       />
                     </Field>
                   </div>
@@ -215,6 +251,96 @@ export function EmpresaAdminFormModal({ onClose, onCreado }: Props) {
                     </Field>
                   </div>
                 </div>
+              </section>
+
+              <section>
+                <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Primera sucursal
+                </h3>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Si la creás ahora, le entregás al cliente el sistema listo para operar: sucursal
+                  con su punto de expedición default, y el admin queda asociado como principal.
+                  Después se pueden agregar más sucursales desde el panel.
+                </p>
+                <SwitchField
+                  label="Crear primera sucursal ahora"
+                  description="Recomendado — evita un paso manual del cliente"
+                  checked={conSucursal}
+                  onCheckedChange={setConSucursal}
+                />
+                {conSucursal && (
+                  <div className="mt-3 space-y-3 rounded-md border bg-muted/20 p-4">
+                    <div className="grid gap-3 sm:grid-cols-[1fr_140px_120px]">
+                      <Field label="Nombre" required>
+                        <Input
+                          value={sucNombre}
+                          onChange={(e) => setSucNombre(e.target.value)}
+                          placeholder="Asunción Centro"
+                        />
+                      </Field>
+                      <Field label="Código interno" required hint="ej: CEN, SLO">
+                        <Input
+                          value={sucCodigo}
+                          onChange={(e) => setSucCodigo(e.target.value.toUpperCase())}
+                          className="font-mono"
+                          placeholder="CEN"
+                          maxLength={20}
+                        />
+                      </Field>
+                      <Field label="Establecimiento" required hint="3 dígitos SIFEN">
+                        <Input
+                          value={sucEstablecimiento}
+                          onChange={(e) =>
+                            setSucEstablecimiento(e.target.value.replace(/\D/g, '').slice(0, 3))
+                          }
+                          className="text-center font-mono"
+                          placeholder="001"
+                          maxLength={3}
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Dirección" required>
+                      <Input
+                        value={sucDireccion}
+                        onChange={(e) => setSucDireccion(e.target.value)}
+                        placeholder="Av. Mariscal López 1234"
+                      />
+                    </Field>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Ciudad">
+                        <Input
+                          value={sucCiudad}
+                          onChange={(e) => setSucCiudad(e.target.value)}
+                          placeholder="Asunción"
+                        />
+                      </Field>
+                      <Field label="Departamento">
+                        <Input
+                          value={sucDepartamento}
+                          onChange={(e) => setSucDepartamento(e.target.value)}
+                          placeholder="Central"
+                        />
+                      </Field>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Teléfono">
+                        <Input
+                          value={sucTelefono}
+                          onChange={(e) => setSucTelefono(e.target.value)}
+                          placeholder="+595 21 ..."
+                        />
+                      </Field>
+                      <Field label="Email">
+                        <Input
+                          type="email"
+                          value={sucEmail}
+                          onChange={(e) => setSucEmail(e.target.value)}
+                          placeholder="centro@empresa.com.py"
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                )}
               </section>
 
               {error && (
@@ -289,6 +415,18 @@ function ResultadoCreacion({
         <p className="mt-1 text-sm font-medium">{resultado.admin.nombreCompleto}</p>
         <p className="text-xs text-muted-foreground">{resultado.admin.email}</p>
       </div>
+
+      {resultado.sucursal && (
+        <div className="rounded-md border bg-muted/40 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Primera sucursal
+          </p>
+          <p className="mt-1 text-sm font-medium">{resultado.sucursal.nombre}</p>
+          <p className="font-mono text-xs text-muted-foreground">
+            Código: {resultado.sucursal.codigo}
+          </p>
+        </div>
+      )}
 
       {resultado.passwordInicial && (
         <div className="rounded-md border-2 border-amber-400 bg-amber-50 p-4 dark:border-amber-500 dark:bg-amber-950/30">
