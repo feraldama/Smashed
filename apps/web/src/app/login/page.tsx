@@ -31,7 +31,9 @@ interface LoginResponse {
  * - Repartidor: pantalla de entregas.
  */
 const ROL_REDIRECT: Record<string, string> = {
-  SUPER_ADMIN: '/',
+  // SUPER_ADMIN entra al panel de gestión de empresas: desde acá administra
+  // los tenants y, si quiere operar sobre uno, usa el botón "Operar".
+  SUPER_ADMIN: '/admin/empresas',
   ADMIN_EMPRESA: '/',
   GERENTE_SUCURSAL: '/',
   CAJERO: '/pos',

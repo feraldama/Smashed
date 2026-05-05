@@ -7,6 +7,7 @@ import {
   Save,
   Settings as SettingsIcon,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
@@ -21,6 +22,7 @@ import {
   useEmpresa,
 } from '@/hooks/useEmpresa';
 import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
 export default function EmpresaPage() {
@@ -34,7 +36,35 @@ export default function EmpresaPage() {
 }
 
 function EmpresaScreen() {
-  const { data: empresa, isLoading, isError } = useEmpresa();
+  const rol = useAuthStore((s) => s.user?.rol);
+  const empresaOperando = useAuthStore((s) => s.empresaOperando);
+  // SUPER_ADMIN sin estar "operando como empresa X" no tiene una empresa
+  // propia: mostrar atajo al panel admin. Si está operando, sí cargamos la
+  // empresa target (el endpoint `/empresa/mi-empresa` mira req.context.empresaId
+  // que va a estar seteada al hacer "operar como").
+  const esSuperAdminSinEmpresa = rol === 'SUPER_ADMIN' && !empresaOperando;
+
+  const { data: empresa, isLoading, isError } = useEmpresa({ enabled: !esSuperAdminSinEmpresa });
+
+  if (esSuperAdminSinEmpresa) {
+    return (
+      <div className="rounded-md border bg-muted/20 p-6 text-sm">
+        <h1 className="mb-2 flex items-center gap-2 text-lg font-bold">
+          <Building2 className="h-5 w-5 text-primary" />
+          Empresa
+        </h1>
+        <p className="text-muted-foreground">
+          Tu rol <strong>SUPER_ADMIN</strong> no tiene una empresa propia. Para administrar las
+          empresas del sistema, andá al panel{' '}
+          <Link href="/admin/empresas" className="font-medium text-primary hover:underline">
+            Super-admin · Empresas
+          </Link>
+          . Para configurar una empresa específica, primero clickeá <strong>Operar</strong> en la
+          fila correspondiente.
+        </p>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (

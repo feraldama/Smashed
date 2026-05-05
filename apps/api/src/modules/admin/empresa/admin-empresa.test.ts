@@ -295,6 +295,123 @@ describe('Auth gating con empresa inactiva', () => {
   });
 });
 
+describe('Operar como empresa (SUPER_ADMIN)', () => {
+  it('emite access token con empresaId seteada y la primera sucursal activa', async () => {
+    const token = await loginAsSuper();
+    const created = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send(bodyEmpresaBase());
+    const empresaId = created.body.empresa.id as string;
+    empresasCreadasIds.push(empresaId);
+
+    const operar = await request(app)
+      .post(`/admin/empresas/${empresaId}/operar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(operar.status).toBe(200);
+    expect(operar.body.accessToken).toBeTypeOf('string');
+    expect(operar.body.empresa.id).toBe(empresaId);
+    // La empresa recién creada no tiene sucursales: la sucursal activa debe ser null.
+    expect(operar.body.sucursalActivaId).toBeNull();
+
+    // El token nuevo permite crear sucursales (cosa que el SUPER_ADMIN puro
+    // sin empresa no podía hacer porque el endpoint exige empresaId).
+    const sucursal = await request(app)
+      .post('/sucursales')
+      .set('Authorization', `Bearer ${operar.body.accessToken}`)
+      .send({
+        nombre: 'Sucursal de prueba',
+        codigo: 'TST',
+        establecimiento: '777',
+        direccion: 'Calle test 123',
+      });
+    expect(sucursal.status).toBe(201);
+    expect(sucursal.body.sucursal.empresaId).toBe(empresaId);
+  });
+
+  it('rechaza operar como empresa inactiva con 403 EMPRESA_INACTIVA', async () => {
+    const token = await loginAsSuper();
+    const created = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send(bodyEmpresaBase());
+    const empresaId = created.body.empresa.id as string;
+    empresasCreadasIds.push(empresaId);
+
+    await request(app)
+      .patch(`/admin/empresas/${empresaId}/activa`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ activa: false, motivo: 'Mora' });
+
+    const operar = await request(app)
+      .post(`/admin/empresas/${empresaId}/operar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(operar.status).toBe(403);
+    expect(operar.body.error.code).toBe('EMPRESA_INACTIVA');
+  });
+
+  it('admin de empresa común NO puede operar como empresa (sólo SUPER_ADMIN)', async () => {
+    const token = await loginAsSuper();
+    const created = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send(bodyEmpresaBase());
+    empresasCreadasIds.push(created.body.empresa.id);
+
+    const adminLogin = await request(app).post('/auth/login').send(ADMIN);
+    const res = await request(app)
+      .post(`/admin/empresas/${created.body.empresa.id}/operar`)
+      .set('Authorization', `Bearer ${adminLogin.body.accessToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it('salir-modo-operar emite access token con empresaId null', async () => {
+    const token = await loginAsSuper();
+    const salir = await request(app)
+      .post('/admin/empresas/salir-modo-operar')
+      .set('Authorization', `Bearer ${token}`);
+    expect(salir.status).toBe(200);
+    expect(salir.body.accessToken).toBeTypeOf('string');
+  });
+
+  it('refresh con hint empresaIdOperar preserva el modo si la empresa está activa', async () => {
+    const token = await loginAsSuper();
+    const created = await request(app)
+      .post('/admin/empresas')
+      .set('Authorization', `Bearer ${token}`)
+      .send(bodyEmpresaBase());
+    const empresaId = created.body.empresa.id as string;
+    empresasCreadasIds.push(empresaId);
+
+    // El SUPER_ADMIN se logueó al principio del test; usamos su refresh cookie.
+    const loginSuper = await request(app).post('/auth/login').send(SUPER);
+    const cookieRaw = loginSuper.headers['set-cookie'];
+    const cookieArr = Array.isArray(cookieRaw) ? cookieRaw : [String(cookieRaw)];
+    const refreshCookie = cookieArr.map((c) => /smash_refresh=([^;]+)/.exec(c)?.[1]).find(Boolean);
+
+    const refresh = await request(app)
+      .post('/auth/refresh')
+      .set('Cookie', `smash_refresh=${refreshCookie}`)
+      .send({ empresaIdOperar: empresaId });
+    expect(refresh.status).toBe(200);
+    expect(refresh.body.empresaId).toBe(empresaId);
+  });
+
+  it('refresh con hint empresaIdOperar inválida cae a empresaId null (no rompe)', async () => {
+    const loginSuper = await request(app).post('/auth/login').send(SUPER);
+    const cookieRaw = loginSuper.headers['set-cookie'];
+    const cookieArr = Array.isArray(cookieRaw) ? cookieRaw : [String(cookieRaw)];
+    const refreshCookie = cookieArr.map((c) => /smash_refresh=([^;]+)/.exec(c)?.[1]).find(Boolean);
+
+    const refresh = await request(app)
+      .post('/auth/refresh')
+      .set('Cookie', `smash_refresh=${refreshCookie}`)
+      .send({ empresaIdOperar: 'cl000000000000000000000000' });
+    expect(refresh.status).toBe(200);
+    expect(refresh.body.empresaId).toBeNull();
+  });
+});
+
 describe('GET /admin/empresas', () => {
   it('lista empresas con paginación y filtros', async () => {
     const token = await loginAsSuper();

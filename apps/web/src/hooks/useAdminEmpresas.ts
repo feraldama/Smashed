@@ -100,3 +100,23 @@ export function useCambiarActivaEmpresa() {
     onSuccess: () => qc.invalidateQueries({ queryKey: KEY }),
   });
 }
+
+export interface OperarComoResultado {
+  accessToken: string;
+  sucursalActivaId: string | null;
+  empresa: { id: string; nombreFantasia: string; razonSocial: string };
+}
+
+export function useOperarComoEmpresa() {
+  return useMutation({
+    mutationFn: (id: string) =>
+      api<OperarComoResultado>(`/admin/empresas/${id}/operar`, { method: 'POST' }),
+  });
+}
+
+export function useSalirDeOperar() {
+  return useMutation({
+    mutationFn: () =>
+      api<{ accessToken: string }>('/admin/empresas/salir-modo-operar', { method: 'POST' }),
+  });
+}

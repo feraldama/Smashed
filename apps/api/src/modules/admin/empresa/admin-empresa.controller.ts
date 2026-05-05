@@ -14,6 +14,15 @@ function ctxOrThrow(req: Request) {
   return { userId: req.context.userId, isSuperAdmin: req.context.isSuperAdmin };
 }
 
+function ctxOperar(req: Request) {
+  if (!req.context) throw Errors.unauthorized();
+  return {
+    userId: req.context.userId,
+    isSuperAdmin: req.context.isSuperAdmin,
+    rol: req.context.rol,
+  };
+}
+
 export async function crear(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
   const input = crearEmpresaInput.parse(req.body);
@@ -39,4 +48,16 @@ export async function cambiarActiva(req: Request, res: Response) {
   const input = cambiarActivaInput.parse(req.body);
   const empresa = await service.cambiarActiva(ctx, req.params.id ?? '', input);
   res.json({ empresa });
+}
+
+export async function operarComo(req: Request, res: Response) {
+  const ctx = ctxOperar(req);
+  const result = await service.operarComoEmpresa(ctx, req.params.id ?? '');
+  res.json(result);
+}
+
+export async function salirDeOperar(req: Request, res: Response) {
+  const ctx = ctxOperar(req);
+  const result = await service.salirDeOperar(ctx);
+  res.json(result);
 }

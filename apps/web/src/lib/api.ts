@@ -75,18 +75,35 @@ export async function tryRefresh(): Promise<boolean> {
   try {
     // Mandamos la sucursalActivaId actual como hint para que el server la preserve
     // si el usuario sigue teniendo acceso. Si no, cae al default (esPrincipal).
-    const sucursalActivaId = useAuthStore.getState().user?.sucursalActivaId ?? undefined;
+    const state = useAuthStore.getState();
+    const sucursalActivaId = state.user?.sucursalActivaId ?? undefined;
+    // Si el SUPER_ADMIN está operando como una empresa, mandamos el hint para
+    // que el server preserve el modo (si la empresa sigue activa).
+    const empresaIdOperar = state.empresaOperando?.id ?? undefined;
+    const body: Record<string, string> = {};
+    if (sucursalActivaId) body.sucursalActivaId = sucursalActivaId;
+    if (empresaIdOperar) body.empresaIdOperar = empresaIdOperar;
     const res = await fetch(`${BASE}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(sucursalActivaId ? { sucursalActivaId } : {}),
+      body: JSON.stringify(body),
     });
     if (!res.ok) return false;
-    const data = (await res.json()) as { accessToken: string; sucursalActivaId?: string | null };
+    const data = (await res.json()) as {
+      accessToken: string;
+      sucursalActivaId?: string | null;
+      empresaId?: string | null;
+    };
     useAuthStore.getState().setAccessToken(data.accessToken);
     if (data.sucursalActivaId !== undefined) {
       useAuthStore.getState().setSucursalActiva(data.sucursalActivaId);
+    }
+    // Si pedimos preservar el modo operar pero el server no lo confirmó (la
+    // empresa pudo haber sido suspendida), limpiamos el estado para que el
+    // banner desaparezca y la app refleje la realidad.
+    if (empresaIdOperar && data.empresaId !== empresaIdOperar) {
+      useAuthStore.getState().setEmpresaOperando(null);
     }
     return true;
   } catch {

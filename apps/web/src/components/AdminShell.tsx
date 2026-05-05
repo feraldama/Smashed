@@ -12,6 +12,7 @@ import {
   Layers,
   LayoutDashboard,
   LogOut,
+  LogIn,
   type LucideIcon,
   Package,
   PackageCheck,
@@ -29,9 +30,11 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { api } from '@/lib/api';
+import { toast } from '@/components/Toast';
+import { useSalirDeOperar } from '@/hooks/useAdminEmpresas';
+import { api, ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { puedeAcceder } from '@/lib/permissions';
 import { cn } from '@/lib/utils';
@@ -92,8 +95,15 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   // Filtrar NAV por permisos del rol actual y agrupar por sección.
   // Los items `superAdminOnly` no pasan por la matriz `MenuRol` (que es por
   // empresa) — se muestran sólo si el usuario es SUPER_ADMIN.
+  const esSuperAdmin = user?.rol === 'SUPER_ADMIN';
+  const empresaOperando = useAuthStore((s) => s.empresaOperando);
+  // SUPER_ADMIN sin operar = operador del SaaS puro: solo ve sus propias
+  // pantallas (admin/*). Las pantallas operativas (productos, sucursales,
+  // POS, etc.) son por empresa y requieren entrar al modo Operar primero.
+  const esSuperAdminPuro = esSuperAdmin && !empresaOperando;
   const itemsPermitidos = NAV.filter((item) => {
-    if (item.superAdminOnly) return user?.rol === 'SUPER_ADMIN';
+    if (item.superAdminOnly) return esSuperAdmin;
+    if (esSuperAdminPuro) return false;
     return puedeAcceder(user?.menusPermitidos, item.href);
   });
 
@@ -196,6 +206,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
       {/* Contenido — scroll propio en desktop, scroll de página en mobile */}
       <main className="flex-1 overflow-x-hidden lg:h-screen lg:overflow-y-auto">
+        {/* Banner de modo "Operar como empresa" — visible si SUPER_ADMIN está
+            impersonando a una empresa específica. */}
+        <ModoOperarBanner />
+
         {/* Topbar mobile */}
         <header className="flex h-14 items-center justify-between border-b bg-card px-4 lg:hidden">
           <h1 className="text-lg font-bold">
@@ -215,6 +229,64 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
         <div className="container mx-auto px-4 py-6">{children}</div>
       </main>
+    </div>
+  );
+}
+
+/**
+ * Banner amarillo persistente cuando un SUPER_ADMIN está operando como una
+ * empresa específica (modo "impersonate"). Reemite el access token al salir
+ * para volver al contexto sin empresaId.
+ */
+function ModoOperarBanner() {
+  const empresaOperando = useAuthStore((s) => s.empresaOperando);
+  const setEmpresaOperando = useAuthStore((s) => s.setEmpresaOperando);
+  const setAccessToken = useAuthStore((s) => s.setAccessToken);
+  const setSucursalActiva = useAuthStore((s) => s.setSucursalActiva);
+  const salir = useSalirDeOperar();
+  const [saliendo, setSaliendo] = useState(false);
+
+  if (!empresaOperando) return null;
+
+  async function handleSalir() {
+    setSaliendo(true);
+    try {
+      const r = await salir.mutateAsync();
+      setAccessToken(r.accessToken);
+      setSucursalActiva(null);
+      setEmpresaOperando(null);
+      toast.success('Volviste al modo super-admin');
+      // Redirección dura para limpiar cualquier query cacheada por TanStack
+      // que dependa del contexto de la empresa anterior.
+      window.location.href = '/admin/empresas';
+    } catch (err) {
+      setSaliendo(false);
+      toast.error(err instanceof ApiError ? err.message : 'No se pudo salir');
+    }
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-100 px-4 py-2 text-sm dark:border-amber-700 dark:bg-amber-950/40">
+      <div className="flex min-w-0 items-center gap-2 text-amber-900 dark:text-amber-100">
+        <Building2 className="h-4 w-4 shrink-0" />
+        <span className="truncate">
+          Estás operando como <strong>{empresaOperando.nombreFantasia}</strong>
+          <span className="ml-1 hidden text-xs text-amber-800 sm:inline dark:text-amber-300">
+            ({empresaOperando.razonSocial})
+          </span>
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          void handleSalir();
+        }}
+        disabled={saliendo}
+        className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500 bg-white px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-50 disabled:opacity-60 dark:bg-amber-900 dark:text-amber-100 dark:hover:bg-amber-800"
+      >
+        <LogIn className="h-3.5 w-3.5 rotate-180" />
+        {saliendo ? 'Saliendo...' : 'Salir'}
+      </button>
     </div>
   );
 }

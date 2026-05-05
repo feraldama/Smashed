@@ -50,7 +50,11 @@ export async function refresh(req: Request, res: Response) {
   const hint = refreshSchema.parse(req.body ?? {});
   const result = await service.refresh(refreshToken, clientMeta(req), hint);
   setRefreshCookie(res, result.refreshToken, result.refreshExpiresInMs);
-  res.json({ accessToken: result.accessToken, sucursalActivaId: result.sucursalActivaId });
+  res.json({
+    accessToken: result.accessToken,
+    sucursalActivaId: result.sucursalActivaId,
+    empresaId: result.empresaId,
+  });
 }
 
 export async function logout(req: Request, res: Response) {

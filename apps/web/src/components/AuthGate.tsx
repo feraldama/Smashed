@@ -4,13 +4,14 @@ import { ArrowLeft, Home, LogOut, ShieldAlert } from 'lucide-react';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, type ReactNode } from 'react';
 
+import { toast } from '@/components/Toast';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { puedeAcceder } from '@/lib/permissions';
 
 /** Mapeo rol → ruta home natural (la pantalla principal de cada rol). */
 const ROL_HOME: Record<string, string> = {
-  SUPER_ADMIN: '/',
+  SUPER_ADMIN: '/admin/empresas',
   ADMIN_EMPRESA: '/',
   GERENTE_SUCURSAL: '/',
   CAJERO: '/pos',
@@ -36,6 +37,16 @@ export function AuthGate({
   const accessToken = useAuthStore((s) => s.accessToken);
   const user = useAuthStore((s) => s.user);
   const bootstrapping = useAuthStore((s) => s.bootstrapping);
+  const empresaOperando = useAuthStore((s) => s.empresaOperando);
+
+  // SUPER_ADMIN sin operar = operador del SaaS puro: solo puede ver pantallas
+  // bajo /admin/. Si entra a una pantalla operativa (productos, sucursales,
+  // POS, etc.), lo redirigimos al panel de empresas con un aviso.
+  const esSuperAdminPuro = user?.rol === 'SUPER_ADMIN' && !empresaOperando;
+  // Defaulteamos a `true` si pathname es null para no redirigir durante el
+  // render inicial.
+  const rutaEsAdmin = pathname?.startsWith('/admin/') ?? true;
+  const debeRedirigirSuperAdmin = esSuperAdminPuro && !rutaEsAdmin;
 
   // Sólo redirigimos si no hay sesión. Si hay sesión pero el rol no tiene permiso,
   // mostramos una pantalla "Sin permisos" en lugar de redirigir al login.
@@ -43,8 +54,13 @@ export function AuthGate({
     if (bootstrapping) return;
     if (!accessToken) {
       router.replace('/login');
+      return;
     }
-  }, [bootstrapping, accessToken, router]);
+    if (debeRedirigirSuperAdmin) {
+      toast.info('Para ver esta pantalla entrá al modo "Operar" en una empresa.');
+      router.replace('/admin/empresas');
+    }
+  }, [bootstrapping, accessToken, router, debeRedirigirSuperAdmin]);
 
   if (bootstrapping) {
     return (
@@ -59,6 +75,17 @@ export function AuthGate({
 
   if (!accessToken) {
     // Mientras corre el router.replace, mostramos un spinner para no parpadear.
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  // SUPER_ADMIN sin operar entró a una pantalla operativa: ya disparamos el
+  // redirect en el effect, mostramos spinner para evitar el flash de la
+  // pantalla a la que está yendo.
+  if (debeRedirigirSuperAdmin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-primary border-t-transparent" />

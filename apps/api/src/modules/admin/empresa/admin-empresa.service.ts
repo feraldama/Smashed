@@ -7,6 +7,7 @@ import bcrypt from 'bcrypt';
 
 import { env } from '../../../config/env.js';
 import { Errors } from '../../../lib/errors.js';
+import { signAccessToken } from '../../../lib/jwt.js';
 import { prisma } from '../../../lib/prisma.js';
 
 import type {
@@ -18,6 +19,10 @@ import type {
 interface SuperAdminCtx {
   userId: string;
   isSuperAdmin: boolean;
+}
+
+interface OperarCtx extends SuperAdminCtx {
+  rol: Rol;
 }
 
 const SELECT_LISTADO = {
@@ -248,6 +253,77 @@ export async function cambiarActiva(user: SuperAdminCtx, id: string, input: Camb
   });
 
   return obtenerEmpresaPorId(user, id);
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  OPERAR COMO EMPRESA — modo "impersonate" para SUPER_ADMIN
+//  Reemite un access token con `empresaId` seteada a la empresa target. El
+//  rol sigue siendo SUPER_ADMIN, pero todos los servicios que usan
+//  `req.context.empresaId` pasan a operar sobre esa empresa.
+// ───────────────────────────────────────────────────────────────────────────
+
+export async function operarComoEmpresa(user: OperarCtx, empresaId: string) {
+  assertSuperAdmin(user);
+
+  const empresa = await prisma.empresa.findUnique({
+    where: { id: empresaId },
+    select: { id: true, activa: true, deletedAt: true, nombreFantasia: true, razonSocial: true },
+  });
+  if (!empresa || empresa.deletedAt) throw Errors.notFound('Empresa no encontrada');
+  if (!empresa.activa) throw Errors.empresaInactiva();
+
+  // Sucursal default: la primera de la empresa target. Lo seteamos para que
+  // las pantallas operativas (POS, KDS, comprobantes) tengan contexto. Si no
+  // hay sucursales todavía (empresa recién creada), queda en null.
+  const primeraSucursal = await prisma.sucursal.findFirst({
+    where: { empresaId, deletedAt: null, activa: true },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+  });
+
+  const accessToken = signAccessToken({
+    userId: user.userId,
+    empresaId: empresa.id,
+    rol: user.rol,
+    sucursalActivaId: primeraSucursal?.id ?? null,
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      empresaId: empresa.id,
+      usuarioId: user.userId,
+      accion: 'LOGIN',
+      entidad: 'Empresa',
+      entidadId: empresa.id,
+      metadata: { modo: 'operar_como', empresa: empresa.nombreFantasia },
+    },
+  });
+
+  return {
+    accessToken,
+    sucursalActivaId: primeraSucursal?.id ?? null,
+    empresa: {
+      id: empresa.id,
+      nombreFantasia: empresa.nombreFantasia,
+      razonSocial: empresa.razonSocial,
+    },
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/require-await
+export async function salirDeOperar(user: OperarCtx) {
+  // Async para mantener la firma uniforme con el resto de handlers (asyncH lo
+  // espera). No hace I/O — solo firma un nuevo access token sin empresaId.
+  assertSuperAdmin(user);
+
+  const accessToken = signAccessToken({
+    userId: user.userId,
+    empresaId: null,
+    rol: user.rol,
+    sucursalActivaId: null,
+  });
+
+  return { accessToken };
 }
 
 // ───── helpers ─────

@@ -51,11 +51,12 @@ export interface ActualizarConfiguracionInput {
   emitirTicketPorDefecto?: boolean;
 }
 
-export function useEmpresa() {
+export function useEmpresa(opts: { enabled?: boolean } = {}) {
   return useQuery({
     queryKey: ['admin', 'empresa'],
     queryFn: () => api<{ empresa: Empresa }>('/empresa/mi-empresa'),
     select: (d) => d.empresa,
+    enabled: opts.enabled ?? true,
   });
 }
 

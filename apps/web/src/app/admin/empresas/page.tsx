@@ -3,6 +3,7 @@
 import {
   Building2,
   CheckCircle2,
+  ExternalLink,
   Loader2,
   Plus,
   Power,
@@ -10,14 +11,22 @@ import {
   Search,
   XCircle,
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { EmpresaActivaModal } from '@/components/EmpresaActivaModal';
 import { EmpresaAdminFormModal } from '@/components/EmpresaAdminFormModal';
+import { toast } from '@/components/Toast';
 import { Input } from '@/components/ui/Input';
-import { type AdminEmpresa, useAdminEmpresas } from '@/hooks/useAdminEmpresas';
+import {
+  type AdminEmpresa,
+  useAdminEmpresas,
+  useOperarComoEmpresa,
+} from '@/hooks/useAdminEmpresas';
+import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
 export default function AdminEmpresasPage() {
@@ -33,6 +42,12 @@ export default function AdminEmpresasPage() {
 type FiltroActiva = 'todas' | 'activas' | 'inactivas';
 
 function AdminEmpresasScreen() {
+  const router = useRouter();
+  const setAccessToken = useAuthStore((s) => s.setAccessToken);
+  const setEmpresaOperando = useAuthStore((s) => s.setEmpresaOperando);
+  const setSucursalActiva = useAuthStore((s) => s.setSucursalActiva);
+  const operar = useOperarComoEmpresa();
+
   const [q, setQ] = useState('');
   const [filtroActiva, setFiltroActiva] = useState<FiltroActiva>('todas');
   const [creando, setCreando] = useState(false);
@@ -47,6 +62,23 @@ function AdminEmpresasScreen() {
   const empresas = data?.items ?? [];
   const total = data?.total ?? 0;
   const inactivas = empresas.filter((e) => !e.activa).length;
+
+  async function entrarComo(empresa: AdminEmpresa) {
+    if (!empresa.activa) {
+      toast.warn('La empresa está suspendida. Reactivala antes de operar.');
+      return;
+    }
+    try {
+      const r = await operar.mutateAsync(empresa.id);
+      setAccessToken(r.accessToken);
+      setSucursalActiva(r.sucursalActivaId);
+      setEmpresaOperando(r.empresa);
+      toast.success(`Operando como ${r.empresa.nombreFantasia}`);
+      router.push('/');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'No se pudo entrar al modo operar');
+    }
+  }
 
   return (
     <div>
@@ -139,26 +171,43 @@ function AdminEmpresasScreen() {
                     <EstadoBadge empresa={e} />
                   </td>
                   <td className="px-4 py-2.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setToggling(e)}
-                      className={cn(
-                        'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
-                        e.activa
-                          ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
-                          : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30',
-                      )}
-                    >
-                      {e.activa ? (
-                        <>
-                          <PowerOff className="h-3.5 w-3.5" /> Suspender
-                        </>
-                      ) : (
-                        <>
-                          <Power className="h-3.5 w-3.5" /> Reactivar
-                        </>
-                      )}
-                    </button>
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          void entrarComo(e);
+                        }}
+                        disabled={!e.activa || operar.isPending}
+                        title={
+                          e.activa
+                            ? 'Operar como esta empresa'
+                            : 'Empresa suspendida — reactivala para operar'
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-md border border-input px-2.5 py-1 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" /> Operar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setToggling(e)}
+                        className={cn(
+                          'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium transition-colors',
+                          e.activa
+                            ? 'border-destructive/30 text-destructive hover:bg-destructive/10'
+                            : 'border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30',
+                        )}
+                      >
+                        {e.activa ? (
+                          <>
+                            <PowerOff className="h-3.5 w-3.5" /> Suspender
+                          </>
+                        ) : (
+                          <>
+                            <Power className="h-3.5 w-3.5" /> Reactivar
+                          </>
+                        )}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

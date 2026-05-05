@@ -121,7 +121,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
 export async function refresh(
   rawToken: string,
   meta: ClientMeta,
-  hint?: { sucursalActivaId?: string },
+  hint?: { sucursalActivaId?: string; empresaIdOperar?: string },
 ) {
   const payload = verifyRefreshToken(rawToken);
   const tokenHash = hashToken(rawToken);
@@ -183,6 +183,22 @@ export async function refresh(
     hint?.sucursalActivaId && (isSuperAdmin || accesibles.has(hint.sucursalActivaId))
       ? hint.sucursalActivaId
       : null;
+
+  // empresaId del nuevo access token: por default el del usuario (null para
+  // SUPER_ADMIN). Si es SUPER_ADMIN y mandó hint `empresaIdOperar`, validamos
+  // que la empresa exista y esté activa, y la usamos para preservar el modo
+  // "operar como empresa X" cuando se le vence el access token.
+  let empresaIdParaToken = stored.usuario.empresaId;
+  if (isSuperAdmin && hint?.empresaIdOperar) {
+    const target = await prisma.empresa.findUnique({
+      where: { id: hint.empresaIdOperar },
+      select: { id: true, activa: true, deletedAt: true },
+    });
+    if (target && target.activa && !target.deletedAt) {
+      empresaIdParaToken = target.id;
+    }
+  }
+
   const sucursalActivaId =
     hintAceptable ??
     stored.usuario.sucursales.find((s) => s.esPrincipal)?.sucursalId ??
@@ -191,7 +207,7 @@ export async function refresh(
 
   const accessToken = signAccessToken({
     userId: stored.usuario.id,
-    empresaId: stored.usuario.empresaId,
+    empresaId: empresaIdParaToken,
     rol: stored.usuario.rol,
     sucursalActivaId,
   });
@@ -201,6 +217,7 @@ export async function refresh(
     refreshToken: nuevo.token,
     refreshExpiresInMs: parseDurationToMs(env.JWT_REFRESH_TTL),
     sucursalActivaId,
+    empresaId: empresaIdParaToken,
   };
 }
 
