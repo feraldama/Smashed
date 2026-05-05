@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import adminEmpresaRoutes from './modules/admin/empresa/admin-empresa.routes.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import cajaRoutes from './modules/caja/caja.routes.js';
 import catalogoRoutes from './modules/catalogo/catalogo.routes.js';
@@ -25,6 +26,7 @@ router.get('/health', (_req, res) => {
 });
 
 router.use('/auth', authRoutes);
+router.use('/admin/empresas', adminEmpresaRoutes);
 router.use('/usuarios', usuarioRoutes);
 router.use('/sucursales', sucursalRoutes);
 router.use('/empresa', empresaRoutes);

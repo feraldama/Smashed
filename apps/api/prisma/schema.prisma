@@ -245,6 +245,11 @@ model Empresa {
   colorSecundario String?  @map("color_secundario") // hex
   zonaHoraria     String   @default("America/Asuncion") @map("zona_horaria")
   activa          Boolean  @default(true)
+  // Campos para suspensión administrativa (ej. cliente que dejó de pagar).
+  // El SUPER_ADMIN los setea al desactivar la empresa; quedan para auditoría
+  // y para mostrar en el panel administrativo.
+  motivoInactiva     String?   @map("motivo_inactiva")
+  fechaInactivacion  DateTime? @map("fecha_inactivacion")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")

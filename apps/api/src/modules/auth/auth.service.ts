@@ -37,6 +37,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
   const usuario = await prisma.usuario.findFirst({
     where: { email: input.email, deletedAt: null, activo: true },
     include: {
+      empresa: { select: { activa: true, motivoInactiva: true } },
       sucursales: {
         include: {
           sucursal: { select: { id: true, nombre: true, codigo: true, establecimiento: true } },
@@ -51,6 +52,11 @@ export async function login(input: LoginInput, meta: ClientMeta) {
   if (!ok) {
     logger.warn({ email: input.email, ip: meta.ip }, 'Login fallido');
     throw Errors.invalidCredentials();
+  }
+
+  // Empresa suspendida → bloqueamos login. SUPER_ADMIN no tiene empresa, sigue.
+  if (usuario.empresa && !usuario.empresa.activa) {
+    throw Errors.empresaInactiva(usuario.empresa.motivoInactiva);
   }
 
   // Sucursal activa por default: la marcada como principal, o la primera, o null.
@@ -125,6 +131,7 @@ export async function refresh(
     include: {
       usuario: {
         include: {
+          empresa: { select: { activa: true, motivoInactiva: true } },
           sucursales: { select: { sucursalId: true, esPrincipal: true } },
         },
       },
@@ -149,6 +156,16 @@ export async function refresh(
   if (stored.expiraEn < new Date()) throw Errors.tokenExpired();
   if (stored.usuario.id !== payload.sub) throw Errors.tokenInvalid();
   if (!stored.usuario.activo || stored.usuario.deletedAt) throw Errors.unauthorized();
+
+  // Empresa suspendida → revocamos el refresh actual y rechazamos. El access
+  // token vivo se va a vencer solo en ≤15 min sin que podamos rotarlo.
+  if (stored.usuario.empresa && !stored.usuario.empresa.activa) {
+    await prisma.refreshToken.update({
+      where: { id: stored.id },
+      data: { revocadoEn: new Date() },
+    });
+    throw Errors.empresaInactiva(stored.usuario.empresa.motivoInactiva);
+  }
 
   // Rotación: emitir nuevo refresh + revocar el viejo apuntándolo al sucesor
   const nuevo = await issueRefreshToken(stored.usuario.id, meta);

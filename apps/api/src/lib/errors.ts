@@ -15,6 +15,7 @@ export type ErrorCode =
   | 'TOKEN_REVOKED'
   | 'TENANT_MISMATCH'
   | 'SUCURSAL_NO_AUTORIZADA'
+  | 'EMPRESA_INACTIVA'
   | 'INTERNAL_ERROR'
   | 'RATE_LIMITED';
 
@@ -30,6 +31,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   TOKEN_REVOKED: 401,
   TENANT_MISMATCH: 403,
   SUCURSAL_NO_AUTORIZADA: 403,
+  EMPRESA_INACTIVA: 403,
   RATE_LIMITED: 429,
   INTERNAL_ERROR: 500,
 };
@@ -61,6 +63,12 @@ export const Errors = {
     new AppError('TENANT_MISMATCH', 'No se puede acceder a recursos de otra empresa'),
   sucursalNoAutorizada: () =>
     new AppError('SUCURSAL_NO_AUTORIZADA', 'Usuario sin acceso a esa sucursal'),
+  empresaInactiva: (motivo?: string | null) =>
+    new AppError(
+      'EMPRESA_INACTIVA',
+      'La empresa se encuentra inactiva. Contactá con el administrador del sistema.',
+      motivo ? { motivo } : undefined,
+    ),
   validation: (details: Record<string, unknown>) =>
     new AppError('VALIDATION_ERROR', 'Datos inválidos', details),
 };

@@ -41,9 +41,22 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   group?: string;
+  /**
+   * Si es true, el item se muestra solo para SUPER_ADMIN y se saltea el
+   * filtro `puedeAcceder` (que es por empresa). Útil para pantallas
+   * transversales del operador del SaaS.
+   */
+  superAdminOnly?: boolean;
 }
 
 const NAV: NavItem[] = [
+  {
+    href: '/admin/empresas',
+    label: 'Empresas',
+    icon: Building2,
+    group: 'Super-admin',
+    superAdminOnly: true,
+  },
   { href: '/', label: 'Dashboard', icon: LayoutDashboard, group: 'General' },
   { href: '/productos', label: 'Productos', icon: Utensils, group: 'Catálogo' },
   { href: '/combos', label: 'Combos', icon: Layers, group: 'Catálogo' },
@@ -77,7 +90,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   const activeLinkRef = useRef<HTMLAnchorElement | null>(null);
 
   // Filtrar NAV por permisos del rol actual y agrupar por sección.
-  const itemsPermitidos = NAV.filter((item) => puedeAcceder(user?.menusPermitidos, item.href));
+  // Los items `superAdminOnly` no pasan por la matriz `MenuRol` (que es por
+  // empresa) — se muestran sólo si el usuario es SUPER_ADMIN.
+  const itemsPermitidos = NAV.filter((item) => {
+    if (item.superAdminOnly) return user?.rol === 'SUPER_ADMIN';
+    return puedeAcceder(user?.menusPermitidos, item.href);
+  });
 
   // El href "activo" es el MÁS LARGO que matchea el pathname actual. Así
   // estando en `/caja/cierres`, sólo se ilumina "Cierres Z" (no "Caja"
