@@ -15,6 +15,8 @@ export type SectorComanda =
 
 export interface KdsItemModificador {
   id: string;
+  /** Snapshot del precio extra. BigInt serializado como string. ">0" = agregar (con costo). */
+  precioExtra: string;
   modificadorOpcion: { nombre: string };
   /** Si tiene comboGrupo, el modificador aplica al componente del combo, no al item global. */
   comboGrupo: { id: string; nombre: string } | null;

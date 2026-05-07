@@ -533,7 +533,9 @@ function TareaRow({
 
           {/* Modificadores: en `item` mostramos los que aplican al item global
                (sin comboGrupoId). En `opcion` mostramos los que apuntan
-               específicamente al componente del combo. */}
+               específicamente al componente del combo.
+               Color: rojo para restricciones / preferencias (Sin X, Bien cocido)
+               y emerald + bold para agregar con costo (precioExtra > 0). */}
           {(() => {
             const mods =
               tarea.kind === 'item'
@@ -543,10 +545,22 @@ function TareaRow({
                   );
             if (mods.length === 0) return null;
             return (
-              <ul className="mt-0.5 text-[11px] font-medium text-red-700 dark:text-red-400">
-                {mods.map((m) => (
-                  <li key={m.id}>+ {m.modificadorOpcion.nombre}</li>
-                ))}
+              <ul className="mt-0.5 text-[11px]">
+                {mods.map((m) => {
+                  const esAgregar = m.precioExtra !== '0';
+                  return (
+                    <li
+                      key={m.id}
+                      className={cn(
+                        esAgregar
+                          ? 'font-bold text-emerald-700 dark:text-emerald-400'
+                          : 'font-medium text-red-700 dark:text-red-400',
+                      )}
+                    >
+                      + {m.modificadorOpcion.nombre}
+                    </li>
+                  );
+                })}
               </ul>
             );
           })()}
