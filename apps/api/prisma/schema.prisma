@@ -841,11 +841,13 @@ model Combo {
 
   descripcion String?
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   grupos ComboGrupo[]
 
+  @@index([deletedAt])
   @@map("combo")
 }
 
@@ -861,14 +863,16 @@ model ComboGrupo {
   tipo     TipoModificadorGrupo @default(UNICA)
   obligatorio Boolean @default(true)
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   opciones        ComboGrupoOpcion[]
   itemsPedidoSel  ItemPedidoComboOpcion[]
   itemsPedidoMod  ItemPedidoModificador[]
 
   @@index([comboId])
+  @@index([deletedAt])
   @@map("combo_grupo")
 }
 
@@ -884,13 +888,15 @@ model ComboGrupoOpcion {
   esDefault       Boolean  @default(false) @map("es_default")
   orden           Int      @default(0)
 
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
 
   itemsPedidoSel ItemPedidoComboOpcion[]
 
   @@unique([comboGrupoId, productoVentaId])
   @@index([comboGrupoId])
+  @@index([deletedAt])
   @@map("combo_grupo_opcion")
 }
 

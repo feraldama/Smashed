@@ -1322,11 +1322,14 @@ async function construirItemsPedido(args: {
       },
       combo: {
         select: {
+          deletedAt: true,
           grupos: {
+            where: { deletedAt: null },
             select: {
               id: true,
               obligatorio: true,
               opciones: {
+                where: { deletedAt: null },
                 select: {
                   id: true,
                   precioExtra: true,
@@ -1399,7 +1402,7 @@ async function construirItemsPedido(args: {
 
     let extraCombo = 0n;
     if (prod.esCombo) {
-      if (!prod.combo) {
+      if (!prod.combo || prod.combo.deletedAt) {
         throw Errors.validation({ producto: 'Producto marcado como combo pero sin configuración' });
       }
       const elegidas = it.combosOpcion ?? [];

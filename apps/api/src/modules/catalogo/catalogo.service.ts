@@ -167,9 +167,11 @@ export async function obtenerProducto(args: {
       combo: {
         include: {
           grupos: {
+            where: { deletedAt: null },
             orderBy: { orden: 'asc' },
             include: {
               opciones: {
+                where: { deletedAt: null },
                 orderBy: { orden: 'asc' },
                 include: {
                   productoVenta: {
@@ -225,8 +227,13 @@ export async function obtenerProducto(args: {
       ? producto.preciosSucursal[0]?.precio
       : undefined;
 
+  // El include de `combo` no filtra por deletedAt en el include 1:1; si quedó
+  // soft-deleted (eliminarCombo) lo tratamos como inexistente para el cliente.
+  const comboActivo = producto.combo && !producto.combo.deletedAt ? producto.combo : null;
+
   return {
     ...producto,
+    combo: comboActivo,
     precio: override ?? producto.precioBase,
     tienePrecioSucursal: override !== undefined,
   };
@@ -587,12 +594,22 @@ export async function eliminarReceta(empresaId: string, productoVentaId: string)
 /**
  * Reemplaza la configuración de combo de un producto.
  *
+ * Estrategia: diff + soft delete. NO podemos hacer delete-recreate porque
+ * `ItemPedidoComboOpcion` tiene FK Restrict a `combo_grupo` y
+ * `combo_grupo_opcion` — borrar grupos/opciones referenciados por pedidos
+ * históricos rompe la integridad. En vez de eso:
+ *  - Hacemos match de grupos por `nombre` (case-insensitive) y de opciones
+ *    por `productoVentaId` dentro del grupo (es la unique natural).
+ *  - Lo que matchea, se actualiza in-place (resurrecta si estaba soft-deleted).
+ *  - Lo que sobra, se marca `deletedAt = now()`. Las lecturas activas filtran
+ *    `deletedAt: null`; los pedidos viejos siguen resolviendo el grupo/opción
+ *    soft-deleted (la FK no filtra), preservando el historial.
+ *
  * Validaciones:
- *  - Producto pertenece a la empresa
- *  - Cada opción referencia un ProductoVenta de la misma empresa, vendible y NO combo
- *  - Por cada grupo: a lo sumo una opción con esDefault=true
- *  - Si el producto no tenía esCombo=true, lo marca en la misma transacción
- *  - Operación atómica: borra combo previo (cascada) y crea nuevo
+ *  - Producto pertenece a la empresa.
+ *  - Cada opción referencia un ProductoVenta de la misma empresa y NO combo.
+ *  - Por grupo: ≤ 1 opción `esDefault`, sin productos repetidos.
+ *  - Nombres de grupo únicos dentro del combo (necesario para el matching).
  */
 export async function setCombo(empresaId: string, productoVentaId: string, input: SetComboInput) {
   const producto = await prisma.productoVenta.findFirst({
@@ -600,6 +617,11 @@ export async function setCombo(empresaId: string, productoVentaId: string, input
     select: { id: true, esCombo: true },
   });
   if (!producto) throw Errors.notFound('Producto no encontrado');
+
+  const nombresGrupo = input.grupos.map((g) => g.nombre.trim().toLowerCase());
+  if (new Set(nombresGrupo).size !== nombresGrupo.length) {
+    throw Errors.validation({ grupos: 'Hay nombres de grupo repetidos en el combo' });
+  }
 
   for (const [i, g] of input.grupos.entries()) {
     const defaults = g.opciones.filter((o) => o.esDefault).length;
@@ -633,7 +655,7 @@ export async function setCombo(empresaId: string, productoVentaId: string, input
   // (insumos intermedios) y productos exclusivos de combo (no vendibles solos).
   // El admin decide la categorización; si lo agregó al combo es porque tiene
   // sentido como componente. Lo único que sigue prohibido son los combos
-  // anidados — eso sí es ambiguo de armar (ver abajo).
+  // anidados — eso sí es ambiguo de armar.
   const combosAnidados = opcionesProductos.filter((p) => p.esCombo).map((p) => p.id);
   if (combosAnidados.length > 0) {
     throw Errors.validation({
@@ -642,8 +664,6 @@ export async function setCombo(empresaId: string, productoVentaId: string, input
   }
 
   return prisma.$transaction(async (tx) => {
-    await tx.combo.deleteMany({ where: { productoVentaId } });
-
     if (!producto.esCombo) {
       await tx.productoVenta.update({
         where: { id: productoVentaId },
@@ -651,37 +671,139 @@ export async function setCombo(empresaId: string, productoVentaId: string, input
       });
     }
 
-    await tx.combo.create({
-      data: {
-        empresaId,
-        productoVentaId,
-        descripcion: input.descripcion,
-        grupos: {
-          create: input.grupos.map((g) => ({
-            nombre: g.nombre,
-            orden: g.orden,
-            tipo: g.tipo,
-            obligatorio: g.obligatorio,
-            opciones: {
-              create: g.opciones.map((o) => ({
-                productoVentaId: o.productoVentaId,
-                precioExtra: o.precioExtra,
-                esDefault: o.esDefault,
-                orden: o.orden,
-              })),
-            },
-          })),
-        },
-      },
+    // Upsert del Combo (resurrecta si estaba soft-deleted).
+    const comboExistente = await tx.combo.findUnique({
+      where: { productoVentaId },
+      select: { id: true },
     });
+    const combo = comboExistente
+      ? await tx.combo.update({
+          where: { id: comboExistente.id },
+          data: { descripcion: input.descripcion, deletedAt: null },
+          select: { id: true },
+        })
+      : await tx.combo.create({
+          data: { empresaId, productoVentaId, descripcion: input.descripcion },
+          select: { id: true },
+        });
+
+    // Cargo grupos existentes (incluye soft-deleted, para poder resurrectar
+    // si el admin re-agrega un grupo con el mismo nombre).
+    const gruposExistentes = await tx.comboGrupo.findMany({
+      where: { comboId: combo.id },
+      select: { id: true, nombre: true },
+    });
+    const grupoPorNombre = new Map(
+      gruposExistentes.map((g) => [g.nombre.trim().toLowerCase(), g.id]),
+    );
+    const grupoIdsEnInput: string[] = [];
+
+    for (const g of input.grupos) {
+      const key = g.nombre.trim().toLowerCase();
+      const existenteId = grupoPorNombre.get(key);
+      const grupoId = existenteId
+        ? (
+            await tx.comboGrupo.update({
+              where: { id: existenteId },
+              data: {
+                nombre: g.nombre,
+                orden: g.orden,
+                tipo: g.tipo,
+                obligatorio: g.obligatorio,
+                deletedAt: null,
+              },
+              select: { id: true },
+            })
+          ).id
+        : (
+            await tx.comboGrupo.create({
+              data: {
+                comboId: combo.id,
+                nombre: g.nombre,
+                orden: g.orden,
+                tipo: g.tipo,
+                obligatorio: g.obligatorio,
+              },
+              select: { id: true },
+            })
+          ).id;
+      grupoIdsEnInput.push(grupoId);
+
+      // Diff de opciones del grupo. La unique natural es (grupoId, productoVentaId).
+      const opcionesExistentes = await tx.comboGrupoOpcion.findMany({
+        where: { comboGrupoId: grupoId },
+        select: { id: true, productoVentaId: true },
+      });
+      const opcionPorProducto = new Map(opcionesExistentes.map((o) => [o.productoVentaId, o.id]));
+      const productosEnGrupo = new Set(g.opciones.map((o) => o.productoVentaId));
+
+      for (const o of g.opciones) {
+        const opcExistenteId = opcionPorProducto.get(o.productoVentaId);
+        if (opcExistenteId) {
+          await tx.comboGrupoOpcion.update({
+            where: { id: opcExistenteId },
+            data: {
+              precioExtra: o.precioExtra,
+              esDefault: o.esDefault,
+              orden: o.orden,
+              deletedAt: null,
+            },
+          });
+        } else {
+          await tx.comboGrupoOpcion.create({
+            data: {
+              comboGrupoId: grupoId,
+              productoVentaId: o.productoVentaId,
+              precioExtra: o.precioExtra,
+              esDefault: o.esDefault,
+              orden: o.orden,
+            },
+          });
+        }
+      }
+
+      // Soft-delete de opciones que ya no están en el input y siguen activas.
+      await tx.comboGrupoOpcion.updateMany({
+        where: {
+          comboGrupoId: grupoId,
+          deletedAt: null,
+          productoVentaId: { notIn: [...productosEnGrupo] },
+        },
+        data: { deletedAt: new Date() },
+      });
+    }
+
+    // Soft-delete de grupos que ya no están en el input + sus opciones activas.
+    const gruposASoftDelete = await tx.comboGrupo.findMany({
+      where: {
+        comboId: combo.id,
+        deletedAt: null,
+        id: { notIn: grupoIdsEnInput },
+      },
+      select: { id: true },
+    });
+    if (gruposASoftDelete.length > 0) {
+      const ids = gruposASoftDelete.map((g) => g.id);
+      const ahora = new Date();
+      await tx.comboGrupoOpcion.updateMany({
+        where: { comboGrupoId: { in: ids }, deletedAt: null },
+        data: { deletedAt: ahora },
+      });
+      await tx.comboGrupo.updateMany({
+        where: { id: { in: ids } },
+        data: { deletedAt: ahora },
+      });
+    }
 
     return tx.combo.findUnique({
       where: { productoVentaId },
       include: {
         grupos: {
+          where: { deletedAt: null },
           orderBy: { orden: 'asc' },
           include: {
             opciones: {
+              where: { deletedAt: null },
               orderBy: { orden: 'asc' },
               include: {
                 productoVenta: {
@@ -709,8 +831,25 @@ export async function eliminarCombo(empresaId: string, productoVentaId: string) 
   });
   if (!producto) throw Errors.notFound('Producto no encontrado');
 
+  // Soft delete del árbol completo. No podemos hard-delete porque los grupos /
+  // opciones pueden estar referenciados por pedidos históricos (FK Restrict).
   return prisma.$transaction(async (tx) => {
-    await tx.combo.deleteMany({ where: { productoVentaId } });
+    const combo = await tx.combo.findUnique({
+      where: { productoVentaId },
+      select: { id: true, deletedAt: true },
+    });
+    if (combo && !combo.deletedAt) {
+      const ahora = new Date();
+      await tx.comboGrupoOpcion.updateMany({
+        where: { comboGrupo: { comboId: combo.id }, deletedAt: null },
+        data: { deletedAt: ahora },
+      });
+      await tx.comboGrupo.updateMany({
+        where: { comboId: combo.id, deletedAt: null },
+        data: { deletedAt: ahora },
+      });
+      await tx.combo.update({ where: { id: combo.id }, data: { deletedAt: ahora } });
+    }
     if (producto.esCombo) {
       await tx.productoVenta.update({
         where: { id: productoVentaId },
