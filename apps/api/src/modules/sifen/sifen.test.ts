@@ -73,6 +73,22 @@ async function reset() {
   mockClient.reset();
 }
 
+// Inyecta opciones de modificadores obligatorios (ej: "Punto de cocción") que
+// el servicio de pedidos exige para hamburguesas/lomitos.
+async function modificadoresObligatoriosDe(productoVentaId: string) {
+  const grupos = await prisma.productoVentaModificadorGrupo.findMany({
+    where: { productoVentaId, modificadorGrupo: { obligatorio: true } },
+    select: {
+      modificadorGrupo: {
+        select: { opciones: { take: 1, orderBy: { orden: 'asc' }, select: { id: true } } },
+      },
+    },
+  });
+  return grupos.flatMap((g) =>
+    g.modificadorGrupo.opciones.map((o) => ({ modificadorOpcionId: o.id })),
+  );
+}
+
 async function emitirFacturaParaCliente(token: string) {
   // Abrir caja
   const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
@@ -84,10 +100,14 @@ async function emitirFacturaParaCliente(token: string) {
 
   // Crear pedido
   const ham = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
+  const modificadores = await modificadoresObligatoriosDe(ham.id);
   const crear = await request(app)
     .post('/pedidos')
     .set('Authorization', `Bearer ${token}`)
-    .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: ham.id, cantidad: 1 }] });
+    .send({
+      tipo: 'MOSTRADOR',
+      items: [{ productoVentaId: ham.id, cantidad: 1, modificadores }],
+    });
 
   await request(app)
     .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
@@ -179,10 +199,14 @@ describe('POST /comprobantes/:id/sifen/enviar', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ montoInicial: 100000 });
     const ham = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
+    const mods = await modificadoresObligatoriosDe(ham.id);
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: ham.id, cantidad: 1 }] });
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [{ productoVentaId: ham.id, cantidad: 1, modificadores: mods }],
+      });
     await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
       .set('Authorization', `Bearer ${token}`);

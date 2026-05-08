@@ -46,6 +46,33 @@ async function getProductoIdPorCodigo(codigo: string) {
   return p.id;
 }
 
+// "Punto de cocción" (UNICA, obligatorio) viene del seed y aplica a hamburguesas
+// y lomitos. Los pedidos los exige el servicio, así que cacheamos la opción
+// "Medio" (precioExtra=0) para inyectarla en los items HAM-*/LOM-* sin alterar
+// los totales esperados por los asserts.
+let _puntoMedioId: string | null = null;
+async function puntoMedio() {
+  if (_puntoMedioId) return _puntoMedioId;
+  const op = await prisma.modificadorOpcion.findFirstOrThrow({
+    where: { modificadorGrupo: { nombre: 'Punto de cocción' }, nombre: 'Medio' },
+  });
+  _puntoMedioId = op.id;
+  return op.id;
+}
+
+type ModEntrada = { modificadorOpcionId: string; comboGrupoId?: string };
+async function itemHam(
+  productoVentaId: string,
+  cantidad: number,
+  modificadoresExtra: ModEntrada[] = [],
+) {
+  return {
+    productoVentaId,
+    cantidad,
+    modificadores: [{ modificadorOpcionId: await puntoMedio() }, ...modificadoresExtra],
+  };
+}
+
 describe('POST /pedidos — crear', () => {
   it('pedido simple (1 hamburguesa) → calcula precio + IVA correctamente', async () => {
     await reset();
@@ -57,7 +84,7 @@ describe('POST /pedidos — crear', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'MOSTRADOR',
-        items: [{ productoVentaId: smashId, cantidad: 2 }],
+        items: [await itemHam(smashId, 2)],
       });
 
     expect(res.status).toBe(201);
@@ -91,22 +118,19 @@ describe('POST /pedidos — crear', () => {
       .send({
         tipo: 'MOSTRADOR',
         items: [
-          {
-            productoVentaId: smashId,
-            cantidad: 1,
-            modificadores: [
-              { modificadorOpcionId: extraQueso.id }, // +5000
-              { modificadorOpcionId: extraBacon.id }, // +10000
-            ],
-          },
+          await itemHam(smashId, 1, [
+            { modificadorOpcionId: extraQueso.id }, // +5000
+            { modificadorOpcionId: extraBacon.id }, // +10000
+          ]),
         ],
       });
 
     expect(res.status).toBe(201);
-    // 35000 + 5000 + 10000 = 50000
+    // 35000 + 5000 + 10000 = 50000 (Punto de cocción "Medio" precioExtra=0)
     expect(res.body.pedido.total).toBe('50000');
     expect(res.body.pedido.items[0].precioModificadores).toBe('15000');
-    expect(res.body.pedido.items[0].modificadores.length).toBe(2);
+    // 2 extras + 1 punto de cocción = 3 modificadores
+    expect(res.body.pedido.items[0].modificadores.length).toBe(3);
   });
 
   it('pedido con combo → valida que se elija opción por cada grupo obligatorio', async () => {
@@ -130,12 +154,21 @@ describe('POST /pedidos — crear', () => {
       comboGrupoId: g.id,
       comboGrupoOpcionId: g.opciones.find((o) => o.esDefault)!.id,
     }));
+    // Hamburguesa elegida en el combo necesita Punto de cocción (componente del combo).
+    const grupoHam = combo.grupos.find((g) => g.nombre.toLowerCase().includes('hamburguesa'))!;
     const res = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'MOSTRADOR',
-        items: [{ productoVentaId: comboId, cantidad: 1, combosOpcion: opciones }],
+        items: [
+          {
+            productoVentaId: comboId,
+            cantidad: 1,
+            combosOpcion: opciones,
+            modificadores: [{ modificadorOpcionId: await puntoMedio(), comboGrupoId: grupoHam.id }],
+          },
+        ],
       });
     expect(res.status).toBe(201);
     // Combo Smash precio base 55000, todas opciones default = 0 extra
@@ -170,7 +203,14 @@ describe('POST /pedidos — crear', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'MOSTRADOR',
-        items: [{ productoVentaId: comboId, cantidad: 1, combosOpcion: opciones }],
+        items: [
+          {
+            productoVentaId: comboId,
+            cantidad: 1,
+            combosOpcion: opciones,
+            modificadores: [{ modificadorOpcionId: await puntoMedio(), comboGrupoId: grupoHam.id }],
+          },
+        ],
       });
     expect(res.status).toBe(201);
     // 55000 + 8000 = 63000
@@ -199,12 +239,13 @@ describe('POST /pedidos — crear', () => {
     const token = await loginAs(CAJERO_CENTRO);
     const ham = await getProductoIdPorCodigo('HAM-001');
 
+    const itemBase = await itemHam(ham, 1);
     const results = await Promise.all(
       Array.from({ length: 10 }, () =>
         request(app)
           .post('/pedidos')
           .set('Authorization', `Bearer ${token}`)
-          .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: ham, cantidad: 1 }] }),
+          .send({ tipo: 'MOSTRADOR', items: [itemBase] }),
       ),
     );
 
@@ -250,7 +291,7 @@ describe('POST /pedidos/:id/confirmar — descuento stock recursivo', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 2 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 2)] });
     expect(crear.status).toBe(201);
     const pedidoId = crear.body.pedido.id as string;
 
@@ -289,7 +330,7 @@ describe('POST /pedidos/:id/confirmar — descuento stock recursivo', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const pedidoId = crear.body.pedido.id as string;
 
     await request(app)
@@ -313,6 +354,7 @@ describe('POST /pedidos/:id/confirmar — descuento stock recursivo', () => {
       comboGrupoId: g.id,
       comboGrupoOpcionId: g.opciones.find((o) => o.esDefault)!.id,
     }));
+    const grupoHam = combo.grupos.find((g) => g.nombre.toLowerCase().includes('hamburguesa'))!;
 
     const sucursalCentro = await prisma.sucursal.findFirstOrThrow({
       where: { nombre: 'Asunción Centro' },
@@ -329,7 +371,14 @@ describe('POST /pedidos/:id/confirmar — descuento stock recursivo', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({
         tipo: 'MOSTRADOR',
-        items: [{ productoVentaId: comboId, cantidad: 1, combosOpcion: opciones }],
+        items: [
+          {
+            productoVentaId: comboId,
+            cantidad: 1,
+            combosOpcion: opciones,
+            modificadores: [{ modificadorOpcionId: await puntoMedio(), comboGrupoId: grupoHam.id }],
+          },
+        ],
       });
     await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
@@ -351,7 +400,7 @@ describe('POST /pedidos/:id/cancelar', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
 
     const cancel = await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/cancelar`)
@@ -384,7 +433,7 @@ describe('POST /pedidos/:id/cancelar', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 3 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 3)] });
 
     await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
@@ -419,7 +468,7 @@ describe('POST /pedidos/:id/cancelar', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const pedidoId = crear.body.pedido.id as string;
 
     // Avanzar hasta FACTURADO via transitions
@@ -450,7 +499,7 @@ describe('PATCH /pedidos/:id/estado — transiciones', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
 
     const t = await request(app)
       .patch(`/pedidos/${crear.body.pedido.id}/estado`)
@@ -467,7 +516,7 @@ describe('PATCH /pedidos/:id/estado — transiciones', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${tCajero}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const id = crear.body.pedido.id;
 
     await request(app).post(`/pedidos/${id}/confirmar`).set('Authorization', `Bearer ${tCajero}`);
@@ -499,7 +548,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const id = crear.body.pedido.id;
     const totalInicial = BigInt(crear.body.pedido.total);
     await request(app).post(`/pedidos/${id}/confirmar`).set('Authorization', `Bearer ${token}`);
@@ -520,10 +569,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
       .post(`/pedidos/${id}/items`)
       .set('Authorization', `Bearer ${token}`)
       .send({
-        items: [
-          { productoVentaId: dobleId, cantidad: 2 },
-          { productoVentaId: smashId, cantidad: 1 },
-        ],
+        items: [await itemHam(dobleId, 2), await itemHam(smashId, 1)],
       });
     expect(agregar.status).toBe(200);
     expect(agregar.body.pedido.items.length).toBeGreaterThanOrEqual(3);
@@ -553,7 +599,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const id = crear.body.pedido.id;
     // NO confirmamos
 
@@ -570,7 +616,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const agregar = await request(app)
       .post(`/pedidos/${id}/items`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ items: [await itemHam(smashId, 1)] });
     expect(agregar.status).toBe(200);
 
     // Stock NO debe haber cambiado
@@ -588,7 +634,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${tCajero}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const id = crear.body.pedido.id;
     await request(app).post(`/pedidos/${id}/confirmar`).set('Authorization', `Bearer ${tCajero}`);
     await request(app)
@@ -603,7 +649,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const agregar = await request(app)
       .post(`/pedidos/${id}/items`)
       .set('Authorization', `Bearer ${tCajero}`)
-      .send({ items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ items: [await itemHam(smashId, 1)] });
     expect(agregar.status).toBe(200);
     expect(agregar.body.pedido.estado).toBe('EN_PREPARACION');
   });
@@ -624,7 +670,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
     const id = crear.body.pedido.id;
     await request(app).post(`/pedidos/${id}/confirmar`).set('Authorization', `Bearer ${token}`);
     await request(app)
@@ -639,7 +685,7 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const agregar = await request(app)
       .post(`/pedidos/${id}/items`)
       .set('Authorization', `Bearer ${token}`)
-      .send({ items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ items: [await itemHam(smashId, 1)] });
     expect(agregar.status).toBe(409);
     expect(agregar.body.error.message).toMatch(/FACTURADO/);
   });
@@ -652,12 +698,12 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${tCentro}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
 
     const res = await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/items`)
       .set('Authorization', `Bearer ${tSlo}`)
-      .send({ items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ items: [await itemHam(smashId, 1)] });
     expect([403, 404]).toContain(res.status);
   });
 });
@@ -670,7 +716,7 @@ describe('Tenant guard', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${tCajero1}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: smashId, cantidad: 1 }] });
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
 
     const tCajero2 = await loginAs(CAJERO_SLO);
     const res = await request(app)

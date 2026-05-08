@@ -43,6 +43,24 @@ async function getProductoIdPorCodigo(codigo: string) {
   return p.id;
 }
 
+// Inyecta automáticamente las opciones de modificadores obligatorios
+// (ej: "Punto de cocción") asociados al producto, que el servicio exige
+// para crear pedidos. Toma la primera opción disponible — sirve a cualquier
+// producto, sin que el caller tenga que conocerlas.
+async function modificadoresObligatoriosDe(productoVentaId: string) {
+  const grupos = await prisma.productoVentaModificadorGrupo.findMany({
+    where: { productoVentaId, modificadorGrupo: { obligatorio: true } },
+    select: {
+      modificadorGrupo: {
+        select: { opciones: { take: 1, orderBy: { orden: 'asc' }, select: { id: true } } },
+      },
+    },
+  });
+  return grupos.flatMap((g) =>
+    g.modificadorGrupo.opciones.map((o) => ({ modificadorOpcionId: o.id })),
+  );
+}
+
 async function abrirCajaYHacerPedido(token: string, codigo: string, cantidad = 1) {
   const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
   // Tomamos la "Caja 1" (que tiene puntoExpedicion asociado)
@@ -53,10 +71,11 @@ async function abrirCajaYHacerPedido(token: string, codigo: string, cantidad = 1
     .send({ montoInicial: 100000 });
 
   const productoId = await getProductoIdPorCodigo(codigo);
+  const modificadores = await modificadoresObligatoriosDe(productoId);
   const crear = await request(app)
     .post('/pedidos')
     .set('Authorization', `Bearer ${token}`)
-    .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad }] });
+    .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad, modificadores }] });
 
   await request(app)
     .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
@@ -120,7 +139,16 @@ describe('POST /comprobantes — emitir', () => {
     const crear2 = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad: 1 }] });
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: productoId,
+            cantidad: 1,
+            modificadores: await modificadoresObligatoriosDe(productoId),
+          },
+        ],
+      });
     await request(app)
       .post(`/pedidos/${crear2.body.pedido.id}/confirmar`)
       .set('Authorization', `Bearer ${token}`);
@@ -210,7 +238,16 @@ describe('POST /comprobantes — emitir', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad: 1 }] });
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: productoId,
+            cantidad: 1,
+            modificadores: await modificadoresObligatoriosDe(productoId),
+          },
+        ],
+      });
     await request(app)
       .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
       .set('Authorization', `Bearer ${token}`);
@@ -267,7 +304,16 @@ describe('POST /comprobantes — emitir', () => {
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
-      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: productoId, cantidad: 1 }] });
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: productoId,
+            cantidad: 1,
+            modificadores: await modificadoresObligatoriosDe(productoId),
+          },
+        ],
+      });
 
     // Snapshot de stock pre-cobro: el pedido quedó PENDIENTE, no se descontó nada.
     const stockPre = await prisma.movimientoStock.count({

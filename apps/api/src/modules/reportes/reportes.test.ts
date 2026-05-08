@@ -48,6 +48,22 @@ async function reset() {
   ids.aperturas = [];
 }
 
+// Inyecta opciones de modificadores obligatorios (ej: "Punto de cocción") que
+// el servicio de pedidos exige para hamburguesas/lomitos.
+async function modificadoresObligatoriosDe(productoVentaId: string) {
+  const grupos = await prisma.productoVentaModificadorGrupo.findMany({
+    where: { productoVentaId, modificadorGrupo: { obligatorio: true } },
+    select: {
+      modificadorGrupo: {
+        select: { opciones: { take: 1, orderBy: { orden: 'asc' }, select: { id: true } } },
+      },
+    },
+  });
+  return grupos.flatMap((g) =>
+    g.modificadorGrupo.opciones.map((o) => ({ modificadorOpcionId: o.id })),
+  );
+}
+
 async function emitirVentas(token: string) {
   // Abrir caja
   const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
@@ -59,6 +75,7 @@ async function emitirVentas(token: string) {
 
   const smash = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
   const coca = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
+  const modsSmash = await modificadoresObligatoriosDe(smash.id);
 
   // Pedido 1: 2 Smash + 1 Coca = 70000 + 10000 = 80000
   const p1 = await request(app)
@@ -67,7 +84,7 @@ async function emitirVentas(token: string) {
     .send({
       tipo: 'MOSTRADOR',
       items: [
-        { productoVentaId: smash.id, cantidad: 2 },
+        { productoVentaId: smash.id, cantidad: 2, modificadores: modsSmash },
         { productoVentaId: coca.id, cantidad: 1 },
       ],
     });
@@ -90,7 +107,7 @@ async function emitirVentas(token: string) {
     .send({
       tipo: 'MOSTRADOR',
       items: [
-        { productoVentaId: smash.id, cantidad: 1 },
+        { productoVentaId: smash.id, cantidad: 1, modificadores: modsSmash },
         { productoVentaId: coca.id, cantidad: 2 },
       ],
     });
