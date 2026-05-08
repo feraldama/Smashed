@@ -335,10 +335,21 @@ export async function eliminarProducto(empresaId: string, id: string) {
   });
   if (!prod) throw Errors.notFound('Producto no encontrado');
 
-  return prisma.productoVenta.update({
-    where: { id },
-    data: { deletedAt: new Date(), activo: false },
-  });
+  // Soft-delete cascada: la receta del producto también se marca como
+  // deleted, así no queda "huérfana" bloqueando la eliminación de insumos
+  // (`eliminarInsumo` filtra por receta.deletedAt IS NULL).
+  const ahora = new Date();
+  const [, productoActualizado] = await prisma.$transaction([
+    prisma.receta.updateMany({
+      where: { productoVentaId: id, deletedAt: null },
+      data: { deletedAt: ahora },
+    }),
+    prisma.productoVenta.update({
+      where: { id },
+      data: { deletedAt: ahora, activo: false },
+    }),
+  ]);
+  return productoActualizado;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

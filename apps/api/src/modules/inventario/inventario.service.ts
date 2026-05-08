@@ -167,7 +167,10 @@ export async function eliminarInsumo(empresaId: string, id: string) {
   const itemsEnRecetas = await prisma.itemReceta.findMany({
     where: {
       productoInventarioId: id,
-      receta: { deletedAt: null },
+      // Defensivo: también descartamos recetas cuyo producto está soft-deleted.
+      // La cascada del soft-delete en `eliminarProducto` debería evitar este
+      // estado, pero filtramos acá por si quedan recetas huérfanas viejas.
+      receta: { deletedAt: null, productoVenta: { deletedAt: null } },
     },
     select: {
       receta: {
