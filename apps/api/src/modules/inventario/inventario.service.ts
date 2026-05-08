@@ -161,18 +161,35 @@ export async function actualizarInsumo(
 export async function eliminarInsumo(empresaId: string, id: string) {
   const insumo = await prisma.productoInventario.findFirst({
     where: { id, empresaId, deletedAt: null },
-    include: {
-      _count: {
+  });
+  if (!insumo) throw Errors.notFound('Insumo no encontrado');
+
+  const itemsEnRecetas = await prisma.itemReceta.findMany({
+    where: {
+      productoInventarioId: id,
+      receta: { deletedAt: null },
+    },
+    select: {
+      receta: {
         select: {
-          itemsReceta: { where: { receta: { deletedAt: null } } },
+          id: true,
+          productoVenta: { select: { nombre: true } },
         },
       },
     },
   });
-  if (!insumo) throw Errors.notFound('Insumo no encontrado');
-  if (insumo._count.itemsReceta > 0) {
+
+  if (itemsEnRecetas.length > 0) {
+    const nombresUnicos = Array.from(
+      new Map(itemsEnRecetas.map((it) => [it.receta.id, it.receta.productoVenta.nombre])).values(),
+    );
+    const MAX_LISTAR = 5;
+    const visibles = nombresUnicos.slice(0, MAX_LISTAR);
+    const restantes = nombresUnicos.length - visibles.length;
+    const lista =
+      visibles.map((n) => `• ${n}`).join('\n') + (restantes > 0 ? `\n• y ${restantes} más` : '');
     throw Errors.conflict(
-      `No se puede eliminar — está usado en ${insumo._count.itemsReceta} receta(s) activa(s).`,
+      `No se puede eliminar — está usado en ${nombresUnicos.length} receta(s) activa(s):\n${lista}`,
     );
   }
 

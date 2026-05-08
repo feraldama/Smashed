@@ -17,7 +17,7 @@ import { AdminShell } from '@/components/AdminShell';
 import { AjusteStockModal } from '@/components/AjusteStockModal';
 import { AuthGate } from '@/components/AuthGate';
 import { InsumoFormModal } from '@/components/InsumoFormModal';
-import { confirmar, toast } from '@/components/Toast';
+import { confirmar, mensaje, toast } from '@/components/Toast';
 import { type Insumo, useEliminarInsumo, useInsumos } from '@/hooks/useInventario';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
@@ -53,7 +53,14 @@ function InsumosScreen() {
       await eliminar.mutateAsync(i.id);
       toast.success('Insumo eliminado');
     } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : 'Error');
+      const msg = err instanceof ApiError ? err.message : 'Error';
+      if (msg.includes('\n')) {
+        const escapado = msg.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const html = escapado.replace(/\n/g, '<br>');
+        await mensaje({ titulo: 'No se puede eliminar', html, icon: 'error' });
+      } else {
+        toast.error(msg);
+      }
     }
   }
 
