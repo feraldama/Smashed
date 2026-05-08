@@ -10,5 +10,51 @@
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "prisma.fileWatcher": true,
-  "files.eol": "\n"
+  "files.eol": "\n",
+
+  // ── Commits (commitlint + husky exigen estas reglas; ver commitlint.config.cjs) ──
+  // Validación visual del input del panel Source Control.
+  "git.inputValidation": "always",
+  "git.inputValidationLength": 100,
+  "git.inputValidationSubjectLength": 100,
+  // Regla visual al escribir el mensaje en el editor de commit (COMMIT_EDITMSG).
+  "[git-commit]": {
+    "editor.rulers": [100],
+    "editor.wordWrap": "wordWrapColumn",
+    "editor.wordWrapColumn": 100
+  },
+  // Wizard de la extensión vivaxy.vscode-conventional-commits — sugiere scopes
+  // habituales del repo. Tipos válidos los toma del estándar conventional commits
+  // (feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert) que
+  // coinciden con nuestro commitlint.
+  "conventionalCommits.scopes": [
+    "api",
+    "web",
+    "auth",
+    "caja",
+    "catalogo",
+    "cliente",
+    "combo",
+    "comprobante",
+    "compra",
+    "inventario",
+    "kds",
+    "mesa",
+    "pedido",
+    "pos",
+    "prisma",
+    "reportes",
+    "seed",
+    "sifen",
+    "stock",
+    "sucursal",
+    "test",
+    "transferencia",
+    "usuario",
+    "vscode",
+    "ci"
+  ],
+  "conventionalCommits.lineBreak": "\\n",
+  "conventionalCommits.showEditor": true,
+  "conventionalCommits.silentAutoCommit": false
 }
