@@ -101,6 +101,12 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
   // pantallas (admin/*). Las pantallas operativas (productos, sucursales,
   // POS, etc.) son por empresa y requieren entrar al modo Operar primero.
   const esSuperAdminPuro = esSuperAdmin && !empresaOperando;
+  // Nombre a mostrar en el header del sidebar:
+  //  1) Si SUPER_ADMIN está operando como empresa X → nombre de X
+  //  2) Si el usuario tiene empresa → nombre de su empresa
+  //  3) Fallback: "Smash" (SUPER_ADMIN puro / operador del SaaS)
+  const nombreEmpresaHeader = empresaOperando?.nombreFantasia ?? user?.empresaNombre ?? 'Smash';
+  const inicialEmpresaHeader = nombreEmpresaHeader.charAt(0).toUpperCase();
   const itemsPermitidos = NAV.filter((item) => {
     if (item.superAdminOnly) return esSuperAdmin;
     if (esSuperAdminPuro) return false;
@@ -146,10 +152,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         {/* Header fijo */}
         <div className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
           <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <span className="text-lg font-bold">S</span>
+            <span className="text-lg font-bold">{inicialEmpresaHeader}</span>
           </div>
-          <div>
-            <p className="text-sm font-bold">Smash</p>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold">{nombreEmpresaHeader}</p>
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Admin</p>
           </div>
         </div>
@@ -213,7 +219,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         {/* Topbar mobile */}
         <header className="flex h-14 items-center justify-between border-b bg-card px-4 lg:hidden">
           <h1 className="text-lg font-bold">
-            Smash <span className="text-primary">Admin</span>
+            {nombreEmpresaHeader} <span className="text-primary">Admin</span>
           </h1>
           <button
             type="button"

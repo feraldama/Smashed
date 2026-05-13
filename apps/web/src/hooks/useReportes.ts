@@ -78,6 +78,33 @@ export function useTopProductos(rango: RangoFechas, limite = 20) {
   });
 }
 
+export interface ProductoRentabilidad {
+  producto_id: string | null;
+  nombre: string;
+  cantidad_total: string;
+  ingreso_total: string;
+  costo_total: string;
+  ganancia_total: string;
+  margen_porcentaje: number | null;
+}
+
+export type OrdenRentabilidad = 'ganancia' | 'margen';
+
+export function useProductosRentabilidad(
+  rango: RangoFechas,
+  limite = 20,
+  ordenarPor: OrdenRentabilidad = 'ganancia',
+) {
+  return useQuery({
+    queryKey: ['reportes', 'productos', 'rentabilidad', rango, limite, ordenarPor],
+    queryFn: () =>
+      api<{ productos: ProductoRentabilidad[] }>(
+        `/reportes/productos/rentabilidad?${buildQuery(rango, { limite, ordenarPor })}`,
+      ),
+    select: (d) => d.productos,
+  });
+}
+
 export interface TopCliente {
   cliente_id: string;
   razon_social: string;

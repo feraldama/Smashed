@@ -7,6 +7,7 @@ export interface SesionUsuario {
   nombreCompleto: string;
   rol: string;
   empresaId: string | null;
+  empresaNombre: string | null;
   sucursales: {
     id: string;
     nombre: string;

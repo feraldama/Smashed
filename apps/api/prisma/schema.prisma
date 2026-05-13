@@ -1485,6 +1485,13 @@ model ItemComprobante {
   tasaIva         TasaIva  @map("tasa_iva")
   subtotal        BigInt
 
+  // Costo unitario estimado al momento de emitir el comprobante (guaraníes).
+  // Se calcula expandiendo la receta del producto y multiplicando cada insumo
+  // por su `ProductoInventario.costoUnitario` vigente al facturar.
+  // Permite calcular ganancia real: ganancia = (precioUnitario - costoUnitarioSnapshot) * cantidad.
+  // Default 0 para registros previos a esta funcionalidad y productos sin receta.
+  costoUnitarioSnapshot BigInt @default(0) @map("costo_unitario_snapshot")
+
   @@index([comprobanteId])
   @@map("item_comprobante")
 }

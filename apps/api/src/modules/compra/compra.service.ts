@@ -171,8 +171,19 @@ export async function crear(user: UserCtx, input: CrearCompraInput) {
       include: { items: true },
     });
 
-    // Por cada item: registrar movimiento de stock + upsert StockSucursal
+    // Por cada item: actualizar costo promedio + registrar movimiento + upsert StockSucursal
     for (const item of compra.items) {
+      // Actualización del costo unitario del insumo por promedio ponderado.
+      // Se hace ANTES de incrementar el stock para que la fórmula use el stock
+      // total previo (suma de todas las sucursales de la empresa).
+      // Limitación conocida (v1): la anulación de compra NO reversa este cálculo.
+      await actualizarCostoPromedioPonderado(tx, {
+        productoInventarioId: item.productoInventarioId,
+        sucursalId: input.sucursalId,
+        cantidadEntrada: item.cantidad,
+        costoEntrada: item.costoUnitario,
+      });
+
       await tx.movimientoStock.create({
         data: {
           productoInventarioId: item.productoInventarioId,
@@ -306,4 +317,135 @@ export async function eliminar(user: UserCtx, id: string) {
       },
     });
   });
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+//  HELPERS — promedio ponderado de costo de insumo
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * Actualiza el costo de un insumo aplicando promedio ponderado **por sucursal**
+ * y refleja el promedio ponderado global en `ProductoInventario.costoUnitario`.
+ *
+ * Por sucursal (la que recibe la compra):
+ *
+ *     nuevoCostoSuc = (stockSucPrevio * costoSucPrevio + cantidadEntrada * costoEntrada)
+ *                     / (stockSucPrevio + cantidadEntrada)
+ *
+ * Global (`ProductoInventario.costoUnitario`) = promedio ponderado de los
+ * `costoPromedio` de todas las sucursales, ponderado por el stock proyectado
+ * de cada una. Esto mantiene un valor representativo para los reportes y
+ * vistas que aún consultan el campo global, y deja al cálculo de ganancia
+ * usar el costo específico de la sucursal donde se factura.
+ *
+ * Llamar ANTES de incrementar el stock — la fórmula necesita el stock previo.
+ *
+ * Edge cases por sucursal:
+ *  - stockSucPrevio ≤ 0 ó costoSucPrevio = 0 (sin info) → adopta `costoEntrada`.
+ *  - stockSucPrevio + cantidadEntrada ≤ 0 → preserva el costo previo (no
+ *    podemos dividir por ≤ 0).
+ *
+ * Limitaciones conocidas:
+ *  - La eliminación de una compra NO reversa este cálculo (haría falta
+ *    historial de costos).
+ *  - Otros flujos que mueven stock (transferencias, ajustes, mermas) no
+ *    afectan el costo.
+ */
+async function actualizarCostoPromedioPonderado(
+  tx: Prisma.TransactionClient,
+  args: {
+    productoInventarioId: string;
+    sucursalId: string;
+    cantidadEntrada: Prisma.Decimal;
+    costoEntrada: bigint;
+  },
+): Promise<void> {
+  const { productoInventarioId, sucursalId, cantidadEntrada, costoEntrada } = args;
+
+  // ─── 1) Costo promedio de la sucursal que recibe ───
+  const stockSuc = await tx.stockSucursal.findUnique({
+    where: { productoInventarioId_sucursalId: { productoInventarioId, sucursalId } },
+    select: { id: true, stockActual: true, costoPromedio: true },
+  });
+
+  const stockSucPrevio = stockSuc?.stockActual ?? new Prisma.Decimal(0);
+  const costoSucPrevio = stockSuc?.costoPromedio ?? 0n;
+  const stockSucNuevo = stockSucPrevio.plus(cantidadEntrada);
+
+  let nuevoCostoSuc: bigint;
+  if (stockSucPrevio.lte(0) || costoSucPrevio === 0n) {
+    // Sin base previa en esta sucursal: adoptamos el costo entrante.
+    nuevoCostoSuc = costoEntrada;
+  } else if (stockSucNuevo.lte(0)) {
+    nuevoCostoSuc = costoSucPrevio;
+  } else {
+    const numerador = stockSucPrevio
+      .times(costoSucPrevio.toString())
+      .plus(cantidadEntrada.times(costoEntrada.toString()));
+    nuevoCostoSuc = BigInt(
+      numerador.dividedBy(stockSucNuevo).toFixed(0, Prisma.Decimal.ROUND_HALF_UP),
+    );
+  }
+
+  if (stockSuc) {
+    if (nuevoCostoSuc !== costoSucPrevio) {
+      await tx.stockSucursal.update({
+        where: { id: stockSuc.id },
+        data: { costoPromedio: nuevoCostoSuc },
+      });
+    }
+  } else {
+    // Aún no existe la fila — la crea la lógica de increment de stock más
+    // adelante. Adelantamos la creación con el costoPromedio + stock 0 para
+    // no perder el cálculo; el increment posterior va a sumar la cantidad.
+    await tx.stockSucursal.create({
+      data: {
+        productoInventarioId,
+        sucursalId,
+        stockActual: new Prisma.Decimal(0),
+        costoPromedio: nuevoCostoSuc,
+      },
+    });
+  }
+
+  // ─── 2) Costo global = promedio ponderado de las sucursales ───
+  // Re-leemos todas las filas (ya incluye la que acabamos de tocar) y usamos
+  // el stock proyectado: para la sucursal de la compra, sumamos la cantidad
+  // entrante porque todavía no se aplicó el increment.
+  const filasSuc = await tx.stockSucursal.findMany({
+    where: { productoInventarioId },
+    select: { sucursalId: true, stockActual: true, costoPromedio: true },
+  });
+
+  let numerador = new Prisma.Decimal(0);
+  let denominador = new Prisma.Decimal(0);
+  for (const fila of filasSuc) {
+    const stockProyectado =
+      fila.sucursalId === sucursalId ? fila.stockActual.plus(cantidadEntrada) : fila.stockActual;
+    if (stockProyectado.lte(0) || fila.costoPromedio === 0n) continue;
+    numerador = numerador.plus(stockProyectado.times(fila.costoPromedio.toString()));
+    denominador = denominador.plus(stockProyectado);
+  }
+
+  let nuevoCostoGlobal: bigint;
+  if (denominador.lte(0)) {
+    // Ninguna sucursal aporta base (todo stock cero o sin costo conocido):
+    // usamos el costo de esta compra como referencia global.
+    nuevoCostoGlobal = costoEntrada;
+  } else {
+    nuevoCostoGlobal = BigInt(
+      numerador.dividedBy(denominador).toFixed(0, Prisma.Decimal.ROUND_HALF_UP),
+    );
+  }
+
+  const insumoActual = await tx.productoInventario.findUniqueOrThrow({
+    where: { id: productoInventarioId },
+    select: { costoUnitario: true },
+  });
+  if (nuevoCostoGlobal !== insumoActual.costoUnitario) {
+    await tx.productoInventario.update({
+      where: { id: productoInventarioId },
+      data: { costoUnitario: nuevoCostoGlobal },
+    });
+  }
 }

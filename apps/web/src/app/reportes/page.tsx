@@ -5,6 +5,7 @@ import {
   BarChart3,
   Boxes,
   Building2,
+  DollarSign,
   Loader2,
   Receipt,
   TrendingUp,
@@ -22,6 +23,7 @@ import { DateRangePicker, type DateRange } from '@/components/DateRangePicker';
 import {
   useComparativaSucursales,
   useMetodosPago,
+  useProductosRentabilidad,
   useResumenVentas,
   useStockBajo,
   useTopClientes,
@@ -29,11 +31,12 @@ import {
   useValuacion,
   useVentasPorDia,
   useVentasPorHora,
+  type OrdenRentabilidad,
 } from '@/hooks/useReportes';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn, formatGs } from '@/lib/utils';
 
-type Tab = 'ventas' | 'productos' | 'clientes' | 'sucursales' | 'inventario';
+type Tab = 'ventas' | 'productos' | 'rentabilidad' | 'clientes' | 'sucursales' | 'inventario';
 
 export default function ReportesPage() {
   return (
@@ -79,6 +82,13 @@ function ReportesScreen() {
         <TabButton active={tab === 'productos'} onClick={() => setTab('productos')} icon={Trophy}>
           Productos
         </TabButton>
+        <TabButton
+          active={tab === 'rentabilidad'}
+          onClick={() => setTab('rentabilidad')}
+          icon={DollarSign}
+        >
+          Rentabilidad
+        </TabButton>
         <TabButton active={tab === 'clientes'} onClick={() => setTab('clientes')} icon={Users}>
           Clientes
         </TabButton>
@@ -98,6 +108,7 @@ function ReportesScreen() {
 
       {tab === 'ventas' && <TabVentas rango={rango} />}
       {tab === 'productos' && <TabProductos rango={rango} />}
+      {tab === 'rentabilidad' && <TabRentabilidad rango={rango} />}
       {tab === 'clientes' && <TabClientes rango={rango} />}
       {tab === 'sucursales' && esAdminEmpresa && <TabSucursales rango={rango} />}
       {tab === 'inventario' && <TabInventario />}
@@ -225,6 +236,124 @@ function TabProductos({ rango }: { rango: DateRange }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// ───── TAB RENTABILIDAD ─────
+
+function TabRentabilidad({ rango }: { rango: DateRange }) {
+  const [ordenarPor, setOrdenarPor] = useState<OrdenRentabilidad>('ganancia');
+  const { data: filas = [], isLoading } = useProductosRentabilidad(rango, 30, ordenarPor);
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card px-3 py-2">
+        <p className="text-xs text-muted-foreground">
+          Ganancia = ingreso − costo. El costo es el snapshot guardado al emitir cada comprobante;
+          los emitidos antes de esta funcionalidad cuentan con costo 0.
+        </p>
+        <div className="flex gap-1 rounded-md border p-0.5">
+          <button
+            type="button"
+            onClick={() => setOrdenarPor('ganancia')}
+            className={cn(
+              'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+              ordenarPor === 'ganancia'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            Ganancia
+          </button>
+          <button
+            type="button"
+            onClick={() => setOrdenarPor('margen')}
+            className={cn(
+              'rounded px-2.5 py-1 text-xs font-medium transition-colors',
+              ordenarPor === 'margen'
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-muted',
+            )}
+          >
+            Margen %
+          </button>
+        </div>
+      </div>
+
+      <Card
+        title={`Rentabilidad por producto — orden: ${ordenarPor === 'ganancia' ? 'ganancia absoluta' : 'margen %'}`}
+      >
+        {isLoading ? (
+          <div className="flex h-32 items-center justify-center">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : filas.length === 0 ? (
+          <Empty mensaje="No hay ventas en el período" />
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full min-w-[720px] text-sm">
+              <thead className="bg-muted/40 text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 text-left">#</th>
+                  <th className="px-3 py-2 text-left">Producto</th>
+                  <th className="px-3 py-2 text-right">Cant.</th>
+                  <th className="px-3 py-2 text-right">Ingreso</th>
+                  <th className="px-3 py-2 text-right">Costo</th>
+                  <th className="px-3 py-2 text-right">Ganancia</th>
+                  <th className="px-3 py-2 text-right">Margen</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filas.map((p, i) => {
+                  const ingreso = Number(p.ingreso_total);
+                  const costo = Number(p.costo_total);
+                  const ganancia = Number(p.ganancia_total);
+                  const margen = p.margen_porcentaje;
+                  // Sin snapshot de costo (comprobantes viejos) la ganancia es == ingreso.
+                  const sinCosto = costo === 0;
+                  const margenColor =
+                    margen === null
+                      ? 'text-muted-foreground'
+                      : margen >= 50
+                        ? 'text-emerald-600 dark:text-emerald-400'
+                        : margen >= 20
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-red-600 dark:text-red-400';
+                  return (
+                    <tr key={p.producto_id ?? p.nombre} className="hover:bg-muted/20">
+                      <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{i + 1}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {p.nombre}
+                        {sinCosto && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal uppercase text-muted-foreground"
+                            title="Sin costo registrado en el snapshot — ganancia no confiable"
+                          >
+                            <AlertTriangle className="h-2.5 w-2.5" />
+                            sin costo
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs">{p.cantidad_total}</td>
+                      <td className="px-3 py-2 text-right font-mono">{formatGs(ingreso)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-muted-foreground">
+                        {formatGs(costo)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold">
+                        {formatGs(ganancia)}
+                      </td>
+                      <td className={cn('px-3 py-2 text-right font-mono', margenColor)}>
+                        {margen === null ? '—' : `${margen.toFixed(1)}%`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
   );
 }
 

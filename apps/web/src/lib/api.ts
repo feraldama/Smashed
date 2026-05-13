@@ -129,7 +129,7 @@ export async function bootstrapAuth() {
         email: string;
         nombreCompleto: string;
         rol: string;
-        empresa: { id: string } | null;
+        empresa: { id: string; nombreFantasia: string } | null;
         sucursales: {
           id: string;
           nombre: string;
@@ -149,6 +149,7 @@ export async function bootstrapAuth() {
     store.setAuth(token, {
       ...meResp.user,
       empresaId: meResp.user.empresa?.id ?? null,
+      empresaNombre: meResp.user.empresa?.nombreFantasia ?? null,
       sucursalActivaId: meResp.sucursalActivaId,
     });
   } catch {

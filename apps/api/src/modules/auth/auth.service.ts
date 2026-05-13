@@ -37,7 +37,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
   const usuario = await prisma.usuario.findFirst({
     where: { email: input.email, deletedAt: null, activo: true },
     include: {
-      empresa: { select: { activa: true, motivoInactiva: true } },
+      empresa: { select: { activa: true, motivoInactiva: true, nombreFantasia: true } },
       sucursales: {
         include: {
           sucursal: { select: { id: true, nombre: true, codigo: true, establecimiento: true } },
@@ -105,6 +105,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
       nombreCompleto: usuario.nombreCompleto,
       rol: usuario.rol,
       empresaId: usuario.empresaId,
+      empresaNombre: usuario.empresa?.nombreFantasia ?? null,
       sucursales: usuario.sucursales.map((us) => ({
         id: us.sucursal.id,
         nombre: us.sucursal.nombre,

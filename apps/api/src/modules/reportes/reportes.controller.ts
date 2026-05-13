@@ -1,7 +1,6 @@
-
 import { Errors } from '../../lib/errors.js';
 
-import { rangoFechasQuery, stockQuery, topQuery } from './reportes.schemas.js';
+import { rangoFechasQuery, rentabilidadQuery, stockQuery, topQuery } from './reportes.schemas.js';
 import * as service from './reportes.service.js';
 
 import type { Request, Response } from 'express';
@@ -42,6 +41,13 @@ export async function topProductos(req: Request, res: Response) {
   const c = ctx(req);
   const q = topQuery.parse(req.query);
   const result = await service.topProductos(c, q);
+  res.json({ productos: result });
+}
+
+export async function productosRentabilidad(req: Request, res: Response) {
+  const c = ctx(req);
+  const q = rentabilidadQuery.parse(req.query);
+  const result = await service.productosRentabilidad(c, q);
   res.json({ productos: result });
 }
 

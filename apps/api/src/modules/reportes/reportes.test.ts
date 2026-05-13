@@ -195,6 +195,102 @@ describe('GET /reportes/productos/top', () => {
   });
 });
 
+describe('GET /reportes/productos/rentabilidad', () => {
+  // Helper local — independiente del seed legacy (HAM-001/Asunción Centro/Caja 1).
+  // Toma cualquier producto activo con receta y costo positivo, abre la caja
+  // del usuario, factura una unidad y devuelve sus datos para validar el reporte.
+  async function emitirUnaVenta(token: string) {
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
+    type CajaResumen = { id: string; nombre: string; puntoExpedicionId: string | null };
+    const caja = (cajas.body.cajas as CajaResumen[]).find((c) => c.puntoExpedicionId !== null);
+    if (!caja) throw new Error('No hay caja con punto de expedición disponible');
+    await request(app)
+      .post(`/cajas/${caja.id}/abrir`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ montoInicial: 100000 });
+
+    const producto = await prisma.productoVenta.findFirstOrThrow({
+      where: { codigo: 'ACO-003', deletedAt: null, activo: true },
+      select: { id: true, precioBase: true, nombre: true },
+    });
+    const mods = await modificadoresObligatoriosDe(producto.id);
+    const pedido = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [{ productoVentaId: producto.id, cantidad: 1, modificadores: mods }],
+      });
+    if (!pedido.body?.pedido?.id) {
+      throw new Error(`Crear pedido falló: ${JSON.stringify(pedido.body)}`);
+    }
+    await request(app)
+      .post(`/pedidos/${pedido.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${token}`);
+    const comprobante = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId: pedido.body.pedido.id,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(pedido.body.pedido.total) }],
+      });
+    if (comprobante.status !== 201) {
+      throw new Error(`Emitir comprobante falló: ${JSON.stringify(comprobante.body)}`);
+    }
+    return {
+      productoId: producto.id,
+      nombre: producto.nombre,
+      precio: Number(producto.precioBase),
+    };
+  }
+
+  it('calcula costo, ganancia y margen sobre los snapshots del comprobante', async () => {
+    await reset();
+    const tokenCajero = await login(CAJERO);
+    const venta = await emitirUnaVenta(tokenCajero);
+
+    const tokenAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/productos/rentabilidad?desde=2024-01-01&hasta=2030-01-01&limite=10')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.productos)).toBe(true);
+
+    const fila = (
+      res.body.productos as {
+        producto_id: string | null;
+        nombre: string;
+        cantidad_total: string;
+        ingreso_total: string;
+        costo_total: string;
+        ganancia_total: string;
+        margen_porcentaje: number | null;
+      }[]
+    ).find((p) => p.producto_id === venta.productoId);
+    expect(fila).toBeDefined();
+    if (!fila) return;
+
+    const ingreso = Number(fila.ingreso_total);
+    const costo = Number(fila.costo_total);
+    const ganancia = Number(fila.ganancia_total);
+
+    expect(ingreso).toBe(venta.precio); // 1 unidad facturada al precio del producto
+    expect(costo).toBeGreaterThan(0); // ACO-003 tiene receta con insumos de costo > 0
+    expect(costo).toBeLessThan(ingreso); // margen sano
+    expect(ganancia).toBe(ingreso - costo);
+    expect(fila.margen_porcentaje).toBeCloseTo((100 * ganancia) / ingreso, 1);
+  });
+
+  it('cajero NO puede ver el reporte → 403', async () => {
+    const token = await login(CAJERO);
+    const res = await request(app)
+      .get('/reportes/productos/rentabilidad?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('GET /reportes/ventas/metodos-pago', () => {
   it('agrupa por método', async () => {
     await reset();

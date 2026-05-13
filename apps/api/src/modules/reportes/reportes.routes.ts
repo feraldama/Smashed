@@ -17,6 +17,7 @@ router.get('/ventas/por-hora', requireGestion, asyncH(ctrl.ventasPorHora));
 router.get('/ventas/metodos-pago', requireGestion, asyncH(ctrl.metodosPago));
 
 router.get('/productos/top', requireGestion, asyncH(ctrl.topProductos));
+router.get('/productos/rentabilidad', requireGestion, asyncH(ctrl.productosRentabilidad));
 router.get('/clientes/top', requireGestion, asyncH(ctrl.topClientes));
 
 router.get('/sucursales/comparativa', requireGestion, asyncH(ctrl.comparativaSucursales));

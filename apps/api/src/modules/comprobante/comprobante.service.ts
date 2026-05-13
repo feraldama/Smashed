@@ -13,6 +13,7 @@ import {
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { emitPedido } from '../../lib/socketio.js';
+import { calcularCostoUnitario } from '../pedido/calcular-costo.js';
 import {
   aplicarCancelacionInline,
   aplicarConfirmacionInline,
@@ -236,15 +237,18 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
             total: pedido.total,
             // Items snapshot
             items: {
-              create: pedido.items.map((it) => ({
-                productoVentaId: it.productoVentaId,
-                codigo: it.productoVenta.codigo,
-                descripcion: armarDescripcionItem(it),
-                cantidad: it.cantidad,
-                precioUnitario: it.precioUnitario + it.precioModificadores,
-                tasaIva: it.productoVenta.tasaIva,
-                subtotal: it.subtotal,
-              })),
+              create: await Promise.all(
+                pedido.items.map(async (it) => ({
+                  productoVentaId: it.productoVentaId,
+                  codigo: it.productoVenta.codigo,
+                  descripcion: armarDescripcionItem(it),
+                  cantidad: it.cantidad,
+                  precioUnitario: it.precioUnitario + it.precioModificadores,
+                  tasaIva: it.productoVenta.tasaIva,
+                  subtotal: it.subtotal,
+                  costoUnitarioSnapshot: await calcularCostoUnitarioItem(tx, it, pedido.sucursalId),
+                })),
+              ),
             },
             // Pagos
             pagos: {
@@ -591,6 +595,38 @@ function calcularTotalesComprobante(items: ItemPedidoInput[]) {
   }
 
   return { subtotalIva10, subtotalIva5, subtotalExentas, totalIva10, totalIva5 };
+}
+
+/**
+ * Costo unitario estimado del item al momento de facturar.
+ *
+ *  - Producto suelto: se calcula expandiendo su receta.
+ *  - Combo: suma de los costos unitarios de cada opción elegida (cada eleccion
+ *    descuenta su propia receta, igual que el flujo de stock en `pedido.service`).
+ *  - Sin receta → 0 (limitación conocida; bebidas envasadas no quedan modeladas).
+ *
+ * No considera modificadores (no tienen costo modelado hoy).
+ */
+async function calcularCostoUnitarioItem(
+  tx: Prisma.TransactionClient,
+  it: {
+    productoVentaId: string;
+    combosOpcion: { comboGrupoOpcion: { productoVentaId: string } }[];
+  },
+  sucursalId: string,
+): Promise<bigint> {
+  if (it.combosOpcion.length > 0) {
+    let total = 0n;
+    for (const eleccion of it.combosOpcion) {
+      total += await calcularCostoUnitario(
+        tx,
+        eleccion.comboGrupoOpcion.productoVentaId,
+        sucursalId,
+      );
+    }
+    return total;
+  }
+  return calcularCostoUnitario(tx, it.productoVentaId, sucursalId);
 }
 
 function armarDescripcionItem(it: ItemPedidoInput & { productoVenta: { nombre: string } }): string {

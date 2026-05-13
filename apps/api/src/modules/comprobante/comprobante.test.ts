@@ -88,7 +88,7 @@ describe('POST /comprobantes — emitir', () => {
   it('emite TICKET con numeración fiscal correcta + comprobante asociado al pedido', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const res = await request(app)
       .post('/comprobantes')
@@ -123,7 +123,7 @@ describe('POST /comprobantes — emitir', () => {
     const token = await login(CAJERO_CENTRO);
 
     // Primer pedido + comprobante
-    const r1 = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const r1 = await abrirCajaYHacerPedido(token, 'ACO-003');
     const c1 = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)
@@ -135,7 +135,7 @@ describe('POST /comprobantes — emitir', () => {
     expect(c1.body.comprobante.numero).toBe(1);
 
     // Segundo pedido (sin reset de caja) + comprobante
-    const productoId = await getProductoIdPorCodigo('HAM-002');
+    const productoId = await getProductoIdPorCodigo('ACO-001');
     const crear2 = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
@@ -166,10 +166,41 @@ describe('POST /comprobantes — emitir', () => {
     expect(c2.body.comprobante.numeroDocumento).toMatch(/^001-001-0000002$/);
   });
 
+  it('snapshotea costoUnitarioSnapshot en cada item al emitir', async () => {
+    // El snapshot del costo se calcula expandiendo la receta del producto y
+    // multiplicando cada insumo por su `ProductoInventario.costoUnitario` al
+    // momento de facturar. ACO-003 (Aros de cebolla) tiene receta con insumos
+    // de costo > 0 en el seed.
+    await reset();
+    const token = await login(CAJERO_CENTRO);
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
+
+    const res = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+      });
+    expect(res.status).toBe(201);
+
+    const items = await prisma.itemComprobante.findMany({
+      where: { comprobanteId: res.body.comprobante.id },
+    });
+    expect(items.length).toBeGreaterThan(0);
+    const item = items[0]!;
+    const costo = item.costoUnitarioSnapshot;
+    // Costo positivo (la receta tiene insumos con costoUnitario > 0).
+    expect(costo > 0n).toBe(true);
+    // Sanity: el costo debe ser menor que el precio de venta (margen sano).
+    expect(costo).toBeLessThan(item.precioUnitario);
+  });
+
   it('subtotales discriminados por IVA — 1 hamburguesa al 10%', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const res = await request(app)
       .post('/comprobantes')
@@ -189,7 +220,7 @@ describe('POST /comprobantes — emitir', () => {
   it('múltiples pagos → suma debe igualar total', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
     const t = Number(total);
 
     const res = await request(app)
@@ -214,7 +245,7 @@ describe('POST /comprobantes — emitir', () => {
   it('suma de pagos != total → 400', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const res = await request(app)
       .post('/comprobantes')
@@ -232,7 +263,7 @@ describe('POST /comprobantes — emitir', () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
     // Crear pedido sin abrir caja primero
-    const productoId = await getProductoIdPorCodigo('HAM-001');
+    const productoId = await getProductoIdPorCodigo('ACO-003');
     // Hack: para que esto funcione sin caja, crear un pedido y confirmarlo
     // (sin caja se permite, sólo emisión la requiere)
     const crear = await request(app)
@@ -267,7 +298,7 @@ describe('POST /comprobantes — emitir', () => {
   it('pedido con comprobante emitido → 409 al intentar emitir otro', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     await request(app)
       .post('/comprobantes')
@@ -300,7 +331,7 @@ describe('POST /comprobantes — emitir', () => {
       .set('Authorization', `Bearer ${token}`)
       .send({ montoInicial: 100000 });
 
-    const productoId = await getProductoIdPorCodigo('HAM-001');
+    const productoId = await getProductoIdPorCodigo('ACO-003');
     const crear = await request(app)
       .post('/pedidos')
       .set('Authorization', `Bearer ${token}`)
@@ -346,7 +377,7 @@ describe('POST /comprobantes — emitir', () => {
   it('snapshot de receptor con cliente con RUC', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const cliente = await prisma.cliente.findFirstOrThrow({
       where: { razonSocial: 'CONSULTORA DEL ESTE S.A.' },
@@ -370,7 +401,7 @@ describe('POST /comprobantes — emitir', () => {
   it('cuando no se pasa clienteId → usa "SIN NOMBRE" (consumidor final)', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const res = await request(app)
       .post('/comprobantes')
@@ -387,7 +418,7 @@ describe('POST /comprobantes — emitir', () => {
   it('campos SIFEN nulos pero presentes (preparados para Fase 4)', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
     const res = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)
@@ -407,7 +438,7 @@ describe('POST /comprobantes/:id/anular', () => {
   it('anula OK + revierte movimientos de caja (caja abierta)', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const c = await request(app)
       .post('/comprobantes')
@@ -435,7 +466,7 @@ describe('POST /comprobantes/:id/anular', () => {
   it('anular en pedido no entregado → cancela pedido + revierte stock', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     // Stock inicial post-confirmación
     const stockTrasConfirmar = await prisma.movimientoStock.count({
@@ -473,7 +504,7 @@ describe('POST /comprobantes/:id/anular', () => {
   it('anular en pedido ya entregado → solo evento fiscal, no cancela pedido', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
 
     const c = await request(app)
       .post('/comprobantes')
@@ -503,7 +534,7 @@ describe('POST /comprobantes/:id/anular', () => {
   it('anular dos veces → 409', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
     const c = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)
@@ -526,7 +557,7 @@ describe('POST /comprobantes/:id/anular', () => {
   it('cajero de otra sucursal no puede anular → 403', async () => {
     await reset();
     const t1 = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(t1, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(t1, 'ACO-003');
     const c = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${t1}`)
@@ -549,7 +580,7 @@ describe('GET /comprobantes', () => {
   it('lista con sucursal del usuario aplicada', async () => {
     await reset();
     const token = await login(CAJERO_CENTRO);
-    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'HAM-001');
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-003');
     await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)

@@ -2,7 +2,12 @@ import { Prisma } from '@prisma/client';
 
 import { prisma } from '../../lib/prisma.js';
 
-import type { RangoFechasQuery, StockQuery, TopQuery } from './reportes.schemas.js';
+import type {
+  RangoFechasQuery,
+  RentabilidadQuery,
+  StockQuery,
+  TopQuery,
+} from './reportes.schemas.js';
 
 /**
  * Servicio de reportes.
@@ -143,6 +148,70 @@ export async function topProductos(user: UserCtx, q: TopQuery) {
       ${sucursalFragment(sucursalId)}
     GROUP BY 1, 2
     ORDER BY ingreso_total DESC
+    LIMIT ${q.limite}
+  `;
+}
+
+/**
+ * Rentabilidad por producto en el rango: ingreso, costo y ganancia.
+ *
+ * El costo viene de `ItemComprobante.costoUnitarioSnapshot`, que se calcula al
+ * emitir cada comprobante expandiendo la receta contra los costos de insumos
+ * vigentes en ese momento. Para comprobantes anteriores a esta funcionalidad
+ * el snapshot es 0, lo que sobrestima la ganancia — el filtro por fecha
+ * permite acotar al período en que el snapshot ya está vivo.
+ *
+ * `ordenarPor`:
+ *  - `ganancia` (default): mejor para ver "qué productos generan más plata
+ *    en términos absolutos". Un producto barato vendido mucho puede ganar
+ *    a uno caro vendido poco.
+ *  - `margen`: porcentaje de ganancia sobre ingreso. Útil para detectar
+ *    productos premium o con buena estructura de costo.
+ */
+export async function productosRentabilidad(user: UserCtx, q: RentabilidadQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  const orderBy =
+    q.ordenarPor === 'margen'
+      ? Prisma.sql`ORDER BY margen_porcentaje DESC NULLS LAST`
+      : Prisma.sql`ORDER BY ganancia_total DESC`;
+
+  return prisma.$queryRaw<
+    {
+      producto_id: string | null;
+      nombre: string;
+      cantidad_total: bigint;
+      ingreso_total: bigint;
+      costo_total: bigint;
+      ganancia_total: bigint;
+      margen_porcentaje: number | null;
+    }[]
+  >`
+    SELECT
+      ic."producto_venta_id" AS producto_id,
+      COALESCE(pv."nombre", ic."descripcion") AS nombre,
+      SUM(ic."cantidad")::bigint AS cantidad_total,
+      SUM(ic."subtotal")::bigint AS ingreso_total,
+      SUM(ic."cantidad" * ic."costo_unitario_snapshot")::bigint AS costo_total,
+      (SUM(ic."subtotal") - SUM(ic."cantidad" * ic."costo_unitario_snapshot"))::bigint AS ganancia_total,
+      CASE WHEN SUM(ic."subtotal") > 0 THEN
+        ROUND(
+          100.0 * (SUM(ic."subtotal") - SUM(ic."cantidad" * ic."costo_unitario_snapshot"))::numeric
+          / SUM(ic."subtotal"),
+          2
+        )::float
+      ELSE NULL END AS margen_porcentaje
+    FROM item_comprobante ic
+    JOIN comprobante c ON c.id = ic."comprobante_id"
+    LEFT JOIN producto_venta pv ON pv.id = ic."producto_venta_id"
+    WHERE
+      c."empresa_id" = ${user.empresaId}
+      AND c."estado" = 'EMITIDO'
+      AND c."deleted_at" IS NULL
+      AND c."fecha_emision" >= ${q.desde}
+      AND c."fecha_emision" <= ${q.hasta}
+      ${sucursalFragment(sucursalId)}
+    GROUP BY 1, 2
+    ${orderBy}
     LIMIT ${q.limite}
   `;
 }
