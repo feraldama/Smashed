@@ -210,7 +210,7 @@ describe('GET /reportes/productos/rentabilidad', () => {
       .send({ montoInicial: 100000 });
 
     const producto = await prisma.productoVenta.findFirstOrThrow({
-      where: { codigo: 'ACO-003', deletedAt: null, activo: true },
+      where: { codigo: 'ACO-002', deletedAt: null, activo: true },
       select: { id: true, precioBase: true, nombre: true },
     });
     const mods = await modificadoresObligatoriosDe(producto.id);
@@ -276,7 +276,7 @@ describe('GET /reportes/productos/rentabilidad', () => {
     const ganancia = Number(fila.ganancia_total);
 
     expect(ingreso).toBe(venta.precio); // 1 unidad facturada al precio del producto
-    expect(costo).toBeGreaterThan(0); // ACO-003 tiene receta con insumos de costo > 0
+    expect(costo).toBeGreaterThan(0); // ACO-002 tiene receta con insumos de costo > 0
     expect(costo).toBeLessThan(ingreso); // margen sano
     expect(ganancia).toBe(ingreso - costo);
     expect(fila.margen_porcentaje).toBeCloseTo((100 * ganancia) / ingreso, 1);
