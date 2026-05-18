@@ -45,6 +45,7 @@ export interface PedidoResult {
   total: string;
   subtotal: string;
   totalIva: string;
+  recargoDelivery: string;
 }
 
 export function useCrearPedido() {
@@ -207,6 +208,7 @@ export interface PedidoDetalle {
   total: string;
   subtotal: string;
   totalIva: string;
+  recargoDelivery: string;
   numeroPager: number | null;
   observaciones: string | null;
   createdAt: string;

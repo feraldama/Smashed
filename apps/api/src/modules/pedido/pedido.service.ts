@@ -79,6 +79,60 @@ const ESTADOS_CON_STOCK_DESCONTADO: EstadoPedido[] = [
 ];
 
 // ───────────────────────────────────────────────────────────────────────────
+//  Recargo delivery — config por sucursal, snapshot al crear pedido
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Calcula el monto del recargo de delivery a aplicar a un pedido nuevo.
+ *
+ *  - Solo aplica a `DELIVERY_PROPIO`.
+ *  - Lee la config de la sucursal (deliveryRecargoActivo/Tipo/Valor).
+ *  - Si el cliente tiene `sinRecargoDelivery=true`, queda exento.
+ *  - PORCENTAJE: `valor` está en centésimos del 1% (ej. 1500 = 15.00%) y se
+ *    aplica sobre `subtotal + totalIva` (lo que paga el cliente sin recargo).
+ *  - MONTO: valor en guaraníes, suma directa.
+ *
+ * El resultado es snapshot: se persiste en `pedido.recargoDelivery` y NO se
+ * recalcula si después cambia la config de la sucursal — los pedidos viejos
+ * conservan exactamente lo cobrado.
+ */
+async function calcularRecargoDelivery(params: {
+  tipo: TipoPedido;
+  sucursalId: string;
+  clienteId: string | null | undefined;
+  subtotal: bigint;
+  totalIva: bigint;
+}): Promise<bigint> {
+  if (params.tipo !== TipoPedido.DELIVERY_PROPIO) return 0n;
+
+  const sucursal = await prisma.sucursal.findUnique({
+    where: { id: params.sucursalId },
+    select: {
+      deliveryRecargoActivo: true,
+      deliveryRecargoTipo: true,
+      deliveryRecargoValor: true,
+    },
+  });
+  if (!sucursal || !sucursal.deliveryRecargoActivo) return 0n;
+  if (sucursal.deliveryRecargoValor <= 0n) return 0n;
+
+  if (params.clienteId) {
+    const cliente = await prisma.cliente.findUnique({
+      where: { id: params.clienteId },
+      select: { sinRecargoDelivery: true },
+    });
+    if (cliente?.sinRecargoDelivery) return 0n;
+  }
+
+  if (sucursal.deliveryRecargoTipo === 'MONTO') {
+    return sucursal.deliveryRecargoValor;
+  }
+  // PORCENTAJE: 10000 = 100% (centésimos del 1%). División entera trunca a Gs.
+  const base = params.subtotal + params.totalIva;
+  return (base * sucursal.deliveryRecargoValor) / 10000n;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  CREAR
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -95,7 +149,15 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
     sucursalId,
     items: input.items,
   });
-  const total = subtotal + totalIva;
+
+  const recargoDelivery = await calcularRecargoDelivery({
+    tipo: input.tipo,
+    sucursalId,
+    clienteId: input.clienteId,
+    subtotal,
+    totalIva,
+  });
+  const total = subtotal + totalIva + recargoDelivery;
 
   // 4) Validar mesa/cliente/dirección si vienen
   if (input.mesaId) {
@@ -152,6 +214,7 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
         tomadoEn: new Date(),
         subtotal,
         totalIva,
+        recargoDelivery,
         total,
         items: { create: itemsParaCrear },
       },

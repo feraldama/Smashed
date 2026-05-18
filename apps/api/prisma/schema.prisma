@@ -119,6 +119,14 @@ enum TipoPedido {
   RETIRO_LOCAL
 }
 
+// Tipo de recargo de delivery configurable por sucursal.
+// PORCENTAJE: valor en centésimos del 1% (ej. 1500 = 15.00%) aplicado al subtotal.
+// MONTO: valor en guaraníes fijo, sumado al total.
+enum TipoRecargoDelivery {
+  PORCENTAJE
+  MONTO
+}
+
 enum EstadoPedido {
   PENDIENTE
   CONFIRMADO
@@ -337,6 +345,15 @@ model Sucursal {
   // (updateMany con check de versión) para garantizar numeración race-free.
   ultimoNumeroPedido Int   @default(0) @map("ultimo_numero_pedido")
 
+  // Recargo automático para pedidos DELIVERY_PROPIO. Lo configura el admin,
+  // el cajero no lo edita. Cuando activo=true se suma al total del pedido
+  // salvo que el cliente tenga `sinRecargoDelivery=true`.
+  // Si tipo=PORCENTAJE, valor se interpreta como centésimos del 1%
+  // (ej. 1500 = 15.00% del subtotal). Si tipo=MONTO, valor es guaraníes.
+  deliveryRecargoActivo Boolean @default(false) @map("delivery_recargo_activo")
+  deliveryRecargoTipo   TipoRecargoDelivery @default(MONTO) @map("delivery_recargo_tipo")
+  deliveryRecargoValor  BigInt  @default(0) @map("delivery_recargo_valor")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -527,6 +544,11 @@ model Cliente {
   telefono        String?
   // Cliente "consumidor final" / "SIN NOMBRE" usa este flag para id estable y filtro.
   esConsumidorFinal Boolean @default(false) @map("es_consumidor_final")
+
+  // Exención de recargo delivery (VIP, empleados, convenios). Cuando es true,
+  // los pedidos DELIVERY_PROPIO de este cliente no suman el recargo configurado
+  // en la sucursal. Editable por admin.
+  sinRecargoDelivery Boolean @default(false) @map("sin_recargo_delivery")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -1163,6 +1185,10 @@ model Pedido {
   subtotal      BigInt   @default(0)
   totalDescuento BigInt  @default(0) @map("total_descuento")
   totalIva      BigInt   @default(0) @map("total_iva")
+  // Snapshot del recargo de delivery aplicado al crear el pedido. No se
+  // recalcula si después cambia la config de la sucursal — los pedidos
+  // históricos preservan el monto cobrado. Siempre 0 para tipo != DELIVERY_PROPIO.
+  recargoDelivery BigInt @default(0) @map("recargo_delivery")
   total         BigInt   @default(0)
 
   // Tiempos para métricas KDS / SLA

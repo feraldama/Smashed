@@ -2,7 +2,6 @@ import { TipoContribuyente } from '@prisma/client';
 import { calcularDvRuc } from '@smash/shared-utils';
 import { z } from 'zod';
 
-
 // ───── Cliente ─────
 
 const rucBase = z
@@ -40,6 +39,7 @@ export const crearClienteInput = z
       .or(z.literal('').transform(() => undefined)),
     telefono: z.string().trim().max(30).optional(),
     esConsumidorFinal: z.boolean().default(false),
+    sinRecargoDelivery: z.boolean().default(false),
   })
   .and(rucBase);
 
@@ -51,6 +51,7 @@ export const actualizarClienteInput = z
     documento: z.string().trim().max(20).nullable().optional(),
     email: z.string().trim().email().nullable().optional(),
     telefono: z.string().trim().max(30).nullable().optional(),
+    sinRecargoDelivery: z.boolean().optional(),
   })
   .and(rucBase);
 

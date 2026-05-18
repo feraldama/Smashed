@@ -21,6 +21,7 @@ import { confirmar, toast } from '@/components/Toast';
 import {
   type ModificadorGrupo,
   type ModificadorOpcion,
+  useActualizarOpcion,
   useEliminarGrupo,
   useEliminarOpcion,
   useModificadores,
@@ -184,6 +185,7 @@ function GrupoCard({
   onEditOpcion: (opcion: ModificadorOpcion) => void;
 }) {
   const eliminar = useEliminarOpcion(grupo.id);
+  const actualizar = useActualizarOpcion(grupo.id);
 
   async function handleEliminarOpcion(o: ModificadorOpcion) {
     const ok = await confirmar({
@@ -197,6 +199,35 @@ function GrupoCard({
       await eliminar.mutateAsync(o.id);
       toast.success(`"${o.nombre}" eliminada`);
     } catch (err) {
+      // Si la opción ya tiene historial de pedidos, el backend bloquea el delete
+      // duro (preservación del histórico) y devuelve CONFLICT. Ofrecemos
+      // desactivar como alternativa directa, sin obligar a abrir el modal de
+      // edición y apagar el switch a mano.
+      if (err instanceof ApiError && err.code === 'CONFLICT' && o.activo) {
+        const desactivar = await confirmar({
+          titulo: 'No se puede eliminar',
+          icon: 'info',
+          mensaje:
+            `"${o.nombre}" se usó en pedidos reales, borrarla rompería el histórico. ` +
+            '¿Querés desactivarla? No va a aparecer más en el POS, pero los pedidos ' +
+            'viejos la siguen mostrando.',
+          textoConfirmar: 'Desactivar',
+        });
+        if (!desactivar) return;
+        try {
+          await actualizar.mutateAsync({
+            opcionId: o.id,
+            nombre: o.nombre,
+            precioExtra: Number.parseInt(o.precioExtra, 10),
+            orden: o.orden,
+            activo: false,
+          });
+          toast.success(`"${o.nombre}" desactivada`);
+        } catch (err2) {
+          toast.error(err2 instanceof ApiError ? err2.message : 'Error al desactivar');
+        }
+        return;
+      }
       toast.error(err instanceof ApiError ? err.message : 'Error al eliminar');
     }
   }

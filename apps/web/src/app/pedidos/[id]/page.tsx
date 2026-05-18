@@ -58,6 +58,7 @@ function PedidoDetalleScreen() {
 
   const subtotal = BigInt(pedido.subtotal);
   const totalIva = BigInt(pedido.totalIva);
+  const recargoDelivery = BigInt(pedido.recargoDelivery);
   const total = BigInt(pedido.total);
 
   return (
@@ -108,6 +109,12 @@ function PedidoDetalleScreen() {
                 <span className="text-muted-foreground">IVA</span>
                 <span className="font-mono tabular-nums">{formatGs(totalIva)}</span>
               </div>
+              {recargoDelivery > 0n && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Recargo delivery</span>
+                  <span className="font-mono tabular-nums">+{formatGs(recargoDelivery)}</span>
+                </div>
+              )}
               <div className="flex justify-between border-t pt-2 text-base font-bold">
                 <span>Total</span>
                 <span className="font-mono tabular-nums">{formatGs(total)}</span>

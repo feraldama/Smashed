@@ -131,6 +131,33 @@ export function cantidadTotal(state: CartState): number {
   return state.items.reduce((acc, it) => acc + it.cantidad, 0);
 }
 
+/**
+ * Calcula el recargo de delivery a aplicar — mirror exacto del cálculo
+ * backend en `pedido.service.calcularRecargoDelivery`. El backend es la
+ * autoridad final (el frontend solo previsualiza al cajero para que no haya
+ * sorpresas al confirmar). Si los dos divergen, el monto persistido es el
+ * del backend.
+ *
+ *  - Solo aplica si `tipoPedido === 'DELIVERY_PROPIO'`.
+ *  - Si la sucursal no tiene config activa o valor=0, devuelve 0.
+ *  - Si el cliente está exento, devuelve 0.
+ *  - MONTO: valor en Gs.
+ *  - PORCENTAJE: valor en centésimos del 1% (10000 = 100%) aplicado al
+ *    total bruto (subtotal + IVA).
+ */
+export function calcularRecargoDelivery(opts: {
+  tipoPedido: string;
+  totalConIva: number;
+  config: { activo: boolean; tipo: 'PORCENTAJE' | 'MONTO'; valor: number } | null | undefined;
+  clienteExento: boolean;
+}): number {
+  if (opts.tipoPedido !== 'DELIVERY_PROPIO') return 0;
+  if (!opts.config || !opts.config.activo || opts.config.valor <= 0) return 0;
+  if (opts.clienteExento) return 0;
+  if (opts.config.tipo === 'MONTO') return opts.config.valor;
+  return Math.floor((opts.totalConIva * opts.config.valor) / 10000);
+}
+
 // ───── Conversión al payload del API ─────
 
 export function aPayloadPedidoItems(state: CartState) {

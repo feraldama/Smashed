@@ -6,8 +6,14 @@ import { useState } from 'react';
 import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
-import { type Sucursal, useActualizarSucursal, useCrearSucursal } from '@/hooks/useSucursales';
+import {
+  type Sucursal,
+  type TipoRecargoDelivery,
+  useActualizarSucursal,
+  useCrearSucursal,
+} from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
+import { cn, formatGs } from '@/lib/utils';
 
 interface Props {
   sucursal?: Sucursal;
@@ -31,6 +37,21 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
   const [zonaHoraria, setZonaHoraria] = useState(sucursal?.zonaHoraria ?? 'America/Asuncion');
   const [activa, setActiva] = useState(sucursal?.activa ?? true);
 
+  // Recargo delivery (admin-only — el cajero ve el monto auto-aplicado, no edita).
+  const [recargoActivo, setRecargoActivo] = useState(sucursal?.deliveryRecargoActivo ?? false);
+  const [recargoTipo, setRecargoTipo] = useState<TipoRecargoDelivery>(
+    sucursal?.deliveryRecargoTipo ?? 'MONTO',
+  );
+  // Para PORCENTAJE guardamos el valor "humano" (15 = 15%) y al enviar
+  // multiplicamos por 100 para llegar a los centésimos del 1% que espera el
+  // backend (10000 = 100%). Para MONTO el valor son Gs. directos.
+  const recargoValorInicial = sucursal
+    ? sucursal.deliveryRecargoTipo === 'PORCENTAJE'
+      ? Number.parseInt(sucursal.deliveryRecargoValor, 10) / 100
+      : Number.parseInt(sucursal.deliveryRecargoValor, 10)
+    : 0;
+  const [recargoValor, setRecargoValor] = useState(String(recargoValorInicial));
+
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -42,6 +63,20 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
       return setError('Establecimiento debe ser exactamente 3 dígitos');
     }
     if (direccion.trim().length < 3) return setError('Dirección requerida');
+
+    // Recargo: validar y normalizar al formato wire del backend.
+    let recargoValorWire = 0;
+    if (recargoActivo) {
+      const v = Number.parseFloat(recargoValor.replace(',', '.'));
+      if (!Number.isFinite(v) || v < 0) return setError('Valor de recargo inválido');
+      if (recargoTipo === 'PORCENTAJE') {
+        if (v > 100) return setError('El porcentaje no puede superar 100%');
+        recargoValorWire = Math.round(v * 100); // 15% → 1500 centésimos
+      } else {
+        if (v > 10_000_000) return setError('Monto excesivo');
+        recargoValorWire = Math.round(v);
+      }
+    }
 
     try {
       if (sucursal) {
@@ -57,6 +92,9 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
           email: email.trim() || null,
           zonaHoraria: zonaHoraria.trim(),
           activa,
+          deliveryRecargoActivo: recargoActivo,
+          deliveryRecargoTipo: recargoTipo,
+          deliveryRecargoValor: recargoValorWire,
         });
         toast.success('Sucursal actualizada');
       } else {
@@ -202,6 +240,91 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
                 checked={activa}
                 onCheckedChange={setActiva}
               />
+            )}
+
+            {isEdit && (
+              <div className="rounded-md border bg-muted/10 p-4">
+                <h3 className="mb-1 text-sm font-bold">Recargo delivery</h3>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Monto que se suma automáticamente a cada pedido de delivery propio. El cajero no
+                  lo puede modificar. Clientes con "Sin recargo delivery" quedan exentos.
+                </p>
+                <SwitchField
+                  label="Aplicar recargo en delivery"
+                  description="Si está apagado, los pedidos de delivery no suman nada extra"
+                  checked={recargoActivo}
+                  onCheckedChange={setRecargoActivo}
+                />
+                {recargoActivo && (
+                  <div className="mt-3 space-y-3">
+                    <Field label="Tipo de recargo">
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => setRecargoTipo('MONTO')}
+                          className={cn(
+                            'rounded-md border p-2 text-xs font-medium transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            recargoTipo === 'MONTO'
+                              ? 'border-primary bg-primary/5 ring-2 ring-primary/30'
+                              : 'border-input hover:bg-accent',
+                          )}
+                        >
+                          Monto fijo (Gs.)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRecargoTipo('PORCENTAJE')}
+                          className={cn(
+                            'rounded-md border p-2 text-xs font-medium transition-colors',
+                            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                            recargoTipo === 'PORCENTAJE'
+                              ? 'border-primary bg-primary/5 ring-2 ring-primary/30'
+                              : 'border-input hover:bg-accent',
+                          )}
+                        >
+                          Porcentaje (%)
+                        </button>
+                      </div>
+                    </Field>
+                    <Field
+                      label={recargoTipo === 'MONTO' ? 'Monto (Gs.)' : 'Porcentaje (%)'}
+                      hint={
+                        recargoTipo === 'MONTO'
+                          ? 'Se suma este monto a cada pedido de delivery'
+                          : 'Se aplica este % sobre el total del pedido (ej: 15 = 15%)'
+                      }
+                    >
+                      <Input
+                        type="number"
+                        value={recargoValor}
+                        onChange={(e) => setRecargoValor(e.target.value)}
+                        min={0}
+                        max={recargoTipo === 'PORCENTAJE' ? 100 : 10_000_000}
+                        step={recargoTipo === 'PORCENTAJE' ? '0.01' : '500'}
+                        placeholder={recargoTipo === 'MONTO' ? '8000' : '15'}
+                      />
+                    </Field>
+                    {(() => {
+                      const v = Number.parseFloat(recargoValor.replace(',', '.'));
+                      if (!Number.isFinite(v) || v <= 0) return null;
+                      const ejemploTicket = 50_000;
+                      const ejemploRecargo =
+                        recargoTipo === 'MONTO' ? v : Math.floor((ejemploTicket * v) / 100);
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          Ejemplo: un pedido de {formatGs(ejemploTicket)} cobraría{' '}
+                          <strong className="text-foreground">+{formatGs(ejemploRecargo)}</strong>{' '}
+                          {recargoTipo === 'PORCENTAJE'
+                            ? `(${v}% del total)`
+                            : '(siempre el mismo monto)'}
+                          .
+                        </p>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
             )}
 
             {error && (

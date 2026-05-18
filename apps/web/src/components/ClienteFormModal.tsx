@@ -56,6 +56,9 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
     numeroParaDv && /^\d+$/.test(numeroParaDv) ? String(calcularDvRuc(numeroParaDv)) : '';
   const [email, setEmail] = useState(cliente?.email ?? '');
   const [telefono, setTelefono] = useState(cliente?.telefono ?? '');
+  const [sinRecargoDelivery, setSinRecargoDelivery] = useState(
+    cliente?.sinRecargoDelivery ?? false,
+  );
   const [error, setError] = useState<string | null>(null);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -99,6 +102,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
       documento: docFinal,
       email: email.trim() || undefined,
       telefono: telefono.trim() || undefined,
+      sinRecargoDelivery,
     };
 
     try {
@@ -275,6 +279,13 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
               />
             </Field>
           </div>
+
+          <SwitchField
+            label="Sin recargo de delivery"
+            description="VIP / empleados / convenios: los pedidos de delivery de este cliente no suman recargo aunque la sucursal lo tenga configurado."
+            checked={sinRecargoDelivery}
+            onCheckedChange={setSinRecargoDelivery}
+          />
 
           {error && (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">

@@ -13,6 +13,7 @@ export interface Cliente {
   email: string | null;
   telefono: string | null;
   esConsumidorFinal: boolean;
+  sinRecargoDelivery: boolean;
   createdAt: string;
 }
 
@@ -57,6 +58,7 @@ interface ClienteInput {
   documento?: string;
   email?: string;
   telefono?: string;
+  sinRecargoDelivery?: boolean;
 }
 
 export function useCrearCliente() {

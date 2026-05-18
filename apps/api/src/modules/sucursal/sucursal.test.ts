@@ -293,6 +293,109 @@ describe('PATCH /empresa/mi-empresa/configuracion', () => {
   });
 });
 
+describe('PATCH /sucursales/:id — config recargo delivery', () => {
+  async function getCentro() {
+    return prisma.sucursal.findFirstOrThrow({ where: { codigo: 'CEN' } });
+  }
+  async function resetCentroConfig() {
+    const c = await getCentro();
+    await prisma.sucursal.update({
+      where: { id: c.id },
+      data: {
+        deliveryRecargoActivo: false,
+        deliveryRecargoTipo: 'MONTO',
+        deliveryRecargoValor: 0n,
+      },
+    });
+  }
+
+  it('admin actualiza config: tipo MONTO, valor 8000', async () => {
+    await resetCentroConfig();
+    const token = await login(ADMIN);
+    const centro = await getCentro();
+    const res = await request(app)
+      .patch(`/sucursales/${centro.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        deliveryRecargoActivo: true,
+        deliveryRecargoTipo: 'MONTO',
+        deliveryRecargoValor: 8000,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.sucursal.deliveryRecargoActivo).toBe(true);
+    expect(res.body.sucursal.deliveryRecargoTipo).toBe('MONTO');
+    expect(res.body.sucursal.deliveryRecargoValor).toBe('8000');
+    await resetCentroConfig();
+  });
+
+  it('admin setea PORCENTAJE con valor 1500 (= 15%)', async () => {
+    await resetCentroConfig();
+    const token = await login(ADMIN);
+    const centro = await getCentro();
+    const res = await request(app)
+      .patch(`/sucursales/${centro.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        deliveryRecargoActivo: true,
+        deliveryRecargoTipo: 'PORCENTAJE',
+        deliveryRecargoValor: 1500,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.sucursal.deliveryRecargoTipo).toBe('PORCENTAJE');
+    expect(res.body.sucursal.deliveryRecargoValor).toBe('1500');
+    await resetCentroConfig();
+  });
+
+  it('PORCENTAJE con valor > 10000 → 400 (validación inline)', async () => {
+    await resetCentroConfig();
+    const token = await login(ADMIN);
+    const centro = await getCentro();
+    const res = await request(app)
+      .patch(`/sucursales/${centro.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        deliveryRecargoActivo: true,
+        deliveryRecargoTipo: 'PORCENTAJE',
+        deliveryRecargoValor: 20000,
+      });
+    expect(res.status).toBe(400);
+    await resetCentroConfig();
+  });
+
+  it('cambiar tipo a PORCENTAJE sin mandar valor nuevo → 400 si el valor existente supera el bound', async () => {
+    // Setup: tipo=MONTO con valor 50000 (válido para MONTO, inválido si fuera PORCENTAJE).
+    const centro = await getCentro();
+    await prisma.sucursal.update({
+      where: { id: centro.id },
+      data: {
+        deliveryRecargoActivo: true,
+        deliveryRecargoTipo: 'MONTO',
+        deliveryRecargoValor: 50000n,
+      },
+    });
+
+    const token = await login(ADMIN);
+    const res = await request(app)
+      .patch(`/sucursales/${centro.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ deliveryRecargoTipo: 'PORCENTAJE' });
+    // El backend valida el ESTADO FINAL, no solo lo que vino — 50000 con tipo
+    // PORCENTAJE serían 500% de recargo y debe rechazarse.
+    expect(res.status).toBe(400);
+    await resetCentroConfig();
+  });
+
+  it('cajero no puede cambiar config delivery (sin rol gestión)', async () => {
+    const token = await login(CAJERO);
+    const centro = await getCentro();
+    const res = await request(app)
+      .patch(`/sucursales/${centro.id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ deliveryRecargoActivo: true });
+    expect(res.status).toBe(403);
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });

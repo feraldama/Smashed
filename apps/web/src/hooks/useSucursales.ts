@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { api } from '@/lib/api';
 
+export type TipoRecargoDelivery = 'PORCENTAJE' | 'MONTO';
+
 export interface Sucursal {
   id: string;
   empresaId: string;
@@ -15,6 +17,11 @@ export interface Sucursal {
   email: string | null;
   zonaHoraria: string | null;
   activa: boolean;
+  deliveryRecargoActivo: boolean;
+  deliveryRecargoTipo: TipoRecargoDelivery;
+  // BigInt serializado — interpretar como centésimos del 1% si tipo=PORCENTAJE
+  // (10000 = 100%), o Gs. si tipo=MONTO.
+  deliveryRecargoValor: string;
   createdAt: string;
   updatedAt: string;
   _count: {
@@ -46,6 +53,9 @@ export interface ActualizarSucursalInput {
   email?: string | null;
   zonaHoraria?: string | null;
   activa?: boolean;
+  deliveryRecargoActivo?: boolean;
+  deliveryRecargoTipo?: TipoRecargoDelivery;
+  deliveryRecargoValor?: number;
 }
 
 export function useSucursales() {
@@ -53,6 +63,15 @@ export function useSucursales() {
     queryKey: ['admin', 'sucursales'],
     queryFn: () => api<{ sucursales: Sucursal[] }>('/sucursales'),
     select: (d) => d.sucursales,
+  });
+}
+
+export function useSucursal(id: string | null | undefined) {
+  return useQuery({
+    queryKey: ['sucursal', id],
+    queryFn: () => api<{ sucursal: Sucursal }>(`/sucursales/${id ?? ''}`),
+    select: (d) => d.sucursal,
+    enabled: Boolean(id),
   });
 }
 

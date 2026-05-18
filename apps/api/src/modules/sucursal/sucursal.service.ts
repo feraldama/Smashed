@@ -27,6 +27,9 @@ const SELECT_SUCURSAL = {
   email: true,
   zonaHoraria: true,
   activa: true,
+  deliveryRecargoActivo: true,
+  deliveryRecargoTipo: true,
+  deliveryRecargoValor: true,
   createdAt: true,
   updatedAt: true,
   _count: {
@@ -145,7 +148,15 @@ export async function actualizarSucursal(
 
   const target = await prisma.sucursal.findUnique({
     where: { id },
-    select: { id: true, empresaId: true, codigo: true, establecimiento: true, deletedAt: true },
+    select: {
+      id: true,
+      empresaId: true,
+      codigo: true,
+      establecimiento: true,
+      deletedAt: true,
+      deliveryRecargoTipo: true,
+      deliveryRecargoValor: true,
+    },
   });
   if (!target || target.deletedAt) throw Errors.notFound('Sucursal no encontrada');
   if (!user.isSuperAdmin && target.empresaId !== user.empresaId) throw Errors.tenantMismatch();
@@ -189,6 +200,28 @@ export async function actualizarSucursal(
   if (input.email !== undefined) data.email = input.email;
   if (input.zonaHoraria !== undefined) data.zonaHoraria = input.zonaHoraria;
   if (input.activa !== undefined) data.activa = input.activa;
+  if (input.deliveryRecargoActivo !== undefined) {
+    data.deliveryRecargoActivo = input.deliveryRecargoActivo;
+  }
+  if (input.deliveryRecargoTipo !== undefined) data.deliveryRecargoTipo = input.deliveryRecargoTipo;
+  if (input.deliveryRecargoValor !== undefined) {
+    data.deliveryRecargoValor = BigInt(input.deliveryRecargoValor);
+  }
+  // Validar el ESTADO FINAL (tipo+valor que van a quedar persistidos), no solo
+  // lo que vino en el input. Cierra el agujero de cambiar el tipo a PORCENTAJE
+  // sin mandar valor nuevo: si la sucursal tenía MONTO=50000 quedaría como
+  // PORCENTAJE=50000 (= 500% de recargo). El frontend siempre manda ambos,
+  // pero defendemos el contrato del endpoint.
+  const tipoFinal = input.deliveryRecargoTipo ?? target.deliveryRecargoTipo;
+  const valorFinal =
+    input.deliveryRecargoValor !== undefined
+      ? BigInt(input.deliveryRecargoValor)
+      : target.deliveryRecargoValor;
+  if (tipoFinal === 'PORCENTAJE' && valorFinal > 10000n) {
+    throw Errors.validation({
+      deliveryRecargoValor: 'Para PORCENTAJE el máximo es 10000 (= 100%)',
+    });
+  }
 
   const sucursal = await prisma.sucursal.update({
     where: { id },

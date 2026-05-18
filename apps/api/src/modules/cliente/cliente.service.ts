@@ -1,4 +1,3 @@
-
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -56,6 +55,7 @@ export async function listarClientes(
       email: true,
       telefono: true,
       esConsumidorFinal: true,
+      sinRecargoDelivery: true,
       createdAt: true,
     },
   });
@@ -105,6 +105,7 @@ export async function crearCliente(empresaId: string, input: CrearClienteInput) 
       email: input.email,
       telefono: input.telefono,
       esConsumidorFinal: input.esConsumidorFinal,
+      sinRecargoDelivery: input.sinRecargoDelivery,
     },
     include: { direcciones: true },
   });

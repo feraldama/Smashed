@@ -45,10 +45,12 @@ import {
   useCrearPedido,
   type TipoPedido,
 } from '@/hooks/usePedidos';
+import { useSucursal } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import {
   aPayloadPedidoItems,
+  calcularRecargoDelivery,
   cantidadTotal,
   cartInitial,
   cartReducer,
@@ -109,6 +111,32 @@ function POSScreen() {
 
   const total = useMemo(() => totalCarrito(cart), [cart]);
   const totalItems = useMemo(() => cantidadTotal(cart), [cart]);
+
+  // Config de recargo delivery de la sucursal activa (solo importa cuando tipo=DELIVERY).
+  // Se ignora silenciosamente si el endpoint todavía no terminó — el backend igualmente
+  // aplica el recargo al crear; esto es solo previsualización para el cajero.
+  const { data: sucursalActiva } = useSucursal(user?.sucursalActivaId ?? null);
+  const recargoDelivery = useMemo(
+    () =>
+      calcularRecargoDelivery({
+        tipoPedido: tipo,
+        totalConIva: total,
+        config: sucursalActiva
+          ? {
+              activo: sucursalActiva.deliveryRecargoActivo,
+              tipo: sucursalActiva.deliveryRecargoTipo,
+              valor: Number.parseInt(sucursalActiva.deliveryRecargoValor, 10),
+            }
+          : null,
+        clienteExento: cliente?.sinRecargoDelivery ?? false,
+      }),
+    [tipo, total, sucursalActiva, cliente],
+  );
+  const totalConRecargo = total + recargoDelivery;
+  const recargoSucursalActivo = Boolean(
+    sucursalActiva?.deliveryRecargoActivo &&
+    Number.parseInt(sucursalActiva.deliveryRecargoValor, 10) > 0,
+  );
 
   if (cajaLoading) {
     return (
@@ -456,12 +484,45 @@ function POSScreen() {
 
           {/* Footer */}
           <div className="space-y-3 border-t bg-muted/20 p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm">Total</span>
-              <span className="text-2xl font-bold tabular-nums">
-                Gs. {total.toLocaleString('es-PY')}
-              </span>
-            </div>
+            {tipo === 'DELIVERY_PROPIO' && recargoSucursalActivo ? (
+              // Delivery con recargo configurado: mostramos subtotal + recargo + total.
+              // El recargo NO es editable — sale automático de la config de la sucursal
+              // (admin) y se confirma del lado backend al crear el pedido.
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-sm text-muted-foreground">
+                  <span>Subtotal</span>
+                  <span className="tabular-nums">Gs. {total.toLocaleString('es-PY')}</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <Truck className="h-3.5 w-3.5" />
+                    Recargo delivery
+                  </span>
+                  {cliente?.sinRecargoDelivery ? (
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">
+                      Cliente exento
+                    </span>
+                  ) : (
+                    <span className="tabular-nums font-medium">
+                      +Gs. {recargoDelivery.toLocaleString('es-PY')}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between border-t pt-2">
+                  <span className="text-sm font-medium">Total</span>
+                  <span className="text-2xl font-bold tabular-nums">
+                    Gs. {totalConRecargo.toLocaleString('es-PY')}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between">
+                <span className="text-sm">Total</span>
+                <span className="text-2xl font-bold tabular-nums">
+                  Gs. {total.toLocaleString('es-PY')}
+                </span>
+              </div>
+            )}
             {tipo === 'DELIVERY_PROPIO' && !pedidoExistenteId ? (
               // Delivery: dos botones — el cajero decide si cobra ahora (prepago)
               // o si cobra el repartidor al entregar (pago contra entrega).

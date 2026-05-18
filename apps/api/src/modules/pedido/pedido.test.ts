@@ -708,6 +708,172 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
   });
 });
 
+describe('Recargo delivery — config por sucursal', () => {
+  // Helpers: setear/limpiar config de la sucursal Centro entre escenarios.
+  async function setRecargoCentro(opts: {
+    activo: boolean;
+    tipo?: 'PORCENTAJE' | 'MONTO';
+    valor?: number;
+  }) {
+    await prisma.sucursal.updateMany({
+      where: { codigo: 'CEN' },
+      data: {
+        deliveryRecargoActivo: opts.activo,
+        ...(opts.tipo ? { deliveryRecargoTipo: opts.tipo } : {}),
+        ...(opts.valor !== undefined ? { deliveryRecargoValor: BigInt(opts.valor) } : {}),
+      },
+    });
+  }
+  async function limpiarRecargoCentro() {
+    await prisma.sucursal.updateMany({
+      where: { codigo: 'CEN' },
+      data: {
+        deliveryRecargoActivo: false,
+        deliveryRecargoTipo: 'MONTO',
+        deliveryRecargoValor: 0n,
+      },
+    });
+  }
+
+  it('DELIVERY_PROPIO con recargo MONTO → suma al total y persiste snapshot', async () => {
+    await reset();
+    await setRecargoCentro({ activo: true, tipo: 'MONTO', valor: 8000 });
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    const res = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'DELIVERY_PROPIO', items: [await itemHam(smashId, 1)] });
+
+    expect(res.status).toBe(201);
+    // 1 × 35000 (subtotal+iva) + 8000 (recargo) = 43000
+    expect(res.body.pedido.total).toBe('43000');
+    expect(res.body.pedido.recargoDelivery).toBe('8000');
+    // El subtotal/iva del pedido NO incluye el recargo — el recargo es aparte.
+    expect(res.body.pedido.subtotal).toBe('31818');
+    expect(res.body.pedido.totalIva).toBe('3182');
+    await limpiarRecargoCentro();
+  });
+
+  it('DELIVERY_PROPIO con recargo PORCENTAJE → calcula sobre subtotal+IVA', async () => {
+    await reset();
+    // 15% (1500 centésimos del 1%)
+    await setRecargoCentro({ activo: true, tipo: 'PORCENTAJE', valor: 1500 });
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    const res = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'DELIVERY_PROPIO', items: [await itemHam(smashId, 2)] });
+
+    expect(res.status).toBe(201);
+    // 2 × 35000 = 70000. 15% de 70000 = 10500. Total = 80500.
+    expect(res.body.pedido.recargoDelivery).toBe('10500');
+    expect(res.body.pedido.total).toBe('80500');
+    await limpiarRecargoCentro();
+  });
+
+  it('Cliente con sinRecargoDelivery=true queda exento aunque la sucursal tenga recargo', async () => {
+    await reset();
+    await setRecargoCentro({ activo: true, tipo: 'MONTO', valor: 8000 });
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    // Crear cliente exento ad-hoc en la empresa de Centro.
+    const sucursalCentro = await prisma.sucursal.findFirstOrThrow({ where: { codigo: 'CEN' } });
+    const cliente = await prisma.cliente.create({
+      data: {
+        empresaId: sucursalCentro.empresaId,
+        tipoContribuyente: 'PERSONA_FISICA',
+        razonSocial: 'Cliente VIP Test',
+        sinRecargoDelivery: true,
+      },
+    });
+
+    const res = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'DELIVERY_PROPIO',
+        clienteId: cliente.id,
+        items: [await itemHam(smashId, 1)],
+      });
+
+    expect(res.status).toBe(201);
+    expect(res.body.pedido.recargoDelivery).toBe('0');
+    expect(res.body.pedido.total).toBe('35000');
+
+    await prisma.cliente.delete({ where: { id: cliente.id } });
+    await limpiarRecargoCentro();
+  });
+
+  it('Sucursal con recargo desactivado → no aplica nada aunque sea DELIVERY', async () => {
+    await reset();
+    await setRecargoCentro({ activo: false, tipo: 'MONTO', valor: 8000 });
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    const res = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'DELIVERY_PROPIO', items: [await itemHam(smashId, 1)] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.pedido.recargoDelivery).toBe('0');
+    expect(res.body.pedido.total).toBe('35000');
+    await limpiarRecargoCentro();
+  });
+
+  it('MOSTRADOR nunca recibe recargo aunque la sucursal lo tenga activo', async () => {
+    await reset();
+    await setRecargoCentro({ activo: true, tipo: 'MONTO', valor: 8000 });
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    const res = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
+
+    expect(res.status).toBe(201);
+    expect(res.body.pedido.recargoDelivery).toBe('0');
+    expect(res.body.pedido.total).toBe('35000');
+    await limpiarRecargoCentro();
+  });
+
+  it('agregarItems no recalcula el recargo (snapshot al crear)', async () => {
+    await reset();
+    await setRecargoCentro({ activo: true, tipo: 'MONTO', valor: 8000 });
+    const tCocina = await loginAs(COCINA_CENTRO);
+    const tCajero = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+
+    const crear = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ tipo: 'DELIVERY_PROPIO', items: [await itemHam(smashId, 1)] });
+    expect(crear.status).toBe(201);
+    expect(crear.body.pedido.recargoDelivery).toBe('8000');
+
+    // Confirmar el pedido y agregar items a la cuenta abierta.
+    await request(app)
+      .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${tCocina}`);
+    const ampliar = await request(app)
+      .post(`/pedidos/${crear.body.pedido.id}/items`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ items: [await itemHam(smashId, 1)] });
+
+    expect(ampliar.status).toBe(200);
+    // recargo sigue 8000 (no se recalcula). subtotal+iva = 70000. total = 78000.
+    expect(ampliar.body.pedido.recargoDelivery).toBe('8000');
+    expect(ampliar.body.pedido.total).toBe('78000');
+    await limpiarRecargoCentro();
+  });
+});
+
 describe('Tenant guard', () => {
   it('cajero de SLO no puede ver pedido de Centro → 403/404', async () => {
     await reset();

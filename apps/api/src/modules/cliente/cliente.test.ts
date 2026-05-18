@@ -5,7 +5,6 @@ import { calcularDvRuc } from '@smash/shared-utils';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-
 import { createApp } from '../../app.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -220,6 +219,56 @@ describe('Direcciones', () => {
       .delete(`/clientes/${c.id}/direcciones/${d2.body.direccion.id}`)
       .set('Authorization', `Bearer ${token}`);
     expect(del.status).toBe(204);
+  });
+});
+
+describe('sinRecargoDelivery — exención de recargo delivery', () => {
+  it('crear cliente con flag activo → se persiste (no se descarta silenciosamente)', async () => {
+    const token = await login(ADMIN);
+    const res = await request(app).post('/clientes').set('Authorization', `Bearer ${token}`).send({
+      tipoContribuyente: 'PERSONA_FISICA',
+      razonSocial: 'Cliente VIP creado con flag',
+      sinRecargoDelivery: true,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.cliente.sinRecargoDelivery).toBe(true);
+    limpiables.push(res.body.cliente.id);
+  });
+
+  it('crear sin flag → default false', async () => {
+    const token = await login(ADMIN);
+    const res = await request(app)
+      .post('/clientes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipoContribuyente: 'PERSONA_FISICA', razonSocial: 'Cliente normal' });
+    expect(res.status).toBe(201);
+    expect(res.body.cliente.sinRecargoDelivery).toBe(false);
+    limpiables.push(res.body.cliente.id);
+  });
+
+  it('actualizar para alternar el flag', async () => {
+    const token = await login(ADMIN);
+    const creado = await request(app)
+      .post('/clientes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipoContribuyente: 'PERSONA_FISICA', razonSocial: 'Toggle test' });
+    expect(creado.status).toBe(201);
+    limpiables.push(creado.body.cliente.id);
+    const id = creado.body.cliente.id;
+
+    const upd = await request(app)
+      .patch(`/clientes/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sinRecargoDelivery: true });
+    expect(upd.status).toBe(200);
+    expect(upd.body.cliente.sinRecargoDelivery).toBe(true);
+
+    const upd2 = await request(app)
+      .patch(`/clientes/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ sinRecargoDelivery: false });
+    expect(upd2.status).toBe(200);
+    expect(upd2.body.cliente.sinRecargoDelivery).toBe(false);
   });
 });
 
