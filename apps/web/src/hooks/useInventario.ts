@@ -175,3 +175,37 @@ export function useEliminarReceta() {
     },
   });
 }
+
+// ───── Listado global de recetas (página /recetas) ─────
+
+export type FiltroRecetas = 'TODOS' | 'SUB' | 'VENDIBLE';
+
+export interface RecetaListItem {
+  id: string;
+  rinde: string;
+  notas: string | null;
+  updatedAt: string;
+  cantidadItems: number;
+  usadaEn: number;
+  productoVenta: {
+    id: string;
+    codigo: string | null;
+    nombre: string;
+    esPreparacion: boolean;
+    esVendible: boolean;
+    activo: boolean;
+    categoria: { id: string; nombre: string } | null;
+  };
+}
+
+export function useRecetas(params: { busqueda?: string; filtro: FiltroRecetas }) {
+  const qs = new URLSearchParams();
+  if (params.busqueda) qs.set('busqueda', params.busqueda);
+  qs.set('filtro', params.filtro);
+  const query = qs.toString();
+  return useQuery({
+    queryKey: ['admin', 'recetas', params.filtro, params.busqueda ?? ''],
+    queryFn: () => api<{ recetas: RecetaListItem[] }>(`/catalogo/recetas?${query}`),
+    select: (d) => d.recetas,
+  });
+}

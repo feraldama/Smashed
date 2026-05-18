@@ -7,6 +7,7 @@ import {
   crearCategoriaInput,
   crearProductoInput,
   listarProductosQuery,
+  listarRecetasQuery,
   obtenerProductoParams,
   productoIdParam,
   setComboInput,
@@ -68,6 +69,17 @@ export async function obtenerProducto(req: Request, res: Response) {
     id,
   });
   res.json({ producto });
+}
+
+export async function listarRecetas(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  if (!ctx.empresaId) {
+    res.json({ recetas: [] });
+    return;
+  }
+  const q = listarRecetasQuery.parse(req.query);
+  const recetas = await service.listarRecetas(ctx.empresaId, q);
+  res.json({ recetas });
 }
 
 // ───── WRITE: Categorías ─────

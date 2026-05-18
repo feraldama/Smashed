@@ -18,6 +18,7 @@ const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
 router.get('/categorias', asyncH(ctrl.listarCategorias));
 router.get('/productos', asyncH(ctrl.listarProductos));
 router.get('/productos/:id', asyncH(ctrl.obtenerProducto));
+router.get('/recetas', requireAdmin, asyncH(ctrl.listarRecetas));
 
 // ───── WRITE (sólo gestión) ─────
 router.post('/categorias', requireAdmin, asyncH(ctrl.crearCategoria));

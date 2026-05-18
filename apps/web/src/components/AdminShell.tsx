@@ -65,6 +65,7 @@ const NAV: NavItem[] = [
   { href: '/combos', label: 'Combos', icon: Layers, group: 'Catálogo' },
   { href: '/categorias', label: 'Categorías', icon: Tags, group: 'Catálogo' },
   { href: '/modificadores', label: 'Modificadores', icon: Sliders, group: 'Catálogo' },
+  { href: '/recetas', label: 'Recetas', icon: ChefHat, group: 'Catálogo' },
   { href: '/insumos', label: 'Insumos', icon: Boxes, group: 'Inventario' },
   { href: '/proveedores', label: 'Proveedores', icon: Package, group: 'Inventario' },
   { href: '/compras', label: 'Compras', icon: ShoppingCart, group: 'Inventario' },

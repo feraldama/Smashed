@@ -113,6 +113,12 @@ export const setRecetaInput = z.object({
   items: z.array(itemRecetaInput).min(1).max(50),
 });
 
+export const listarRecetasQuery = z.object({
+  busqueda: z.string().trim().min(1).optional(),
+  // 'TODOS' (default) | 'SUB' (solo sub-preparaciones) | 'VENDIBLE' (solo productos vendibles).
+  filtro: z.enum(['TODOS', 'SUB', 'VENDIBLE']).default('TODOS'),
+});
+
 // ───── Combo ─────
 
 export const comboGrupoOpcionInput = z.object({
@@ -143,6 +149,7 @@ export type ActualizarProductoInput = z.infer<typeof actualizarProductoInput>;
 export type SetPrecioSucursalInput = z.infer<typeof setPrecioSucursalInput>;
 export type SetRecetaInput = z.infer<typeof setRecetaInput>;
 export type ItemRecetaInput = z.infer<typeof itemRecetaInput>;
+export type ListarRecetasQuery = z.infer<typeof listarRecetasQuery>;
 export type SetComboInput = z.infer<typeof setComboInput>;
 export type ComboGrupoInput = z.infer<typeof comboGrupoInput>;
 export type ComboGrupoOpcionInput = z.infer<typeof comboGrupoOpcionInput>;

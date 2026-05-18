@@ -277,6 +277,66 @@ describe('DELETE /catalogo/productos/:id/receta', () => {
   });
 });
 
+describe('GET /catalogo/recetas — listado global', () => {
+  it('admin lista todas las recetas con info útil', async () => {
+    const token = await login();
+    const res = await request(app).get('/catalogo/recetas').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.recetas)).toBe(true);
+    expect(res.body.recetas.length).toBeGreaterThan(0);
+    const r0 = res.body.recetas[0];
+    expect(r0).toHaveProperty('id');
+    expect(r0).toHaveProperty('cantidadItems');
+    expect(r0).toHaveProperty('usadaEn');
+    expect(r0).toHaveProperty('productoVenta');
+    expect(r0.productoVenta).toHaveProperty('esPreparacion');
+  });
+
+  it('filtro=SUB devuelve solo sub-preparaciones', async () => {
+    const token = await login();
+    const res = await request(app)
+      .get('/catalogo/recetas?filtro=SUB')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.recetas.length).toBeGreaterThan(0);
+    for (const r of res.body.recetas) {
+      expect(r.productoVenta.esPreparacion).toBe(true);
+    }
+  });
+
+  it('filtro=VENDIBLE descarta sub-preparaciones', async () => {
+    const token = await login();
+    const res = await request(app)
+      .get('/catalogo/recetas?filtro=VENDIBLE')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    for (const r of res.body.recetas) {
+      expect(r.productoVenta.esPreparacion).toBe(false);
+      expect(r.productoVenta.esVendible).toBe(true);
+    }
+  });
+
+  it('busqueda matchea por nombre del producto', async () => {
+    const token = await login();
+    const res = await request(app)
+      .get('/catalogo/recetas?busqueda=Salsa')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    for (const r of res.body.recetas) {
+      expect(r.productoVenta.nombre.toLowerCase()).toContain('salsa');
+    }
+  });
+
+  it('cajero NO puede acceder al listado (solo admin/gerente) → 403', async () => {
+    const cajeroLogin = await request(app)
+      .post('/auth/login')
+      .send({ email: 'cajero1@smash.com.py', password: 'Smash123!' });
+    const token = cajeroLogin.body.accessToken as string;
+    const res = await request(app).get('/catalogo/recetas').set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });

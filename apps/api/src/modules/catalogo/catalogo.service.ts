@@ -7,6 +7,7 @@ import type {
   CrearCategoriaInput,
   CrearProductoInput,
   ListarProductosQuery,
+  ListarRecetasQuery,
   SetComboInput,
   SetPrecioSucursalInput,
   SetRecetaInput,
@@ -461,6 +462,91 @@ export async function setPrecioSucursal(
       vigenteHasta: input.vigenteHasta,
     },
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  READ — Recetas (listado global con filtros para la página /recetas)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Lista todas las recetas de la empresa para la página de administración.
+ * Devuelve la receta con su producto asociado y métricas útiles (cantidad de
+ * items, cantidad de productos que la usan como sub-receta).
+ *
+ * Filtros:
+ *  - busqueda: matchea sobre el nombre o código del producto.
+ *  - filtro: TODOS (default), SUB (solo sub-preparaciones), VENDIBLE (solo
+ *    productos vendibles — descarta sub-preparaciones).
+ */
+export async function listarRecetas(empresaId: string, q: ListarRecetasQuery) {
+  const whereProducto: Prisma.ProductoVentaWhereInput = {
+    empresaId,
+    deletedAt: null,
+    ...(q.filtro === 'SUB' ? { esPreparacion: true } : {}),
+    ...(q.filtro === 'VENDIBLE' ? { esVendible: true, esPreparacion: false } : {}),
+    ...(q.busqueda
+      ? {
+          OR: [
+            { nombre: { contains: q.busqueda, mode: 'insensitive' } },
+            { codigo: { contains: q.busqueda, mode: 'insensitive' } },
+          ],
+        }
+      : {}),
+  };
+
+  const recetas = await prisma.receta.findMany({
+    where: { empresaId, deletedAt: null, productoVenta: whereProducto },
+    select: {
+      id: true,
+      rinde: true,
+      notas: true,
+      updatedAt: true,
+      productoVenta: {
+        select: {
+          id: true,
+          codigo: true,
+          nombre: true,
+          esPreparacion: true,
+          esVendible: true,
+          activo: true,
+          categoria: { select: { id: true, nombre: true } },
+        },
+      },
+      _count: { select: { items: true } },
+    },
+    orderBy: [
+      // Sub-preparaciones primero (son las que más se gestionan desde acá),
+      // después por nombre del producto.
+      { productoVenta: { esPreparacion: 'desc' } },
+      { productoVenta: { nombre: 'asc' } },
+    ],
+  });
+
+  // Para cada producto, contar cuántas recetas lo usan como sub-receta (referencias).
+  // Hacemos un solo groupBy en lugar de N+1.
+  const productoIds = recetas.map((r) => r.productoVenta.id);
+  const referencias =
+    productoIds.length > 0
+      ? await prisma.itemReceta.groupBy({
+          by: ['subProductoVentaId'],
+          where: { subProductoVentaId: { in: productoIds } },
+          _count: { _all: true },
+        })
+      : [];
+  const referenciasPorProducto = new Map<string, number>();
+  for (const r of referencias) {
+    if (r.subProductoVentaId) referenciasPorProducto.set(r.subProductoVentaId, r._count._all);
+  }
+
+  return recetas.map((r) => ({
+    id: r.id,
+    rinde: r.rinde.toString(),
+    notas: r.notas,
+    updatedAt: r.updatedAt,
+    cantidadItems: r._count.items,
+    usadaEn: referenciasPorProducto.get(r.productoVenta.id) ?? 0,
+    productoVenta: r.productoVenta,
+  }));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
