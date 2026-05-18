@@ -3,6 +3,8 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma.js';
 
 import type {
+  DescuentosListadoQuery,
+  MovimientosStockQuery,
   RangoFechasQuery,
   RentabilidadQuery,
   StockQuery,
@@ -43,26 +45,45 @@ function sucursalFragment(sucursalId: string | undefined, alias = 'c') {
     : Prisma.empty;
 }
 
+/**
+ * Filtra por usuario. Como cada reporte interpreta "usuario" distinto (quien
+ * cobró el comprobante, quien aplicó el descuento, quien tomó el pedido),
+ * el caller pasa alias + columna.
+ */
+function usuarioFragment(usuarioId: string | undefined, alias: string, column: string) {
+  return usuarioId
+    ? Prisma.sql`AND ${Prisma.raw(`"${alias}"`)}.${Prisma.raw(`"${column}"`)} = ${usuarioId}`
+    : Prisma.empty;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  VENTAS
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function resumenVentas(user: UserCtx, q: RangoFechasQuery) {
   const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  // Joineamos con pedido para sumar descuentos y recargo delivery —
+  // datos que viven en pedido, no en comprobante. El comprobante.total ya
+  // refleja ambos (es el final cobrado), por eso ticket_promedio sale del total.
   const rows = await prisma.$queryRaw<
     {
       total: bigint | null;
       cantidad: bigint | null;
       ticket_promedio: bigint | null;
       iva_total: bigint | null;
+      total_descuentos: bigint | null;
+      total_recargo_delivery: bigint | null;
     }[]
   >`
     SELECT
-      COALESCE(SUM("total"), 0)::bigint AS total,
+      COALESCE(SUM(c."total"), 0)::bigint AS total,
       COUNT(*)::bigint AS cantidad,
-      COALESCE(AVG("total"), 0)::bigint AS ticket_promedio,
-      COALESCE(SUM("total_iva_10") + SUM("total_iva_5"), 0)::bigint AS iva_total
+      COALESCE(AVG(c."total"), 0)::bigint AS ticket_promedio,
+      COALESCE(SUM(c."total_iva_10") + SUM(c."total_iva_5"), 0)::bigint AS iva_total,
+      COALESCE(SUM(p."total_descuento"), 0)::bigint AS total_descuentos,
+      COALESCE(SUM(p."recargo_delivery"), 0)::bigint AS total_recargo_delivery
     FROM comprobante c
+    LEFT JOIN pedido p ON p.id = c."pedido_id"
     WHERE
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
@@ -70,6 +91,7 @@ export async function resumenVentas(user: UserCtx, q: RangoFechasQuery) {
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
+      ${usuarioFragment(q.usuarioId, 'c', 'emitido_por_id')}
   `;
 
   const r = rows[0];
@@ -78,17 +100,32 @@ export async function resumenVentas(user: UserCtx, q: RangoFechasQuery) {
     cantidad: Number(r?.cantidad ?? 0n),
     ticketPromedio: r?.ticket_promedio ?? 0n,
     ivaTotal: r?.iva_total ?? 0n,
+    totalDescuentos: r?.total_descuentos ?? 0n,
+    totalRecargoDelivery: r?.total_recargo_delivery ?? 0n,
   };
 }
 
 export async function ventasPorDia(user: UserCtx, q: RangoFechasQuery) {
   const sucursalId = efectiveSucursalId(user, q.sucursalId);
-  return prisma.$queryRaw<{ fecha: Date; total: bigint; cantidad: bigint }[]>`
+  return prisma.$queryRaw<
+    {
+      fecha: Date;
+      total: bigint;
+      cantidad: bigint;
+      ticket_promedio: bigint;
+      total_descuentos: bigint;
+      total_recargo_delivery: bigint;
+    }[]
+  >`
     SELECT
       DATE_TRUNC('day', c."fecha_emision" AT TIME ZONE 'America/Asuncion')::date AS fecha,
       COALESCE(SUM(c."total"), 0)::bigint AS total,
-      COUNT(*)::bigint AS cantidad
+      COUNT(*)::bigint AS cantidad,
+      COALESCE(AVG(c."total"), 0)::bigint AS ticket_promedio,
+      COALESCE(SUM(p."total_descuento"), 0)::bigint AS total_descuentos,
+      COALESCE(SUM(p."recargo_delivery"), 0)::bigint AS total_recargo_delivery
     FROM comprobante c
+    LEFT JOIN pedido p ON p.id = c."pedido_id"
     WHERE
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
@@ -96,6 +133,7 @@ export async function ventasPorDia(user: UserCtx, q: RangoFechasQuery) {
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
+      ${usuarioFragment(q.usuarioId, 'c', 'emitido_por_id')}
     GROUP BY 1
     ORDER BY 1 ASC
   `;
@@ -103,12 +141,21 @@ export async function ventasPorDia(user: UserCtx, q: RangoFechasQuery) {
 
 export async function ventasPorHora(user: UserCtx, q: RangoFechasQuery) {
   const sucursalId = efectiveSucursalId(user, q.sucursalId);
-  return prisma.$queryRaw<{ dia_semana: number; hora: number; cantidad: bigint; total: bigint }[]>`
+  return prisma.$queryRaw<
+    {
+      dia_semana: number;
+      hora: number;
+      cantidad: bigint;
+      total: bigint;
+      ticket_promedio: bigint;
+    }[]
+  >`
     SELECT
       EXTRACT(DOW FROM c."fecha_emision" AT TIME ZONE 'America/Asuncion')::int AS dia_semana,
       EXTRACT(HOUR FROM c."fecha_emision" AT TIME ZONE 'America/Asuncion')::int AS hora,
       COUNT(*)::bigint AS cantidad,
-      COALESCE(SUM(c."total"), 0)::bigint AS total
+      COALESCE(SUM(c."total"), 0)::bigint AS total,
+      COALESCE(AVG(c."total"), 0)::bigint AS ticket_promedio
     FROM comprobante c
     WHERE
       c."empresa_id" = ${user.empresaId}
@@ -117,6 +164,7 @@ export async function ventasPorHora(user: UserCtx, q: RangoFechasQuery) {
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
+      ${usuarioFragment(q.usuarioId, 'c', 'emitido_por_id')}
     GROUP BY 1, 2
     ORDER BY 1, 2
   `;
@@ -271,8 +319,347 @@ export async function metodosPago(user: UserCtx, q: RangoFechasQuery) {
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
+      ${usuarioFragment(q.usuarioId, 'c', 'emitido_por_id')}
     GROUP BY 1
     ORDER BY total DESC
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  VENTAS POR CANAL (tipo de pedido)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Agrega ventas por tipo de pedido — MOSTRADOR, MESA, DELIVERY_PROPIO, etc.
+ * Usa el JOIN con pedido para tomar `pedido.tipo`. Pedidos sin comprobante
+ * emitido no cuentan (es venta real, no intención).
+ */
+export async function ventasPorCanal(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      tipo: string;
+      cantidad: bigint;
+      total: bigint;
+      ticket_promedio: bigint;
+      total_descuentos: bigint;
+    }[]
+  >`
+    SELECT
+      p."tipo",
+      COUNT(c.id)::bigint AS cantidad,
+      COALESCE(SUM(c."total"), 0)::bigint AS total,
+      COALESCE(AVG(c."total"), 0)::bigint AS ticket_promedio,
+      COALESCE(SUM(p."total_descuento"), 0)::bigint AS total_descuentos
+    FROM comprobante c
+    JOIN pedido p ON p.id = c."pedido_id"
+    WHERE
+      c."empresa_id" = ${user.empresaId}
+      AND c."estado" = 'EMITIDO'
+      AND c."deleted_at" IS NULL
+      AND c."fecha_emision" >= ${q.desde}
+      AND c."fecha_emision" <= ${q.hasta}
+      ${sucursalFragment(sucursalId)}
+      ${usuarioFragment(q.usuarioId, 'c', 'emitido_por_id')}
+    GROUP BY 1
+    ORDER BY total DESC
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DESCUENTOS APLICADOS — listado detallado
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Listado fila-por-pedido de descuentos aplicados en el rango. A diferencia del
+ * cierre Z (que agrega por turno), este es el detalle crudo: cada descuento con
+ * quién lo aplicó, quién lo autorizó, motivo, monto, hora, observación.
+ *
+ * Filtra por sucursal (efectivo), motivo, tipo de descuento, y usuario que
+ * APLICÓ el descuento (no quien autorizó).
+ *
+ * Devuelve hasta `limite` filas ordenadas por fecha descendente.
+ */
+export async function descuentosListado(user: UserCtx, q: DescuentosListadoQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      pedido_id: string;
+      numero: number;
+      tipo: string;
+      monto: bigint;
+      observacion: string | null;
+      aplicado_en: Date;
+      motivo: string | null;
+      aplicado_por: string | null;
+      autorizado_por: string | null;
+      tipo_pedido: string;
+      sucursal_nombre: string;
+    }[]
+  >`
+    SELECT
+      p.id AS pedido_id,
+      p."numero",
+      p."descuento_tipo" AS tipo,
+      p."total_descuento" AS monto,
+      p."descuento_observacion" AS observacion,
+      p."updated_at" AS aplicado_en,
+      md."nombre" AS motivo,
+      ua."nombre_completo" AS aplicado_por,
+      uz."nombre_completo" AS autorizado_por,
+      p."tipo" AS tipo_pedido,
+      s."nombre" AS sucursal_nombre
+    FROM pedido p
+    LEFT JOIN motivo_descuento md ON md.id = p."motivo_descuento_id"
+    LEFT JOIN usuario ua ON ua.id = p."descuento_aplicado_por_id"
+    LEFT JOIN usuario uz ON uz.id = p."descuento_autorizado_por_id"
+    LEFT JOIN sucursal s ON s.id = p."sucursal_id"
+    WHERE
+      p."empresa_id" = ${user.empresaId}
+      AND p."deleted_at" IS NULL
+      AND p."total_descuento" > 0
+      AND p."updated_at" >= ${q.desde}
+      AND p."updated_at" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND p."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND p."descuento_aplicado_por_id" = ${q.usuarioId}` : Prisma.empty}
+      ${q.motivoDescuentoId ? Prisma.sql`AND p."motivo_descuento_id" = ${q.motivoDescuentoId}` : Prisma.empty}
+      ${q.tipo ? Prisma.sql`AND p."descuento_tipo" = ${q.tipo}::"TipoDescuento"` : Prisma.empty}
+    ORDER BY p."updated_at" DESC
+    LIMIT ${q.limite}
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  TIEMPOS DE COCINA — promedios + percentiles
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Devuelve métricas de tiempos del flujo de cocina por sucursal:
+ *  - tiempoPrepSegundos: del confirmado al listo (cocina trabajando)
+ *  - tiempoEsperaClienteSegundos: del confirmado al entregado (espera total
+ *    desde la perspectiva del cliente)
+ *
+ * Para cada métrica devuelve promedio, mediana (p50) y p90 — útil para
+ * detectar que "en promedio sale en 8min pero el peor 10% tarda 25min".
+ *
+ * Filtra pedidos con ambos timestamps presentes (no parciales).
+ */
+export async function tiemposCocina(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      sucursal_id: string;
+      sucursal_nombre: string;
+      cantidad: bigint;
+      prep_promedio_seg: number;
+      prep_p50_seg: number;
+      prep_p90_seg: number;
+      espera_promedio_seg: number;
+      espera_p50_seg: number;
+      espera_p90_seg: number;
+    }[]
+  >`
+    SELECT
+      s.id AS sucursal_id,
+      s."nombre" AS sucursal_nombre,
+      COUNT(*)::bigint AS cantidad,
+      COALESCE(AVG(EXTRACT(EPOCH FROM (p."listo_en" - p."confirmado_en"))), 0)::float AS prep_promedio_seg,
+      COALESCE(
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (p."listo_en" - p."confirmado_en"))),
+        0
+      )::float AS prep_p50_seg,
+      COALESCE(
+        PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (p."listo_en" - p."confirmado_en"))),
+        0
+      )::float AS prep_p90_seg,
+      COALESCE(AVG(EXTRACT(EPOCH FROM (p."entregado_en" - p."confirmado_en"))), 0)::float AS espera_promedio_seg,
+      COALESCE(
+        PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (p."entregado_en" - p."confirmado_en"))),
+        0
+      )::float AS espera_p50_seg,
+      COALESCE(
+        PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (p."entregado_en" - p."confirmado_en"))),
+        0
+      )::float AS espera_p90_seg
+    FROM pedido p
+    JOIN sucursal s ON s.id = p."sucursal_id"
+    WHERE
+      p."empresa_id" = ${user.empresaId}
+      AND p."deleted_at" IS NULL
+      AND p."confirmado_en" IS NOT NULL
+      AND p."listo_en" IS NOT NULL
+      AND p."entregado_en" IS NOT NULL
+      AND p."confirmado_en" >= ${q.desde}
+      AND p."confirmado_en" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND p."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND p."tomado_por_id" = ${q.usuarioId}` : Prisma.empty}
+    GROUP BY 1, 2
+    ORDER BY 2
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  INVENTARIO — MOVIMIENTOS detallados + resumen por tipo
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Listado detallado de movimientos de stock — una fila por movimiento.
+ *
+ * Filtra por rango (sobre `created_at`), tipo de movimiento, insumo, sucursal,
+ * usuario que ejecutó. Devuelve cantidad signada (positiva entrada, negativa
+ * salida) para que el frontend pinte fácil con color.
+ */
+export async function movimientosStock(user: UserCtx, q: MovimientosStockQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      id: string;
+      fecha: Date;
+      tipo: string;
+      insumo_codigo: string | null;
+      insumo_nombre: string;
+      sucursal_nombre: string;
+      usuario_nombre: string | null;
+      cantidad_signed: Prisma.Decimal;
+      unidad_medida: string;
+      costo_unitario: bigint;
+      motivo: string | null;
+    }[]
+  >`
+    SELECT
+      ms.id,
+      ms."created_at" AS fecha,
+      ms."tipo"::text AS tipo,
+      pi."codigo" AS insumo_codigo,
+      pi."nombre" AS insumo_nombre,
+      s."nombre" AS sucursal_nombre,
+      u."nombre_completo" AS usuario_nombre,
+      ms."cantidad_signed",
+      pi."unidad_medida"::text AS unidad_medida,
+      ms."costo_unitario",
+      ms."motivo"
+    FROM movimiento_stock ms
+    JOIN producto_inventario pi ON pi.id = ms."producto_inventario_id"
+    JOIN sucursal s ON s.id = ms."sucursal_id"
+    LEFT JOIN usuario u ON u.id = ms."usuario_id"
+    WHERE
+      pi."empresa_id" = ${user.empresaId}
+      AND ms."created_at" >= ${q.desde}
+      AND ms."created_at" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND ms."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND ms."usuario_id" = ${q.usuarioId}` : Prisma.empty}
+      ${q.tipo ? Prisma.sql`AND ms."tipo" = ${q.tipo}::"TipoMovimientoStock"` : Prisma.empty}
+      ${q.insumoId ? Prisma.sql`AND ms."producto_inventario_id" = ${q.insumoId}` : Prisma.empty}
+    ORDER BY ms."created_at" DESC
+    LIMIT ${q.limite}
+  `;
+}
+
+/**
+ * Resumen agregado de movimientos por tipo (cuánto entró, salió, mermó, etc.)
+ * Una fila por (tipo, sucursal) con suma de cantidades y costo total estimado.
+ *
+ * Usado para mostrar de un vistazo "este mes perdimos X en mermas, Y en ajustes".
+ */
+export async function movimientosResumen(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      tipo: string;
+      sucursal_id: string;
+      sucursal_nombre: string;
+      cantidad_total: Prisma.Decimal;
+      cantidad_movimientos: bigint;
+      costo_estimado: bigint;
+    }[]
+  >`
+    SELECT
+      ms."tipo"::text AS tipo,
+      s.id AS sucursal_id,
+      s."nombre" AS sucursal_nombre,
+      SUM(ABS(ms."cantidad_signed")) AS cantidad_total,
+      COUNT(*)::bigint AS cantidad_movimientos,
+      COALESCE(SUM(ABS(ms."cantidad_signed") * ms."costo_unitario"), 0)::bigint AS costo_estimado
+    FROM movimiento_stock ms
+    JOIN producto_inventario pi ON pi.id = ms."producto_inventario_id"
+    JOIN sucursal s ON s.id = ms."sucursal_id"
+    WHERE
+      pi."empresa_id" = ${user.empresaId}
+      AND ms."created_at" >= ${q.desde}
+      AND ms."created_at" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND ms."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND ms."usuario_id" = ${q.usuarioId}` : Prisma.empty}
+    GROUP BY 1, 2, 3
+    ORDER BY 3, 1
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  CAJA — REPORTE DIARIO (un row por turno = apertura → cierre)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Listado de turnos de caja con todas las cifras del cuadre:
+ *  - monto inicial (apertura)
+ *  - ventas + ingresos extra + egresos/gastos + retiros parciales (sumadas
+ *    sólo de movimientos EFECTIVO — el resto va por método de pago)
+ *  - total esperado vs contado vs diferencia
+ *
+ * Filtra por rango (sobre `cierre.cerrada_en`), sucursal y usuario que cerró.
+ * Aperturas sin cierre todavía (turnos abiertos) no aparecen — el reporte es
+ * de turnos cerrados.
+ */
+export async function cajaTurnos(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      cierre_id: string;
+      caja_nombre: string;
+      sucursal_nombre: string;
+      usuario_nombre: string;
+      abierta_en: Date;
+      cerrada_en: Date;
+      monto_inicial: bigint;
+      total_ventas: bigint;
+      ingresos_extra_efectivo: bigint;
+      egresos_efectivo: bigint;
+      retiros_parciales: bigint;
+      ventas_efectivo: bigint;
+      total_esperado_efectivo: bigint;
+      total_contado_efectivo: bigint;
+      diferencia_efectivo: bigint;
+    }[]
+  >`
+    SELECT
+      cc.id AS cierre_id,
+      ca."nombre" AS caja_nombre,
+      s."nombre" AS sucursal_nombre,
+      u."nombre_completo" AS usuario_nombre,
+      ap."abierta_en" AS abierta_en,
+      cc."cerrada_en" AS cerrada_en,
+      ap."monto_inicial" AS monto_inicial,
+      cc."total_ventas" AS total_ventas,
+      COALESCE(SUM(CASE WHEN mc."tipo" = 'INGRESO_EXTRA' AND mc."metodo_pago" = 'EFECTIVO' THEN mc."monto" ELSE 0 END), 0)::bigint AS ingresos_extra_efectivo,
+      COALESCE(SUM(CASE WHEN mc."tipo" = 'EGRESO' AND mc."metodo_pago" = 'EFECTIVO' THEN mc."monto" ELSE 0 END), 0)::bigint AS egresos_efectivo,
+      COALESCE(SUM(CASE WHEN mc."tipo" = 'RETIRO_PARCIAL' AND mc."metodo_pago" = 'EFECTIVO' THEN mc."monto" ELSE 0 END), 0)::bigint AS retiros_parciales,
+      COALESCE(SUM(CASE WHEN mc."tipo" = 'VENTA' AND mc."metodo_pago" = 'EFECTIVO' THEN mc."monto" ELSE 0 END), 0)::bigint AS ventas_efectivo,
+      cc."total_esperado_efectivo" AS total_esperado_efectivo,
+      cc."total_contado_efectivo" AS total_contado_efectivo,
+      cc."diferencia_efectivo" AS diferencia_efectivo
+    FROM cierre_caja cc
+    JOIN apertura_caja ap ON ap.id = cc."apertura_caja_id"
+    JOIN caja ca ON ca.id = cc."caja_id"
+    JOIN sucursal s ON s.id = ca."sucursal_id"
+    JOIN usuario u ON u.id = cc."usuario_id"
+    LEFT JOIN movimiento_caja mc ON mc."apertura_caja_id" = ap.id
+    WHERE
+      s."empresa_id" = ${user.empresaId}
+      AND cc."cerrada_en" >= ${q.desde}
+      AND cc."cerrada_en" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND ca."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND cc."usuario_id" = ${q.usuarioId}` : Prisma.empty}
+    GROUP BY cc.id, ca."nombre", s."nombre", u."nombre_completo", ap."abierta_en", cc."cerrada_en", ap."monto_inicial", cc."total_ventas", cc."total_esperado_efectivo", cc."total_contado_efectivo", cc."diferencia_efectivo"
+    ORDER BY cc."cerrada_en" DESC
   `;
 }
 
@@ -408,13 +795,14 @@ export async function dashboardSnapshot(user: UserCtx, sucursalIdInput?: string)
   const inicioMes = new Date(inicioHoy);
   inicioMes.setDate(inicioMes.getDate() - 29);
 
+  const baseRango = { desde: inicioHoy, hasta: ahora, sucursalId, formato: 'json' as const };
   const [hoy, ayer, semana, ventasUltimos30, top5, alertas] = await Promise.all([
-    resumenVentas(user, { desde: inicioHoy, hasta: ahora, sucursalId }),
-    resumenVentas(user, { desde: inicioAyer, hasta: inicioHoy, sucursalId }),
-    resumenVentas(user, { desde: inicioSemana, hasta: ahora, sucursalId }),
-    ventasPorDia(user, { desde: inicioMes, hasta: ahora, sucursalId }),
-    topProductos(user, { desde: inicioSemana, hasta: ahora, sucursalId, limite: 5 }),
-    stockBajo(user, { sucursalId }),
+    resumenVentas(user, baseRango),
+    resumenVentas(user, { ...baseRango, desde: inicioAyer, hasta: inicioHoy }),
+    resumenVentas(user, { ...baseRango, desde: inicioSemana, hasta: ahora }),
+    ventasPorDia(user, { ...baseRango, desde: inicioMes, hasta: ahora }),
+    topProductos(user, { ...baseRango, desde: inicioSemana, hasta: ahora, limite: 5 }),
+    stockBajo(user, { sucursalId, formato: 'json' }),
   ]);
 
   return {

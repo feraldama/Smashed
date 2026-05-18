@@ -397,6 +397,352 @@ describe('GET /reportes/dashboard', () => {
   });
 });
 
+describe('GET /reportes/ventas/por-canal', () => {
+  it('agrupa ventas por tipo de pedido', async () => {
+    await reset();
+    const tokenCajero = await login(CAJERO);
+    await emitirVentas(tokenCajero);
+
+    const tokenAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/ventas/por-canal?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.canales)).toBe(true);
+    // emitirVentas crea 2 pedidos MOSTRADOR.
+    const mostrador = res.body.canales.find((c: { tipo: string }) => c.tipo === 'MOSTRADOR');
+    expect(mostrador).toBeTruthy();
+    expect(Number(mostrador.cantidad)).toBe(2);
+  });
+});
+
+describe('GET /reportes/ventas/descuentos', () => {
+  it('lista descuentos aplicados en el rango', async () => {
+    await reset();
+    // Setup mínimo de descuentos: motivo + límite ADMIN_EMPRESA = 100%.
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+    const motivo = await prisma.motivoDescuento.create({
+      data: { empresaId: empresa.id, nombre: 'Test report descuento' },
+    });
+    await prisma.limiteDescuentoRol.create({
+      data: { empresaId: empresa.id, rol: 'ADMIN_EMPRESA', maxPorcentaje: 100 },
+    });
+
+    const tAdmin = await login(ADMIN);
+    // Abrir caja
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${tAdmin}`);
+    const caja = cajas.body.cajas.find((c: { nombre: string }) => c.nombre === 'Caja 1');
+    await request(app)
+      .post(`/cajas/${caja.id}/abrir`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ montoInicial: 100000 });
+
+    // Crear pedido + aplicar descuento
+    const beb = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
+    const pedido = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: beb.id, cantidad: 1 }] });
+    await request(app)
+      .post(`/descuentos/pedidos/${pedido.body.pedido.id}/descuento`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ tipo: 'PORCENTAJE', valor: 1500, motivoDescuentoId: motivo.id });
+
+    const res = await request(app)
+      .get('/reportes/ventas/descuentos?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.descuentos)).toBe(true);
+    expect(res.body.descuentos.length).toBeGreaterThan(0);
+    const d = res.body.descuentos[0];
+    expect(d).toHaveProperty('numero');
+    expect(d.tipo).toBe('PORCENTAJE');
+    expect(d.motivo).toBe('Test report descuento');
+
+    // Filtro por motivo
+    const conFiltro = await request(app)
+      .get(
+        `/reportes/ventas/descuentos?desde=2024-01-01&hasta=2030-01-01&motivoDescuentoId=${motivo.id}`,
+      )
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(conFiltro.body.descuentos.length).toBe(1);
+
+    // Cleanup
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+  });
+});
+
+describe('GET /reportes/cocina/tiempos', () => {
+  it('agrega tiempos de cocina por sucursal cuando hay pedidos con timestamps completos', async () => {
+    await reset();
+    // Crear un pedido y forzar timestamps de timeline.
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    const sucursal = await prisma.sucursal.findFirstOrThrow({
+      where: { empresaId: empresa.id, deletedAt: null },
+    });
+    const ahora = new Date();
+    const confirmadoEn = new Date(ahora.getTime() - 10 * 60 * 1000);
+    const listoEn = new Date(ahora.getTime() - 4 * 60 * 1000);
+    const entregadoEn = new Date(ahora.getTime() - 2 * 60 * 1000);
+
+    await prisma.pedido.create({
+      data: {
+        empresaId: empresa.id,
+        sucursalId: sucursal.id,
+        numero: 9999,
+        tipo: 'MOSTRADOR',
+        estado: 'FACTURADO',
+        confirmadoEn,
+        listoEn,
+        entregadoEn,
+        total: 0n,
+      },
+    });
+
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/cocina/tiempos?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.sucursales)).toBe(true);
+    const stats = res.body.sucursales.find(
+      (s: { sucursal_id: string }) => s.sucursal_id === sucursal.id,
+    );
+    expect(stats).toBeTruthy();
+    expect(Number(stats.cantidad)).toBe(1);
+    // Prep ≈ 6 min = 360 seg.
+    expect(stats.prep_promedio_seg).toBeGreaterThan(355);
+    expect(stats.prep_promedio_seg).toBeLessThan(365);
+  });
+});
+
+describe('GET /reportes/caja/turnos', () => {
+  it('lista turnos cerrados con totales de movimientos por tipo', async () => {
+    await reset();
+    const tCajero = await login(CAJERO);
+    await emitirVentas(tCajero);
+
+    // Traer apertura activa desde DB (más confiable que el listado de /cajas).
+    const apertura = await prisma.aperturaCaja.findFirstOrThrow({
+      where: { cierre: null },
+      orderBy: { abiertaEn: 'desc' },
+    });
+
+    // Insertar gastos + ingresos extra al turno abierto.
+    await prisma.movimientoCaja.create({
+      data: {
+        cajaId: apertura.cajaId,
+        aperturaCajaId: apertura.id,
+        tipo: 'EGRESO',
+        metodoPago: 'EFECTIVO',
+        monto: 15000n,
+        concepto: 'Compra de hielo',
+      },
+    });
+    await prisma.movimientoCaja.create({
+      data: {
+        cajaId: apertura.cajaId,
+        aperturaCajaId: apertura.id,
+        tipo: 'INGRESO_EXTRA',
+        metodoPago: 'EFECTIVO',
+        monto: 5000n,
+        concepto: 'Reembolso proveedor',
+      },
+    });
+
+    // Cerrar el turno via API.
+    const cerrar = await request(app)
+      .post(`/cajas/aperturas/${apertura.id}/cerrar`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ totalContadoEfectivo: 200000 });
+    expect(cerrar.status).toBe(200);
+
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/caja/turnos?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.turnos)).toBe(true);
+    expect(res.body.turnos.length).toBeGreaterThan(0);
+    const turno = res.body.turnos[0];
+    expect(Number(turno.egresos_efectivo)).toBe(15000);
+    expect(Number(turno.ingresos_extra_efectivo)).toBe(5000);
+    expect(turno.sucursal_nombre).toBeTruthy();
+    expect(turno.usuario_nombre).toBeTruthy();
+  });
+
+  it('CSV export del reporte de caja con columnas esperadas', async () => {
+    await reset();
+    const tCajero = await login(CAJERO);
+    await emitirVentas(tCajero);
+    const apertura = await prisma.aperturaCaja.findFirstOrThrow({
+      orderBy: { abiertaEn: 'desc' },
+    });
+    await request(app)
+      .post(`/cajas/aperturas/${apertura.id}/cerrar`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ totalContadoEfectivo: 180000 });
+
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/caja/turnos?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.text).toContain('Egresos / Gastos');
+    expect(res.text).toContain('Diferencia');
+  });
+});
+
+describe('GET /reportes/inventario/movimientos', () => {
+  it('lista movimientos de stock filtrados por tipo SALIDA_MERMA', async () => {
+    await reset();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    const sucursal = await prisma.sucursal.findFirstOrThrow({
+      where: { empresaId: empresa.id, deletedAt: null },
+    });
+    const insumo = await prisma.productoInventario.findFirstOrThrow({
+      where: { empresaId: empresa.id, deletedAt: null },
+    });
+
+    // Insertamos 3 movimientos: 1 entrada compra, 1 salida venta, 1 merma.
+    await prisma.movimientoStock.createMany({
+      data: [
+        {
+          productoInventarioId: insumo.id,
+          sucursalId: sucursal.id,
+          tipo: 'ENTRADA_COMPRA',
+          cantidad: '10',
+          cantidadSigned: '10',
+          costoUnitario: 1000n,
+          motivo: 'Compra normal',
+        },
+        {
+          productoInventarioId: insumo.id,
+          sucursalId: sucursal.id,
+          tipo: 'SALIDA_VENTA',
+          cantidad: '3',
+          cantidadSigned: '-3',
+          costoUnitario: 1000n,
+          motivo: 'Venta',
+        },
+        {
+          productoInventarioId: insumo.id,
+          sucursalId: sucursal.id,
+          tipo: 'SALIDA_MERMA',
+          cantidad: '2',
+          cantidadSigned: '-2',
+          costoUnitario: 1000n,
+          motivo: 'Vencido',
+        },
+      ],
+    });
+
+    const tAdmin = await login(ADMIN);
+
+    // Sin filtro: trae los 3 (al menos).
+    const todos = await request(app)
+      .get('/reportes/inventario/movimientos?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(todos.status).toBe(200);
+    expect(todos.body.movimientos.length).toBeGreaterThanOrEqual(3);
+
+    // Filtro por SALIDA_MERMA: solo el de merma.
+    const mermas = await request(app)
+      .get('/reportes/inventario/movimientos?desde=2024-01-01&hasta=2030-01-01&tipo=SALIDA_MERMA')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(mermas.status).toBe(200);
+    expect(mermas.body.movimientos.length).toBe(1);
+    expect(mermas.body.movimientos[0].motivo).toBe('Vencido');
+    expect(Number(mermas.body.movimientos[0].cantidad_signed)).toBe(-2);
+  });
+
+  it('resumen agrega cantidades y costos por tipo', async () => {
+    await reset();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    const sucursal = await prisma.sucursal.findFirstOrThrow({
+      where: { empresaId: empresa.id, deletedAt: null },
+    });
+    const insumo = await prisma.productoInventario.findFirstOrThrow({
+      where: { empresaId: empresa.id, deletedAt: null },
+    });
+
+    await prisma.movimientoStock.createMany({
+      data: [
+        {
+          productoInventarioId: insumo.id,
+          sucursalId: sucursal.id,
+          tipo: 'SALIDA_MERMA',
+          cantidad: '5',
+          cantidadSigned: '-5',
+          costoUnitario: 2000n,
+        },
+        {
+          productoInventarioId: insumo.id,
+          sucursalId: sucursal.id,
+          tipo: 'SALIDA_MERMA',
+          cantidad: '3',
+          cantidadSigned: '-3',
+          costoUnitario: 2000n,
+        },
+      ],
+    });
+
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/inventario/movimientos-resumen?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    const fila = res.body.tipos.find(
+      (t: { tipo: string; sucursal_id: string }) =>
+        t.tipo === 'SALIDA_MERMA' && t.sucursal_id === sucursal.id,
+    );
+    expect(fila).toBeTruthy();
+    expect(Number(fila.cantidad_movimientos)).toBe(2);
+    expect(Number(fila.cantidad_total)).toBe(8); // 5 + 3
+    expect(Number(fila.costo_estimado)).toBe(16000); // 8 × 2000
+  });
+});
+
+describe('Export CSV (?formato=csv)', () => {
+  it('resumen ventas en CSV con headers correctos', async () => {
+    await reset();
+    const tCajero = await login(CAJERO);
+    await emitirVentas(tCajero);
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/ventas/resumen?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('text/csv');
+    expect(res.headers['content-disposition']).toContain('attachment');
+    expect(res.headers['content-disposition']).toContain('.csv');
+    // BOM UTF-8 + header (U+FEFF para que Excel reconozca encoding al abrir).
+    expect(res.text.startsWith('﻿')).toBe(true);
+    expect(res.text).toContain('Total ventas');
+    expect(res.text).toContain('Ticket promedio');
+    expect(res.text).toContain('Total descuentos');
+  });
+
+  it('ventas por día en CSV con una fila por día', async () => {
+    await reset();
+    const tCajero = await login(CAJERO);
+    await emitirVentas(tCajero);
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/ventas/por-dia?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
+    expect(lineas[0]).toContain('Fecha,Tickets,Total');
+    expect(lineas.length).toBeGreaterThan(1);
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });

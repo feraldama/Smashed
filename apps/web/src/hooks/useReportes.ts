@@ -6,6 +6,7 @@ export interface RangoFechas {
   desde: Date;
   hasta: Date;
   sucursalId?: string;
+  usuarioId?: string;
 }
 
 function buildQuery(r: RangoFechas, extra?: Record<string, string | number>) {
@@ -13,10 +14,25 @@ function buildQuery(r: RangoFechas, extra?: Record<string, string | number>) {
   params.set('desde', r.desde.toISOString());
   params.set('hasta', r.hasta.toISOString());
   if (r.sucursalId) params.set('sucursalId', r.sucursalId);
+  if (r.usuarioId) params.set('usuarioId', r.usuarioId);
   if (extra) {
     for (const [k, v] of Object.entries(extra)) params.set(k, String(v));
   }
   return params.toString();
+}
+
+/**
+ * Construye la URL completa con `?formato=csv` para descargar un reporte como
+ * CSV. El cliente lo abre con `window.open` o un `<a download>` y dispara el
+ * download nativo del browser.
+ */
+export function buildCsvUrl(
+  endpoint: string,
+  rango: RangoFechas,
+  extra?: Record<string, string | number>,
+): string {
+  const qs = buildQuery(rango, { ...extra, formato: 'csv' });
+  return `/api${endpoint}?${qs}`;
 }
 
 export interface ResumenVentas {
@@ -24,6 +40,8 @@ export interface ResumenVentas {
   cantidad: number;
   ticketPromedio: string;
   ivaTotal: string;
+  totalDescuentos: string;
+  totalRecargoDelivery: string;
 }
 
 export function useResumenVentas(rango: RangoFechas) {
@@ -37,6 +55,9 @@ export interface PuntoSerie {
   fecha: string;
   total: string;
   cantidad: string;
+  ticket_promedio: string;
+  total_descuentos: string;
+  total_recargo_delivery: string;
 }
 
 export function useVentasPorDia(rango: RangoFechas) {
@@ -52,6 +73,7 @@ export interface CeldaHora {
   hora: number;
   cantidad: string;
   total: string;
+  ticket_promedio: string;
 }
 
 export function useVentasPorHora(rango: RangoFechas) {
@@ -210,5 +232,184 @@ export function useDashboard(sucursalId?: string) {
   return useQuery({
     queryKey: ['reportes', 'dashboard', sucursalId],
     queryFn: () => api<DashboardData>(`/reportes/dashboard${qs}`),
+  });
+}
+
+// ───── Ventas por canal (MOSTRADOR / MESA / DELIVERY_PROPIO / etc.) ─────
+
+export interface CanalVenta {
+  tipo: string;
+  cantidad: string;
+  total: string;
+  ticket_promedio: string;
+  total_descuentos: string;
+}
+
+export function useVentasPorCanal(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'por-canal', rango],
+    queryFn: () =>
+      api<{ canales: CanalVenta[] }>(`/reportes/ventas/por-canal?${buildQuery(rango)}`),
+    select: (d) => d.canales,
+  });
+}
+
+// ───── Descuentos aplicados — listado detallado ─────
+
+export interface DescuentoAplicado {
+  pedido_id: string;
+  numero: number;
+  tipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA';
+  monto: string;
+  observacion: string | null;
+  aplicado_en: string;
+  motivo: string | null;
+  aplicado_por: string | null;
+  autorizado_por: string | null;
+  tipo_pedido: string;
+  sucursal_nombre: string;
+}
+
+export interface FiltrosDescuentos {
+  motivoDescuentoId?: string;
+  tipo?: 'PORCENTAJE' | 'MONTO' | 'CORTESIA';
+  limite?: number;
+}
+
+export function useDescuentosListado(rango: RangoFechas, filtros: FiltrosDescuentos = {}) {
+  return useQuery({
+    queryKey: ['reportes', 'descuentos', rango, filtros],
+    queryFn: () => {
+      const extra: Record<string, string | number> = {};
+      if (filtros.motivoDescuentoId) extra.motivoDescuentoId = filtros.motivoDescuentoId;
+      if (filtros.tipo) extra.tipo = filtros.tipo;
+      if (filtros.limite) extra.limite = filtros.limite;
+      return api<{ descuentos: DescuentoAplicado[] }>(
+        `/reportes/ventas/descuentos?${buildQuery(rango, extra)}`,
+      );
+    },
+    select: (d) => d.descuentos,
+  });
+}
+
+// ───── Tiempos de cocina (promedios + percentiles) ─────
+
+export interface TiemposCocinaPorSucursal {
+  sucursal_id: string;
+  sucursal_nombre: string;
+  cantidad: string;
+  prep_promedio_seg: number;
+  prep_p50_seg: number;
+  prep_p90_seg: number;
+  espera_promedio_seg: number;
+  espera_p50_seg: number;
+  espera_p90_seg: number;
+}
+
+export function useTiemposCocina(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'cocina-tiempos', rango],
+    queryFn: () =>
+      api<{ sucursales: TiemposCocinaPorSucursal[] }>(
+        `/reportes/cocina/tiempos?${buildQuery(rango)}`,
+      ),
+    select: (d) => d.sucursales,
+  });
+}
+
+// ───── Caja diaria — listado de turnos cerrados ─────
+
+export interface TurnoCaja {
+  cierre_id: string;
+  caja_nombre: string;
+  sucursal_nombre: string;
+  usuario_nombre: string;
+  abierta_en: string;
+  cerrada_en: string;
+  monto_inicial: string;
+  total_ventas: string;
+  ingresos_extra_efectivo: string;
+  egresos_efectivo: string;
+  retiros_parciales: string;
+  ventas_efectivo: string;
+  total_esperado_efectivo: string;
+  total_contado_efectivo: string;
+  diferencia_efectivo: string;
+}
+
+export function useCajaTurnos(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'caja-turnos', rango],
+    queryFn: () => api<{ turnos: TurnoCaja[] }>(`/reportes/caja/turnos?${buildQuery(rango)}`),
+    select: (d) => d.turnos,
+  });
+}
+
+// ───── Inventario — movimientos detallados + resumen por tipo ─────
+
+export type TipoMovimientoStock =
+  | 'ENTRADA_COMPRA'
+  | 'ENTRADA_TRANSFERENCIA'
+  | 'ENTRADA_AJUSTE'
+  | 'ENTRADA_PRODUCCION'
+  | 'SALIDA_VENTA'
+  | 'SALIDA_TRANSFERENCIA'
+  | 'SALIDA_MERMA'
+  | 'SALIDA_AJUSTE'
+  | 'SALIDA_CONSUMO_INTERNO';
+
+export interface MovimientoStock {
+  id: string;
+  fecha: string;
+  tipo: TipoMovimientoStock;
+  insumo_codigo: string | null;
+  insumo_nombre: string;
+  sucursal_nombre: string;
+  usuario_nombre: string | null;
+  cantidad_signed: string;
+  unidad_medida: string;
+  costo_unitario: string;
+  motivo: string | null;
+}
+
+export interface FiltrosMovimientos {
+  tipo?: TipoMovimientoStock;
+  insumoId?: string;
+  limite?: number;
+}
+
+export function useMovimientosStock(rango: RangoFechas, filtros: FiltrosMovimientos = {}) {
+  return useQuery({
+    queryKey: ['reportes', 'movimientos-stock', rango, filtros],
+    queryFn: () => {
+      const extra: Record<string, string | number> = {};
+      if (filtros.tipo) extra.tipo = filtros.tipo;
+      if (filtros.insumoId) extra.insumoId = filtros.insumoId;
+      if (filtros.limite) extra.limite = filtros.limite;
+      return api<{ movimientos: MovimientoStock[] }>(
+        `/reportes/inventario/movimientos?${buildQuery(rango, extra)}`,
+      );
+    },
+    select: (d) => d.movimientos,
+  });
+}
+
+export interface ResumenMovimiento {
+  tipo: TipoMovimientoStock;
+  sucursal_id: string;
+  sucursal_nombre: string;
+  cantidad_total: string;
+  cantidad_movimientos: string;
+  costo_estimado: string;
+}
+
+export function useMovimientosResumen(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'movimientos-resumen', rango],
+    queryFn: () =>
+      api<{ tipos: ResumenMovimiento[] }>(
+        `/reportes/inventario/movimientos-resumen?${buildQuery(rango)}`,
+      ),
+    select: (d) => d.tipos,
   });
 }

@@ -14,7 +14,13 @@ router.get('/dashboard', requireGestion, asyncH(ctrl.dashboard));
 router.get('/ventas/resumen', requireGestion, asyncH(ctrl.resumenVentas));
 router.get('/ventas/por-dia', requireGestion, asyncH(ctrl.ventasPorDia));
 router.get('/ventas/por-hora', requireGestion, asyncH(ctrl.ventasPorHora));
+router.get('/ventas/por-canal', requireGestion, asyncH(ctrl.ventasPorCanal));
 router.get('/ventas/metodos-pago', requireGestion, asyncH(ctrl.metodosPago));
+router.get('/ventas/descuentos', requireGestion, asyncH(ctrl.descuentosListado));
+
+router.get('/cocina/tiempos', requireGestion, asyncH(ctrl.tiemposCocina));
+
+router.get('/caja/turnos', requireGestion, asyncH(ctrl.cajaTurnos));
 
 router.get('/productos/top', requireGestion, asyncH(ctrl.topProductos));
 router.get('/productos/rentabilidad', requireGestion, asyncH(ctrl.productosRentabilidad));
@@ -24,6 +30,8 @@ router.get('/sucursales/comparativa', requireGestion, asyncH(ctrl.comparativaSuc
 
 router.get('/inventario/stock-bajo', requireGestion, asyncH(ctrl.stockBajo));
 router.get('/inventario/valuacion', requireGestion, asyncH(ctrl.valuacionInventario));
+router.get('/inventario/movimientos', requireGestion, asyncH(ctrl.movimientosStock));
+router.get('/inventario/movimientos-resumen', requireGestion, asyncH(ctrl.movimientosResumen));
 
 export default router;
 
