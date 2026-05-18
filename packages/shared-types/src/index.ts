@@ -100,6 +100,7 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
     grupo: 'Catálogo',
     defaults: ROLES_ADMIN,
   },
+  { path: '/recetas', label: 'Recetas', grupo: 'Catálogo', defaults: ROLES_ADMIN },
 
   // Inventario
   { path: '/insumos', label: 'Insumos', grupo: 'Inventario', defaults: ROLES_ADMIN },
@@ -152,6 +153,7 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
   { path: '/permisos', label: 'Permisos', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/usuarios', label: 'Usuarios', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/sucursales', label: 'Sucursales', grupo: 'Configuración', defaults: ROLES_GESTION },
+  { path: '/descuentos', label: 'Descuentos', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/empresa', label: 'Empresa', grupo: 'Configuración', defaults: ROLES_GESTION },
 ] as const;
 

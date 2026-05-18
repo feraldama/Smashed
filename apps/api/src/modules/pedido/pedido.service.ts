@@ -1316,6 +1316,9 @@ export async function obtenerPedido(user: UserCtx, pedidoId: string) {
       cliente: { select: { id: true, razonSocial: true, ruc: true, dv: true } },
       mesa: { select: { id: true, numero: true } },
       tomadoPor: { select: { id: true, nombreCompleto: true } },
+      motivoDescuento: { select: { id: true, nombre: true } },
+      descuentoAplicadoPor: { select: { id: true, nombreCompleto: true } },
+      descuentoAutorizadoPor: { select: { id: true, nombreCompleto: true } },
     },
   });
   if (!pedido) throw Errors.notFound('Pedido no encontrado');

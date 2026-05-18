@@ -209,6 +209,13 @@ export interface PedidoDetalle {
   subtotal: string;
   totalIva: string;
   recargoDelivery: string;
+  totalDescuento: string;
+  descuentoTipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA' | null;
+  descuentoValor: string;
+  descuentoObservacion: string | null;
+  motivoDescuento: { id: string; nombre: string } | null;
+  descuentoAplicadoPor: { id: string; nombreCompleto: string } | null;
+  descuentoAutorizadoPor: { id: string; nombreCompleto: string } | null;
   numeroPager: number | null;
   observaciones: string | null;
   createdAt: string;

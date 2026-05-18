@@ -188,6 +188,41 @@ function TicketCierreZ({ cierre }: { cierre: CierreDetalle }) {
         ))
       )}
 
+      {/* Descuentos del turno — solo si hubo */}
+      {cierre.descuentos.cantidad > 0 && (
+        <>
+          <Divider />
+          <p style={{ fontWeight: 'bold', margin: '4px 0 2px' }}>
+            DESCUENTOS ({cierre.descuentos.cantidad})
+          </p>
+          <Row label="Total descontado:" value={`-${formatGs(cierre.descuentos.total)}`} bold />
+          {cierre.descuentos.porMotivo.length > 0 && (
+            <>
+              <p style={{ margin: '3px 0 1px', fontSize: '10px' }}>Por motivo:</p>
+              {cierre.descuentos.porMotivo.map((m) => (
+                <Row
+                  key={m.motivoId ?? m.nombre}
+                  label={`  ${m.nombre} (×${m.cantidad})`}
+                  value={`-${formatGs(m.total)}`}
+                />
+              ))}
+            </>
+          )}
+          {cierre.descuentos.porUsuario.length > 0 && (
+            <>
+              <p style={{ margin: '3px 0 1px', fontSize: '10px' }}>Por cajero:</p>
+              {cierre.descuentos.porUsuario.map((u) => (
+                <Row
+                  key={u.usuarioId ?? u.nombre}
+                  label={`  ${u.nombre} (×${u.cantidad})`}
+                  value={`-${formatGs(u.total)}`}
+                />
+              ))}
+            </>
+          )}
+        </>
+      )}
+
       <Divider />
 
       {/* Cuadre de efectivo */}

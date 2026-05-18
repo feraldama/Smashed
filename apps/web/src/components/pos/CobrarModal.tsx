@@ -1,20 +1,24 @@
 'use client';
 
 import {
+  Banknote,
   BellRing,
   CreditCard,
   Loader2,
+  Percent,
   Plus,
   Receipt,
-  Smartphone,
+  ScrollText,
+  Send,
   Trash2,
   User,
   Wallet,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
+import { DescuentoModal } from '@/components/pos/DescuentoModal';
 import { confirmar, toast } from '@/components/Toast';
 import { Input } from '@/components/ui/Input';
 import { type Cliente } from '@/hooks/useClientes';
@@ -23,8 +27,10 @@ import {
   type TipoDocumentoFiscal,
   useEmitirComprobante,
 } from '@/hooks/useComprobantes';
+import { type PedidoConDescuento, useRemoverDescuento } from '@/hooks/useDescuento';
+import { usePedidoDetalle } from '@/hooks/usePedidos';
 import { ApiError } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, formatGs } from '@/lib/utils';
 
 interface Pago {
   id: string;
@@ -42,18 +48,27 @@ interface Props {
   onSuccess: (comprobanteId: string) => void;
 }
 
+interface DescuentoAplicado {
+  /** Total a cobrar después del descuento. */
+  totalConDescuento: number;
+  /** Total que se descontó (positivo). */
+  totalDescuento: number;
+  motivoNombre: string;
+  /** Si vino de supervisor o código, lo señalamos para que se entienda. */
+  autorizadoPorNombre: string | null;
+}
+
 const METODOS: {
   value: MetodoPago;
   label: string;
   icon: typeof Wallet;
   requiereReferencia: boolean;
 }[] = [
-  { value: 'EFECTIVO', label: 'Efectivo', icon: Wallet, requiereReferencia: false },
-  { value: 'TARJETA_DEBITO', label: 'T. Débito', icon: CreditCard, requiereReferencia: true },
-  { value: 'TARJETA_CREDITO', label: 'T. Crédito', icon: CreditCard, requiereReferencia: true },
-  { value: 'TRANSFERENCIA', label: 'Transferencia', icon: CreditCard, requiereReferencia: true },
-  { value: 'BANCARD', label: 'Bancard', icon: Smartphone, requiereReferencia: true },
-  { value: 'INFONET', label: 'Infonet', icon: Smartphone, requiereReferencia: true },
+  { value: 'EFECTIVO', label: 'Efectivo', icon: Banknote, requiereReferencia: false },
+  { value: 'BANCARD', label: 'Bancard', icon: CreditCard, requiereReferencia: true },
+  { value: 'DINELCO', label: 'Dinelco', icon: CreditCard, requiereReferencia: true },
+  { value: 'TRANSFERENCIA', label: 'Transferencia', icon: Send, requiereReferencia: true },
+  { value: 'CHEQUE', label: 'Cheque', icon: ScrollText, requiereReferencia: true },
 ];
 
 function parseGs(s: string): number {
@@ -69,13 +84,55 @@ function nuevoPago(monto: number, metodo: MetodoPago = 'EFECTIVO'): Pago {
   };
 }
 
-export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSuccess }: Props) {
+export function CobrarModal({
+  pedidoId,
+  total: totalInicial,
+  clienteInicial,
+  onCancel,
+  onSuccess,
+}: Props) {
   const [tipoDoc, setTipoDoc] = useState<TipoDocumentoFiscal>(
     clienteInicial?.ruc ? 'FACTURA' : 'TICKET',
   );
   const [cliente, setCliente] = useState<Cliente | null>(clienteInicial);
   const [showClienteSelector, setShowClienteSelector] = useState(false);
-  const [pagos, setPagos] = useState<Pago[]>([nuevoPago(total)]);
+  const [showDescuento, setShowDescuento] = useState(false);
+  // Descuento del pedido — se hidrata del backend al montar (vital para
+  // /entregas, donde el pedido puede ya tener un descuento aplicado antes).
+  const [descuento, setDescuento] = useState<DescuentoAplicado | null>(null);
+  const removerDescuento = useRemoverDescuento(pedidoId);
+
+  // Trae el pedido completo del backend para hidratar descuento existente +
+  // determinar el "total sin descuento" real (necesario porque el prop
+  // `total` puede venir ya descontado desde /entregas).
+  const { data: pedidoDetalle } = usePedidoDetalle(pedidoId);
+  const totalSinDescuento = useMemo(() => {
+    if (!pedidoDetalle) return totalInicial;
+    return (
+      Number.parseInt(pedidoDetalle.subtotal, 10) +
+      Number.parseInt(pedidoDetalle.totalIva, 10) +
+      Number.parseInt(pedidoDetalle.recargoDelivery, 10)
+    );
+  }, [pedidoDetalle, totalInicial]);
+
+  const total = descuento ? descuento.totalConDescuento : totalSinDescuento;
+  const [pagos, setPagos] = useState<Pago[]>([nuevoPago(totalInicial)]);
+
+  // Hidratar descuento + pagos cuando llega el pedido detalle si ya tiene descuento.
+  useEffect(() => {
+    if (!pedidoDetalle || descuento) return;
+    const totalDescuento = Number.parseInt(pedidoDetalle.totalDescuento, 10);
+    if (totalDescuento <= 0) return;
+    const totalConDescuento = Number.parseInt(pedidoDetalle.total, 10);
+    setDescuento({
+      totalConDescuento,
+      totalDescuento,
+      motivoNombre: pedidoDetalle.motivoDescuento?.nombre ?? '—',
+      autorizadoPorNombre: pedidoDetalle.descuentoAutorizadoPor?.nombreCompleto ?? null,
+    });
+    setPagos([nuevoPago(totalConDescuento)]);
+    // Una vez hidratado, no volvemos a tocar — el usuario controla.
+  }, [pedidoDetalle, descuento]);
   const [numeroPager, setNumeroPager] = useState('');
   const emitir = useEmitirComprobante();
 
@@ -85,6 +142,39 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
   const esEfectivoFinal = pagos.length === 1 && pagos[0]?.metodo === 'EFECTIVO';
   const vuelto = esEfectivoFinal ? Math.max(0, diferencia) : 0;
   const insuficiente = totalPagado > 0 && totalPagado < total;
+
+  function handleDescuentoAplicado(p: PedidoConDescuento) {
+    const totalDescuento = Number.parseInt(p.totalDescuento, 10);
+    const totalNuevo = Number.parseInt(p.total, 10);
+    setDescuento({
+      totalConDescuento: totalNuevo,
+      totalDescuento,
+      motivoNombre: p.motivoDescuento?.nombre ?? '—',
+      autorizadoPorNombre: p.descuentoAutorizadoPor?.nombreCompleto ?? null,
+    });
+    // Resetear pagos al nuevo total — el cajero arma el pago de cero.
+    setPagos([nuevoPago(totalNuevo)]);
+    setShowDescuento(false);
+  }
+
+  async function handleQuitarDescuento() {
+    const ok = await confirmar({
+      titulo: 'Quitar descuento',
+      mensaje: '¿Sacar el descuento aplicado a este pedido?',
+      destructivo: true,
+      textoConfirmar: 'Quitar',
+    });
+    if (!ok) return;
+    try {
+      const res = await removerDescuento.mutateAsync();
+      const totalRestaurado = Number.parseInt(res.pedido.total, 10);
+      setDescuento(null);
+      setPagos([nuevoPago(totalRestaurado)]);
+      toast.success('Descuento quitado');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al quitar descuento');
+    }
+  }
 
   function actualizarPago(id: string, patch: Partial<Pago>) {
     setPagos((arr) => arr.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -188,8 +278,62 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
             <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
               Total a cobrar
             </p>
-            <p className="text-3xl font-bold tabular-nums">Gs. {total.toLocaleString('es-PY')}</p>
+            {descuento ? (
+              <>
+                <p className="text-xs text-muted-foreground line-through">
+                  Gs. {totalSinDescuento.toLocaleString('es-PY')}
+                </p>
+                <p className="text-3xl font-bold tabular-nums text-primary">
+                  Gs. {total.toLocaleString('es-PY')}
+                </p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold tabular-nums">Gs. {total.toLocaleString('es-PY')}</p>
+            )}
           </div>
+
+          {/* Descuento — botón aplicar o panel del aplicado */}
+          {descuento ? (
+            <div className="rounded-md border border-emerald-300 bg-emerald-50 p-3 dark:border-emerald-900/50 dark:bg-emerald-950/30">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <p className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-emerald-800 dark:text-emerald-200">
+                    <Percent className="h-3 w-3" /> Descuento aplicado
+                  </p>
+                  <p className="mt-1 text-sm font-medium">
+                    −{formatGs(descuento.totalDescuento)} · {descuento.motivoNombre}
+                  </p>
+                  {descuento.autorizadoPorNombre && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Autorizado por {descuento.autorizadoPorNombre}
+                    </p>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleQuitarDescuento();
+                  }}
+                  disabled={removerDescuento.isPending}
+                  className="shrink-0 rounded-md border border-input bg-card px-2.5 py-1.5 text-xs font-medium hover:bg-accent disabled:opacity-60"
+                >
+                  {removerDescuento.isPending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    'Quitar'
+                  )}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowDescuento(true)}
+              className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-input px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Percent className="h-4 w-4" /> Aplicar descuento
+            </button>
+          )}
 
           {/* Tipo de documento */}
           <div>
@@ -369,6 +513,16 @@ export function CobrarModal({ pedidoId, total, clienteInicial, onCancel, onSucce
             setShowClienteSelector(false);
           }}
           onClose={() => setShowClienteSelector(false)}
+        />
+      )}
+
+      {/* Modal de descuento — base es subtotal+IVA+recargo del pedido (lo que paga sin descuento) */}
+      {showDescuento && (
+        <DescuentoModal
+          pedidoId={pedidoId}
+          base={totalSinDescuento}
+          onCancel={() => setShowDescuento(false)}
+          onAplicado={handleDescuentoAplicado}
         />
       )}
     </div>

@@ -127,6 +127,17 @@ enum TipoRecargoDelivery {
   MONTO
 }
 
+// Tipo de descuento aplicado a un pedido.
+// PORCENTAJE: descuentoValor en centésimos del 1% (1500 = 15.00%).
+// MONTO: descuentoValor en guaraníes.
+// CORTESIA: 100% de descuento sobre el subtotal. Permiso aparte por rol —
+//   diferenciable en reportes vs descuento "regular".
+enum TipoDescuento {
+  PORCENTAJE
+  MONTO
+  CORTESIA
+}
+
 enum EstadoPedido {
   PENDIENTE
   CONFIRMADO
@@ -182,15 +193,10 @@ enum EstadoSifen {
 
 enum MetodoPago {
   EFECTIVO
-  TARJETA_DEBITO
-  TARJETA_CREDITO
+  BANCARD
+  DINELCO
   TRANSFERENCIA
   CHEQUE
-  BANCARD
-  INFONET
-  ZIMPLE
-  TIGO_MONEY
-  PERSONAL_PAY
 }
 
 enum EstadoCaja {
@@ -222,6 +228,8 @@ enum AccionAuditable {
   APERTURA_CAJA
   CIERRE_CAJA
   CAMBIO_PERMISO
+  APLICAR_DESCUENTO
+  REMOVER_DESCUENTO
 }
 
 enum EstadoPedidosYa {
@@ -278,6 +286,9 @@ model Empresa {
   auditLogs        AuditLog[]
   configuracion    ConfiguracionEmpresa?
   menusPorRol      MenuRol[]
+  motivosDescuento MotivoDescuento[]
+  limitesDescuento LimiteDescuentoRol[]
+  codigosDescuento CodigoAutorizacionDescuento[]
 
   @@index([deletedAt])
   @@map("empresa")
@@ -301,6 +312,86 @@ model MenuRol {
   @@unique([empresaId, menu, rol])
   @@index([empresaId, rol])
   @@map("menu_rol")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  DESCUENTOS — configuración por empresa
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Catálogo de motivos por los que se puede dar un descuento. El cajero elige
+/// uno al aplicar el descuento — sirve para reportes y para forzar escalado
+/// en motivos sensibles (ej. "Cortesía gerencial" siempre pide supervisor).
+model MotivoDescuento {
+  id        String   @id @default(cuid())
+  empresaId String   @map("empresa_id")
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nombre               String
+  // Si true, este motivo SIEMPRE requiere autorización de supervisor o código,
+  // sin importar si el % está dentro del límite del rol.
+  requiereAutorizacion Boolean @default(false) @map("requiere_autorizacion")
+  activo               Boolean @default(true)
+  ordenMenu            Int     @default(0) @map("orden_menu")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  pedidos Pedido[]
+
+  @@unique([empresaId, nombre])
+  @@index([empresaId, activo, ordenMenu])
+  @@map("motivo_descuento")
+}
+
+/// Límite máximo de descuento que puede dar cada rol, por empresa.
+/// Una fila por (empresa, rol). Si no hay fila para un par, ese rol no puede
+/// dar descuentos (default seguro). `puedeAutorizarOtros=true` significa que
+/// este rol puede actuar como supervisor para escalar descuentos de otros.
+model LimiteDescuentoRol {
+  empresaId           String  @map("empresa_id")
+  empresa             Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+  rol                 Rol
+  // 0-100. 0 = no puede dar descuentos por sí mismo. 100 = sin límite.
+  maxPorcentaje       Int     @default(0) @map("max_porcentaje")
+  puedeAutorizarOtros Boolean @default(false) @map("puede_autorizar_otros")
+  puedeUsarCortesia   Boolean @default(false) @map("puede_usar_cortesia")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([empresaId, rol])
+  @@map("limite_descuento_rol")
+}
+
+/// Códigos de autorización de un solo uso. Admin/gerente los genera desde una
+/// pantalla y los pasa al cajero (whatsapp, voz, etc.). El cajero los ingresa
+/// en el modal de descuento cuando excede su límite y no hay supervisor cerca.
+model CodigoAutorizacionDescuento {
+  id        String   @id @default(cuid())
+  empresaId String   @map("empresa_id")
+  empresa   Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  // Código que el cajero ingresa (8 dígitos generados aleatoriamente).
+  // Único por empresa — colisión teóricamente improbable, igual hay constraint.
+  codigo        String
+  maxPorcentaje Int    @map("max_porcentaje") // 0-100
+
+  creadoPorId String  @map("creado_por_id")
+  creadoPor   Usuario @relation("CodigoDescuentoCreador", fields: [creadoPorId], references: [id], onDelete: Restrict)
+  expiraEn    DateTime @map("expira_en")
+  // Marca de uso — null hasta que se aplica. Una vez usado no se puede reusar.
+  usadoEn     DateTime? @map("usado_en")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Pedidos que usaron este código (en práctica 0 o 1 — usadoEn lo bloquea).
+  pedidos Pedido[]
+
+  @@unique([empresaId, codigo])
+  @@index([empresaId, expiraEn])
+  @@index([empresaId, usadoEn])
+  @@map("codigo_autorizacion_descuento")
 }
 
 model ConfiguracionEmpresa {
@@ -456,6 +547,9 @@ model Usuario {
   cajasCerradas    CierreCaja[]
   comprobantesEmitidos Comprobante[]    @relation("ComprobanteEmitidoPor")
   auditLogs        AuditLog[]
+  descuentosAplicados   Pedido[] @relation("PedidoDescuentoAplicado")
+  descuentosAutorizados Pedido[] @relation("PedidoDescuentoAutorizado")
+  codigosDescuentoCreados CodigoAutorizacionDescuento[] @relation("CodigoDescuentoCreador")
 
   @@unique([empresaId, email])
   @@index([empresaId, deletedAt])
@@ -1190,6 +1284,24 @@ model Pedido {
   // históricos preservan el monto cobrado. Siempre 0 para tipo != DELIVERY_PROPIO.
   recargoDelivery BigInt @default(0) @map("recargo_delivery")
   total         BigInt   @default(0)
+
+  // Descuento aplicado (un solo descuento por pedido — si se reaplica, sobrescribe).
+  // `totalDescuento` es el monto final ya calculado (Gs.) que se resta del subtotal.
+  // `descuentoTipo` + `descuentoValor` son el snapshot del input original:
+  //   - PORCENTAJE: valor en centésimos del 1% (1500 = 15%).
+  //   - MONTO: valor en Gs.
+  //   - CORTESIA: valor = subtotal completo (= 100%).
+  descuentoTipo            TipoDescuento?    @map("descuento_tipo")
+  descuentoValor           BigInt            @default(0) @map("descuento_valor")
+  motivoDescuentoId        String?           @map("motivo_descuento_id")
+  motivoDescuento          MotivoDescuento?  @relation(fields: [motivoDescuentoId], references: [id], onDelete: SetNull)
+  descuentoObservacion     String?           @map("descuento_observacion")
+  descuentoAplicadoPorId   String?           @map("descuento_aplicado_por_id")
+  descuentoAplicadoPor     Usuario?          @relation("PedidoDescuentoAplicado", fields: [descuentoAplicadoPorId], references: [id], onDelete: SetNull)
+  descuentoAutorizadoPorId String?           @map("descuento_autorizado_por_id")
+  descuentoAutorizadoPor   Usuario?          @relation("PedidoDescuentoAutorizado", fields: [descuentoAutorizadoPorId], references: [id], onDelete: SetNull)
+  codigoAutorizacionId     String?           @map("codigo_autorizacion_id")
+  codigoAutorizacion       CodigoAutorizacionDescuento? @relation(fields: [codigoAutorizacionId], references: [id], onDelete: SetNull)
 
   // Tiempos para métricas KDS / SLA
   tomadoEn        DateTime? @map("tomado_en")

@@ -12,7 +12,6 @@ import {
   Receipt,
   Send,
   ShoppingBag,
-  Smartphone,
   Trash2,
   X,
 } from 'lucide-react';
@@ -31,7 +30,6 @@ import {
 import { ApiError } from '@/lib/api';
 import { type CartItem, totalCarrito, totalItem, useCartStore } from '@/lib/cart-store';
 import { cn, formatGs } from '@/lib/utils';
-
 
 /**
  * Sidebar/drawer del carrito con flujo completo:
@@ -284,14 +282,10 @@ const METODOS_PAGO: Array<{
   group?: string;
 }> = [
   { codigo: 'EFECTIVO', label: 'Efectivo', icon: Banknote },
-  { codigo: 'TARJETA_DEBITO', label: 'Débito', icon: CreditCard },
-  { codigo: 'TARJETA_CREDITO', label: 'Crédito', icon: CreditCard },
   { codigo: 'BANCARD', label: 'Bancard', icon: CreditCard },
-  { codigo: 'INFONET', label: 'Infonet', icon: CreditCard },
-  { codigo: 'TIGO_MONEY', label: 'Tigo Money', icon: Smartphone },
-  { codigo: 'PERSONAL_PAY', label: 'Personal Pay', icon: Smartphone },
-  { codigo: 'ZIMPLE', label: 'Zimple', icon: Smartphone },
+  { codigo: 'DINELCO', label: 'Dinelco', icon: CreditCard },
   { codigo: 'TRANSFERENCIA', label: 'Transferencia', icon: Send },
+  { codigo: 'CHEQUE', label: 'Cheque', icon: Receipt },
 ];
 
 interface CobroViewProps {
@@ -321,14 +315,7 @@ function CobroView({
 
   const trabajando = crearPedido.isPending || confirmarPedido.isPending || emitir.isPending;
   const requiereReferencia = metodo
-    ? [
-        'TARJETA_DEBITO',
-        'TARJETA_CREDITO',
-        'BANCARD',
-        'INFONET',
-        'TRANSFERENCIA',
-        'CHEQUE',
-      ].includes(metodo)
+    ? (['BANCARD', 'DINELCO', 'TRANSFERENCIA', 'CHEQUE'] as MetodoPagoCode[]).includes(metodo)
     : false;
 
   async function handleEmitir() {

@@ -185,6 +185,160 @@ pnpm db:snapshot
 
 ---
 
+## Despliegue al servidor
+
+Guía para llevar cambios al servidor de producción **conservando el catálogo
+maestro** (productos, insumos, recetas, subrecetas, combos, clientes,
+proveedores, configuración, usuarios). Movimientos transaccionales (ventas,
+compras, cajas, stock) se pueden perder si hace falta.
+
+### Qué tablas son qué
+
+| Categoría                          | Tablas (no perder)                                                                                                                                                                                                                                                                                       |
+| ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Catálogo / maestros (críticas)** | `empresa`, `sucursal`, `usuario`, `usuario_sucursal`, `permiso`, `usuario_permiso`, `menu_rol`, `configuracion_empresa`, `motivo_descuento`, `limite_descuento_rol`, `codigo_autorizacion_descuento`, `punto_expedicion`, `timbrado`                                                                     |
+| **Catálogo de productos**          | `categoria_producto_empresa`, `producto_inventario` (insumos), `producto_venta` (productos), `producto_imagen`, `precio_por_sucursal`, `receta`, `item_receta` (subrecetas), `combo`, `combo_grupo`, `combo_grupo_opcion`, `modificador_grupo`, `modificador_opcion`, `producto_venta_modificador_grupo` |
+| **Clientes / proveedores / mesas** | `cliente`, `direccion_cliente`, `proveedor`, `zona_mesa`, `mesa`, `pedidos_ya_producto_mapping`                                                                                                                                                                                                          |
+
+| Categoría                     | Tablas (descartables — ventas/compras/auditoría)                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Ventas**                    | `pedido`, `item_pedido`, `item_pedido_modificador`, `item_pedido_combo_opcion`, `comprobante`, `item_comprobante`, `pago_comprobante`, `evento_sifen` |
+| **Caja**                      | `caja`, `apertura_caja`, `cierre_caja`, `movimiento_caja`                                                                                             |
+| **Compras / stock**           | `compra`, `item_compra`, `movimiento_stock`, `transferencia_stock`, `item_transferencia`, `stock_sucursal` _(perder esta obliga a reinventariar)_     |
+| **Integraciones / auditoría** | `pedidos_ya_pedido`, `pedidos_ya_log`, `audit_log`                                                                                                    |
+
+### Plan A — migración limpia (recomendado, no pierde nada)
+
+La migración nueva (`20260518170000_metodos_pago_simplificados`) **remapea
+los datos existentes** con `ALTER COLUMN ... USING CASE`:
+
+- `TARJETA_DEBITO`, `TARJETA_CREDITO` → `BANCARD`
+- `ZIMPLE`, `TIGO_MONEY`, `PERSONAL_PAY` → `EFECTIVO`
+- `INFONET` → `DINELCO`
+
+Pasos en el servidor:
+
+```bash
+# 1. Backup completo (obligatorio).
+pg_dump -U postgres -F c -f backup_$(date +%Y%m%d_%H%M).dump smash
+
+# 2. Apagar las apps (web, api, pos, kitchen, worker) — la migración
+#    toma ACCESS EXCLUSIVE sobre pago_comprobante y movimiento_caja
+#    durante el ALTER COLUMN, y no querés escrituras concurrentes.
+pm2 stop all              # o systemctl stop smash-*, según cómo lo corras
+
+# 3. Pull + dependencias.
+cd /ruta/al/repo
+git pull origin main
+pnpm install --frozen-lockfile
+
+# 4. Aplicar migraciones (transaccional — si algo falla, rollback).
+pnpm --filter @smash/api prisma:generate
+pnpm --filter @smash/api exec prisma migrate deploy
+
+# 5. Build.
+pnpm build
+
+# 6. Levantar.
+pm2 start all
+```
+
+Verificar después:
+
+```sql
+-- Debe devolver sólo {EFECTIVO, BANCARD, DINELCO, TRANSFERENCIA, CHEQUE}.
+SELECT unnest(enum_range(NULL::"MetodoPago"));
+
+-- No debe haber valores fuera del set.
+SELECT DISTINCT metodo FROM pago_comprobante;
+SELECT DISTINCT metodo_pago FROM movimiento_caja WHERE metodo_pago IS NOT NULL;
+```
+
+### Plan B — si la migración falla o querés reset de ventas/compras
+
+Si el `migrate deploy` rompe, o si querés directamente arrancar de cero las
+ventas/compras manteniendo el catálogo, hacemos un dump filtrado de las
+tablas críticas y restauramos sobre una BD limpia.
+
+```bash
+# 1. Backup completo (siempre primero).
+pg_dump -U postgres -F c -f backup_full_$(date +%Y%m%d_%H%M).dump smash
+
+# 2. Dump de SOLO las tablas críticas (data-only, para reimportar sobre
+#    el schema nuevo). Ajustar la lista si agregaste maestros.
+pg_dump -U postgres --data-only --disable-triggers \
+  -t public.empresa \
+  -t public.sucursal \
+  -t public.usuario \
+  -t public.usuario_sucursal \
+  -t public.permiso \
+  -t public.usuario_permiso \
+  -t public.menu_rol \
+  -t public.configuracion_empresa \
+  -t public.motivo_descuento \
+  -t public.limite_descuento_rol \
+  -t public.codigo_autorizacion_descuento \
+  -t public.punto_expedicion \
+  -t public.timbrado \
+  -t public.categoria_producto_empresa \
+  -t public.producto_inventario \
+  -t public.producto_venta \
+  -t public.producto_imagen \
+  -t public.precio_por_sucursal \
+  -t public.receta \
+  -t public.item_receta \
+  -t public.combo \
+  -t public.combo_grupo \
+  -t public.combo_grupo_opcion \
+  -t public.modificador_grupo \
+  -t public.modificador_opcion \
+  -t public.producto_venta_modificador_grupo \
+  -t public.cliente \
+  -t public.direccion_cliente \
+  -t public.proveedor \
+  -t public.zona_mesa \
+  -t public.mesa \
+  -t public.pedidos_ya_producto_mapping \
+  -f maestros_$(date +%Y%m%d_%H%M).sql \
+  smash
+
+# 3. Recrear la BD desde cero con el schema nuevo (5 métodos).
+psql -U postgres -c "DROP DATABASE smash;"
+psql -U postgres -c "CREATE DATABASE smash;"
+pnpm --filter @smash/api prisma:generate
+pnpm --filter @smash/api exec prisma migrate deploy
+
+# 4. Restaurar SOLO los maestros (las transaccionales quedan vacías).
+psql -U postgres -d smash -f maestros_*.sql
+
+# 5. Levantar apps y, si corresponde, hacer inventario inicial para
+#    poblar stock_sucursal (quedó en 0).
+pm2 start all
+```
+
+### Rollback
+
+Si después de migrar algo anda mal y querés volver atrás:
+
+```bash
+pm2 stop all
+psql -U postgres -c "DROP DATABASE smash;"
+psql -U postgres -c "CREATE DATABASE smash;"
+pg_restore -U postgres -d smash backup_<timestamp>.dump
+# Volver al commit anterior del repo y reiniciar apps.
+git checkout <commit-anterior>
+pnpm install --frozen-lockfile
+pnpm build
+pm2 start all
+```
+
+> **Importante**: una vez aplicada la migración de métodos de pago, el código
+> viejo (que todavía conoce `TARJETA_DEBITO`/`TARJETA_CREDITO`/`ZIMPLE`/...) ya
+> no compila contra el enum nuevo, así que el rollback de código **requiere**
+> restaurar también la BD desde backup.
+
+---
+
 ## Flujos de negocio
 
 ### Modos de venta
@@ -225,7 +379,7 @@ PENDIENTE → CONFIRMADO → EN_PREPARACION → LISTO → ENTREGADO → FACTURAD
 | Numeración fiscal | `establecimiento-puntoExp-correlativo`. Múltiples puntos de expedición por sucursal.                                |
 | Timbrado          | Tabla con vigencia, asociada a punto de expedición. Múltiples timbrados a lo largo del tiempo.                      |
 | Consumidor final  | Cliente "SIN NOMBRE" único por empresa.                                                                             |
-| Métodos de pago   | EFECTIVO, TARJETA_DEBITO/CREDITO, TRANSFERENCIA, CHEQUE, BANCARD, INFONET, ZIMPLE, TIGO_MONEY, PERSONAL_PAY.        |
+| Métodos de pago   | EFECTIVO, BANCARD, DINELCO, TRANSFERENCIA, CHEQUE.                                                                  |
 | Moneda            | Guaraní entero (BigInt en BD, `number` en TS). Sin decimales. Formato `Gs. 1.234.567`.                              |
 | Zona horaria      | `America/Asuncion` por empresa, override por sucursal.                                                              |
 | Permisos          | Matriz `MenuRol` por empresa; SUPER_ADMIN ve todo. Rutas tipo `/comprobantes/[id]/imprimir` con override por roles. |

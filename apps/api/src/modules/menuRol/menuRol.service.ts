@@ -55,9 +55,39 @@ export async function obtenerMatriz(user: UserCtx) {
 }
 
 /**
+ * Auto-sincroniza menús nuevos del catálogo: si un menu de MENU_DEFINICIONES
+ * no tiene ningún row en la empresa (cero filas para cualquier rol), inserta
+ * los defaults. Permite agregar menús nuevos en el catálogo sin que el admin
+ * tenga que entrar a /permisos a restaurar — aparecen automáticamente.
+ *
+ * Solo aplica a menús "vírgenes" (sin filas): una vez que el admin gestionó
+ * un menu (aunque haya sacado todos los roles), no se vuelve a tocar.
+ * Idempotente: se puede llamar en cada login sin efectos colaterales.
+ */
+async function sincronizarMenusNuevos(empresaId: string): Promise<void> {
+  const filas = await prisma.menuRol.findMany({
+    where: { empresaId },
+    distinct: ['menu'],
+    select: { menu: true },
+  });
+  const gestionados = new Set(filas.map((f) => f.menu));
+
+  const aInsertar: { empresaId: string; rol: Rol; menu: string }[] = [];
+  for (const def of MENU_DEFINICIONES) {
+    if (gestionados.has(def.path)) continue;
+    for (const rol of def.defaults) {
+      aInsertar.push({ empresaId, rol, menu: def.path });
+    }
+  }
+  if (aInsertar.length === 0) return;
+  await prisma.menuRol.createMany({ data: aInsertar, skipDuplicates: true });
+}
+
+/**
  * Devuelve la lista de menús permitidos para un rol concreto en una empresa.
  * - SUPER_ADMIN siempre ve todo (catálogo completo).
- * - El resto: lo que tenga en la tabla MenuRol.
+ * - El resto: lo que tenga en la tabla MenuRol (auto-sincronizando menús
+ *   nuevos del catálogo con sus defaults).
  */
 export async function obtenerMenusPermitidos(
   empresaId: string | null,
@@ -67,6 +97,9 @@ export async function obtenerMenusPermitidos(
     return MENU_DEFINICIONES.map((m) => m.path);
   }
   if (!empresaId) return [];
+
+  await sincronizarMenusNuevos(empresaId);
+
   const filas = await prisma.menuRol.findMany({
     where: { empresaId, rol },
     select: { menu: true },

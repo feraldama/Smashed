@@ -572,23 +572,16 @@ function mapCondicionVenta(c: CondicionVenta): CondicionVentaSifen {
 }
 
 function mapMetodoPago(m: string): number {
-  // Códigos DNIT: 1 Efectivo, 2 Cheque, 3 TC, 4 TD, 5 Transf, 19 Pago electrónico
+  // Códigos DNIT: 1 Efectivo, 2 Cheque, 5 Transf, 19 Pago electrónico
   switch (m) {
     case 'EFECTIVO':
       return 1;
     case 'CHEQUE':
       return 2;
-    case 'TARJETA_CREDITO':
-      return 3;
-    case 'TARJETA_DEBITO':
-      return 4;
     case 'TRANSFERENCIA':
       return 5;
     case 'BANCARD':
-    case 'INFONET':
-    case 'ZIMPLE':
-    case 'TIGO_MONEY':
-    case 'PERSONAL_PAY':
+    case 'DINELCO':
       return 19;
     default:
       return 99;

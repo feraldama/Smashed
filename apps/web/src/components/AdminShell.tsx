@@ -16,6 +16,7 @@ import {
   type LucideIcon,
   Package,
   PackageCheck,
+  Percent,
   ScanLine,
   Settings,
   ShieldCheck,
@@ -84,6 +85,7 @@ const NAV: NavItem[] = [
   { href: '/permisos', label: 'Permisos', icon: ShieldCheck, group: 'Configuración' },
   { href: '/usuarios', label: 'Usuarios', icon: UserCog, group: 'Configuración' },
   { href: '/sucursales', label: 'Sucursales', icon: Building2, group: 'Configuración' },
+  { href: '/descuentos', label: 'Descuentos', icon: Percent, group: 'Configuración' },
   { href: '/empresa', label: 'Empresa', icon: Settings, group: 'Configuración' },
 ];
 

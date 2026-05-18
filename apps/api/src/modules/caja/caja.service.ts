@@ -592,7 +592,95 @@ export async function obtenerCierre(user: UserCtx, cierreId: string) {
   if (!user.isSuperAdmin && cierre.caja.sucursal.empresaId !== user.empresaId) {
     throw Errors.tenantMismatch();
   }
-  return cierre;
+
+  const descuentos = await calcularDescuentosDelTurno(cierre.aperturaCajaId);
+  return { ...cierre, descuentos };
+}
+
+/**
+ * Agregaciones de descuentos para el cierre Z.
+ *
+ * "Descuentos del turno" = descuentos aplicados a los pedidos cuyos
+ * comprobantes se emitieron durante esta apertura (camino del dinero, no del
+ * pedido). Si un pedido fue creado en otro turno pero se cobró en este, su
+ * descuento cuenta acá — porque acá es donde el dinero entró menos.
+ *
+ * Devuelve total + breakdown por motivo + breakdown por usuario que aplicó.
+ * Ordenados por total descendente para que el "abusador" más grande quede arriba.
+ */
+async function calcularDescuentosDelTurno(aperturaId: string) {
+  const movimientos = await prisma.movimientoCaja.findMany({
+    where: { aperturaCajaId: aperturaId, tipo: TipoMovimientoCaja.VENTA },
+    select: { comprobante: { select: { pedidoId: true } } },
+  });
+  const pedidoIds = movimientos
+    .map((m) => m.comprobante?.pedidoId)
+    .filter((id): id is string => Boolean(id));
+
+  if (pedidoIds.length === 0) {
+    return { total: '0', cantidad: 0, porMotivo: [], porUsuario: [] };
+  }
+
+  const pedidos = await prisma.pedido.findMany({
+    where: { id: { in: pedidoIds }, totalDescuento: { gt: 0n } },
+    select: {
+      id: true,
+      numero: true,
+      totalDescuento: true,
+      motivoDescuento: { select: { id: true, nombre: true } },
+      descuentoAplicadoPor: { select: { id: true, nombreCompleto: true } },
+    },
+  });
+
+  const porMotivo = new Map<
+    string,
+    { motivoId: string | null; nombre: string; cantidad: number; total: bigint }
+  >();
+  const porUsuario = new Map<
+    string,
+    { usuarioId: string | null; nombre: string; cantidad: number; total: bigint }
+  >();
+  let total = 0n;
+  for (const p of pedidos) {
+    total += p.totalDescuento;
+    const mKey = p.motivoDescuento?.id ?? 'sin-motivo';
+    const mNombre = p.motivoDescuento?.nombre ?? 'Sin motivo';
+    const m = porMotivo.get(mKey) ?? {
+      motivoId: p.motivoDescuento?.id ?? null,
+      nombre: mNombre,
+      cantidad: 0,
+      total: 0n,
+    };
+    m.cantidad += 1;
+    m.total += p.totalDescuento;
+    porMotivo.set(mKey, m);
+
+    const uKey = p.descuentoAplicadoPor?.id ?? 'desconocido';
+    const uNombre = p.descuentoAplicadoPor?.nombreCompleto ?? 'Desconocido';
+    const u = porUsuario.get(uKey) ?? {
+      usuarioId: p.descuentoAplicadoPor?.id ?? null,
+      nombre: uNombre,
+      cantidad: 0,
+      total: 0n,
+    };
+    u.cantidad += 1;
+    u.total += p.totalDescuento;
+    porUsuario.set(uKey, u);
+  }
+
+  const sortByTotalDesc = (a: { total: bigint }, b: { total: bigint }) =>
+    a.total > b.total ? -1 : a.total < b.total ? 1 : 0;
+
+  return {
+    total: total.toString(),
+    cantidad: pedidos.length,
+    porMotivo: Array.from(porMotivo.values())
+      .sort(sortByTotalDesc)
+      .map((m) => ({ ...m, total: m.total.toString() })),
+    porUsuario: Array.from(porUsuario.values())
+      .sort(sortByTotalDesc)
+      .map((u) => ({ ...u, total: u.total.toString() })),
+  };
 }
 
 // ───────────────────────────────────────────────────────────────────────────

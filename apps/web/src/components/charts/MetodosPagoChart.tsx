@@ -20,15 +20,10 @@ const COLORS = [
 
 const LABELS: Record<string, string> = {
   EFECTIVO: 'Efectivo',
-  TARJETA_DEBITO: 'T. Débito',
-  TARJETA_CREDITO: 'T. Crédito',
+  BANCARD: 'Bancard',
+  DINELCO: 'Dinelco',
   TRANSFERENCIA: 'Transferencia',
   CHEQUE: 'Cheque',
-  BANCARD: 'Bancard',
-  INFONET: 'Infonet',
-  ZIMPLE: 'Zimple',
-  TIGO_MONEY: 'Tigo Money',
-  PERSONAL_PAY: 'Personal Pay',
 };
 
 interface MetodosPagoChartProps {

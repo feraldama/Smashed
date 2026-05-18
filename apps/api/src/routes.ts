@@ -7,6 +7,7 @@ import catalogoRoutes from './modules/catalogo/catalogo.routes.js';
 import clienteRoutes from './modules/cliente/cliente.routes.js';
 import compraRoutes from './modules/compra/compra.routes.js';
 import comprobanteRoutes from './modules/comprobante/comprobante.routes.js';
+import descuentoRoutes from './modules/descuento/descuento.routes.js';
 import empresaRoutes from './modules/empresa/empresa.routes.js';
 import inventarioRoutes from './modules/inventario/inventario.routes.js';
 import menuRolRoutes from './modules/menuRol/menuRol.routes.js';
@@ -42,6 +43,7 @@ router.use('/modificadores', modificadorRoutes);
 router.use('/pedidos', pedidoRoutes);
 router.use('/comprobantes', comprobanteRoutes);
 router.use('/reportes', reportesRoutes);
+router.use('/descuentos', descuentoRoutes);
 router.use('/', cajaRoutes); // expone /cajas y /cajas/aperturas/...
 
 export default router;

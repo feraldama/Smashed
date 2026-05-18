@@ -231,7 +231,7 @@ describe('POST /comprobantes — emitir', () => {
         tipoDocumento: 'TICKET',
         pagos: [
           { metodo: 'EFECTIVO', monto: Math.floor(t / 2) },
-          { metodo: 'TARJETA_DEBITO', monto: t - Math.floor(t / 2), referencia: 'auth-12345' },
+          { metodo: 'BANCARD', monto: t - Math.floor(t / 2), referencia: 'auth-12345' },
         ],
       });
     expect(res.status).toBe(201);

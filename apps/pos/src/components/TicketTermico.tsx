@@ -12,15 +12,10 @@ import { formatGs } from '@/lib/utils';
  */
 const METODO_LABELS: Record<string, string> = {
   EFECTIVO: 'Efectivo',
-  TARJETA_DEBITO: 'T. Débito',
-  TARJETA_CREDITO: 'T. Crédito',
+  BANCARD: 'Bancard',
+  DINELCO: 'Dinelco',
   TRANSFERENCIA: 'Transferencia',
   CHEQUE: 'Cheque',
-  BANCARD: 'Bancard',
-  INFONET: 'Infonet',
-  ZIMPLE: 'Zimple',
-  TIGO_MONEY: 'Tigo Money',
-  PERSONAL_PAY: 'Personal Pay',
 };
 
 const TIPO_LABELS: Record<string, string> = {

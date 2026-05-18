@@ -356,6 +356,137 @@ describe('integración listado con sesión activa', () => {
   });
 });
 
+describe('GET /cajas/cierres/:id — descuentos del turno', () => {
+  it('agrega descuentos por motivo y usuario, con totales correctos', async () => {
+    await resetCajas();
+    // Setup: el descuento necesita un motivo activo + el rol del usuario que
+    // aplica con maxPorcentaje suficiente. Limpiamos cualquier sobrante de tests
+    // previos y armamos lo mínimo para que ADMIN pueda aplicar sin escalado.
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+    const motivo = await prisma.motivoDescuento.create({
+      data: { empresaId: empresa.id, nombre: 'Cliente frecuente' },
+    });
+    await prisma.limiteDescuentoRol.create({
+      data: { empresaId: empresa.id, rol: 'ADMIN_EMPRESA', maxPorcentaje: 100 },
+    });
+
+    // Limpiamos pedidos/comprobantes del seed para no contaminar.
+    await prisma.pagoComprobante.deleteMany();
+    await prisma.itemComprobante.deleteMany();
+    await prisma.eventoSifen.deleteMany();
+    await prisma.comprobante.deleteMany();
+    await prisma.itemPedidoComboOpcion.deleteMany();
+    await prisma.itemPedidoModificador.deleteMany();
+    await prisma.itemPedido.deleteMany();
+    await prisma.pedido.deleteMany();
+    await prisma.timbrado.updateMany({ data: { ultimoNumeroUsado: 0 } });
+
+    const tAdmin = await login(ADMIN);
+
+    // Abrir caja (admin puede operar como ADMIN, abre cualquier caja de su empresa).
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${tAdmin}`);
+    const cajaCentro = cajas.body.cajas.find(
+      (c: { sucursalId: string; nombre: string }) => c.nombre === 'Caja 1',
+    );
+    expect(cajaCentro).toBeTruthy();
+    const apertura = await request(app)
+      .post(`/cajas/${cajaCentro.id}/abrir`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ montoInicial: 100000 });
+    expect(apertura.status).toBe(201);
+    const aperturaId = apertura.body.apertura.id as string;
+
+    // Crear pedido con bebida (sin modificadores obligatorios).
+    const beb = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
+    const pedido = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [{ productoVentaId: beb.id, cantidad: 1 }],
+      });
+    expect(pedido.status).toBe(201);
+    const totalSinDesc = Number.parseInt(pedido.body.pedido.total, 10);
+
+    // Aplicar descuento 10%.
+    const desc = await request(app)
+      .post(`/descuentos/pedidos/${pedido.body.pedido.id}/descuento`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ tipo: 'PORCENTAJE', valor: 1000, motivoDescuentoId: motivo.id });
+    expect(desc.status).toBe(200);
+    const totalConDesc = Number.parseInt(desc.body.pedido.total, 10);
+    const montoDesc = Number.parseInt(desc.body.pedido.totalDescuento, 10);
+
+    // Emitir comprobante (pago efectivo, total ya descontado).
+    const comp = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        pedidoId: pedido.body.pedido.id,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: totalConDesc }],
+      });
+    expect(comp.status).toBe(201);
+
+    // Cerrar caja: esperado = montoInicial + totalConDesc.
+    const cierre = await request(app)
+      .post(`/cajas/aperturas/${aperturaId}/cerrar`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ totalContadoEfectivo: 100000 + totalConDesc });
+    expect(cierre.status).toBe(200);
+    const cierreId = cierre.body.cierre.id as string;
+
+    // GET del cierre — debe traer la sección `descuentos` poblada.
+    const detalle = await request(app)
+      .get(`/cajas/cierres/${cierreId}`)
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(detalle.status).toBe(200);
+    const d = detalle.body.cierre.descuentos;
+    expect(d).toBeTruthy();
+    expect(d.cantidad).toBe(1);
+    expect(d.total).toBe(String(montoDesc));
+    expect(d.porMotivo).toHaveLength(1);
+    expect(d.porMotivo[0].nombre).toBe('Cliente frecuente');
+    expect(d.porMotivo[0].total).toBe(String(montoDesc));
+    expect(d.porUsuario).toHaveLength(1);
+    expect(d.porUsuario[0].total).toBe(String(montoDesc));
+
+    // Sanity: el total del pedido descontado y montoDesc son coherentes.
+    expect(totalSinDesc - montoDesc).toBe(totalConDesc);
+
+    // Cleanup motivo/límite para no afectar tests siguientes.
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+  });
+
+  it('cierre sin descuentos del turno devuelve descuentos vacíos', async () => {
+    await resetCajas();
+    const tCajero = await login(CAJERO_CENTRO);
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${tCajero}`);
+    const ap = await request(app)
+      .post(`/cajas/${cajas.body.cajas[0].id}/abrir`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ montoInicial: 50000 });
+    const cierre = await request(app)
+      .post(`/cajas/aperturas/${ap.body.apertura.id}/cerrar`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ totalContadoEfectivo: 50000 });
+    expect(cierre.status).toBe(200);
+
+    const detalle = await request(app)
+      .get(`/cajas/cierres/${cierre.body.cierre.id}`)
+      .set('Authorization', `Bearer ${tCajero}`);
+    expect(detalle.status).toBe(200);
+    expect(detalle.body.cierre.descuentos.cantidad).toBe(0);
+    expect(detalle.body.cierre.descuentos.total).toBe('0');
+    expect(detalle.body.cierre.descuentos.porMotivo).toHaveLength(0);
+    expect(detalle.body.cierre.descuentos.porUsuario).toHaveLength(0);
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });
@@ -367,3 +498,4 @@ afterAll(async () => {
 
 // Helper para silenciar TS sobre admin no usado
 void ADMIN;
+void COCINA;

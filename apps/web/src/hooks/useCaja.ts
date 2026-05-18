@@ -15,17 +15,7 @@ export type TipoMovimiento =
   | 'RETIRO_PARCIAL'
   | 'CIERRE';
 
-export type MetodoPago =
-  | 'EFECTIVO'
-  | 'TARJETA_DEBITO'
-  | 'TARJETA_CREDITO'
-  | 'TRANSFERENCIA'
-  | 'CHEQUE'
-  | 'BANCARD'
-  | 'INFONET'
-  | 'ZIMPLE'
-  | 'TIGO_MONEY'
-  | 'PERSONAL_PAY';
+export type MetodoPago = 'EFECTIVO' | 'BANCARD' | 'DINELCO' | 'TRANSFERENCIA' | 'CHEQUE';
 
 export interface CajaListItem {
   id: string;
@@ -136,6 +126,24 @@ export interface CierreDetalle {
   };
   usuario: { id: string; nombreCompleto: string; email: string };
   apertura: { id: string; montoInicial: string; abiertaEn: string };
+  // Descuentos aplicados a los pedidos cuyo comprobante se emitió en esta
+  // apertura. Sirve para detectar abuso y auditar el turno.
+  descuentos: {
+    total: string;
+    cantidad: number;
+    porMotivo: Array<{
+      motivoId: string | null;
+      nombre: string;
+      cantidad: number;
+      total: string;
+    }>;
+    porUsuario: Array<{
+      usuarioId: string | null;
+      nombre: string;
+      cantidad: number;
+      total: string;
+    }>;
+  };
 }
 
 export function useCierre(id: string | null) {
