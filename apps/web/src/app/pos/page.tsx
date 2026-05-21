@@ -45,6 +45,7 @@ import {
   useCrearPedido,
   type TipoPedido,
 } from '@/hooks/usePedidos';
+import { type Promocion, usePromocionesVigentes } from '@/hooks/usePromociones';
 import { useSucursal } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
@@ -54,10 +55,12 @@ import {
   cantidadTotal,
   cartInitial,
   cartReducer,
+  itemDesdeProductoEnPromo,
   itemDesdeProductoSimple,
   type ItemCarrito,
   precioLinea,
   totalCarrito,
+  unidadesGratisNxm,
 } from '@/lib/pos-cart';
 import { cn } from '@/lib/utils';
 
@@ -76,13 +79,31 @@ function POSScreen() {
   const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
   const { data: apertura, isLoading: cajaLoading } = useMiAperturaActiva();
   const { data: categorias = [] } = useCategorias();
+  const { data: promociones = [] } = usePromocionesVigentes(user?.sucursalActivaId ?? null);
+  // Selección de pestaña: o una categoría real (`categoriaId`) o una promo
+  // (`promocionId`). Son mutuamente excluyentes — al elegir una se limpia la otra.
   const [categoriaId, setCategoriaId] = useState<string | null>(null);
+  const [promocionId, setPromocionId] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState('');
 
   const { data: productos = [], isLoading: prodLoading } = useProductos({
     categoriaId: categoriaId ?? undefined,
     busqueda: busqueda.trim() || undefined,
   });
+
+  // Promo seleccionada (si hay) — siempre que aún esté vigente.
+  const promoActiva = useMemo(
+    () => (promocionId ? (promociones.find((p) => p.id === promocionId) ?? null) : null),
+    [promocionId, promociones],
+  );
+  // Si seleccionaron una promo, el grid muestra solo los productos vinculados
+  // a la promo. El catálogo se filtra cliente-side a partir de `productos`.
+  const productosEnPromo = useMemo(() => {
+    if (!promoActiva) return null;
+    const idsPromo = new Set(promoActiva.productos.map((p) => p.productoVentaId));
+    return productos.filter((p) => idsPromo.has(p.id));
+  }, [promoActiva, productos]);
+  const productosVisibles = productosEnPromo ?? productos;
 
   const [cart, dispatch] = useReducer(cartReducer, cartInitial);
   const [configProductoId, setConfigProductoId] = useState<string | null>(null);
@@ -170,12 +191,81 @@ function POSScreen() {
   function handleAgregar(p: ProductoListado) {
     // Combos y productos con modificadores vinculados requieren elegir opciones,
     // así que se abre el modal de configuración antes de añadir al carrito.
+    // Si hay promo activa, el modal sigue funcionando — la promo se inyecta al
+    // confirmar (ver handleConfirmConfigurarItem en CartArea).
     if (p.esCombo || p.tieneModificadores) {
       setConfigProductoId(p.id);
       return;
     }
+    if (promoActiva) {
+      dispatch({ type: 'ADD', item: itemDesdeProductoEnPromo(p, promoActiva) });
+      toast.success(`+ ${p.nombre} (promo)`);
+      return;
+    }
     dispatch({ type: 'ADD', item: itemDesdeProductoSimple(p) });
     toast.success(`+ ${p.nombre}`);
+  }
+
+  /**
+   * Carga todos los productos de una promo tipo COMBO al carrito (uno por
+   * producto con su cantidadMin). El backend ya prorratea precioFijo entre
+   * los items al recibirlos, así que acá pasamos el precio base y dejamos
+   * que el backend recalcule. Para preview en UI mostramos el precioFijo
+   * dividido por la cantidad total (aproximado).
+   */
+  function handleCargarCombo() {
+    if (!promoActiva || promoActiva.tipo !== 'COMBO') return;
+    const productosCombo = promoActiva.productos
+      .map((pp) => ({
+        prod: productos.find((p) => p.id === pp.productoVentaId),
+        cantidadMin: pp.cantidadMin,
+      }))
+      .filter((x): x is { prod: ProductoListado; cantidadMin: number } => Boolean(x.prod));
+
+    if (productosCombo.length !== promoActiva.productos.length) {
+      toast.error('Faltan productos del combo en el catálogo activo');
+      return;
+    }
+
+    // Bloqueamos combos que tienen productos con esCombo o modificadores —
+    // requieren configuración por producto y la pseudo-categoría de combo no
+    // los soporta todavía.
+    if (productosCombo.some((x) => x.prod.esCombo || x.prod.tieneModificadores)) {
+      toast.error('Algún producto del combo necesita configuración — no soportado todavía');
+      return;
+    }
+
+    // Distribuir precioFijo proporcional al precioBase * cantidadMin (espejo
+    // del cálculo del backend — el backend re-valida y ajusta si difiere).
+    const precioFijo = Number(promoActiva.precioFijo ?? 0);
+    const pesos = productosCombo.map((x) => Number(x.prod.precio) * x.cantidadMin);
+    const sumaPesos = pesos.reduce((acc, w) => acc + w, 0);
+    let acumulado = 0;
+    productosCombo.forEach((x, i) => {
+      const esUltimo = i === productosCombo.length - 1;
+      const peso = pesos[i] ?? 0;
+      const asignadoTotal = esUltimo
+        ? precioFijo - acumulado
+        : Math.floor((precioFijo * peso) / sumaPesos);
+      acumulado += asignadoTotal;
+      const precioUnit = Math.floor(asignadoTotal / x.cantidadMin);
+      dispatch({
+        type: 'ADD',
+        item: {
+          productoVentaId: x.prod.id,
+          codigo: x.prod.codigo,
+          nombre: x.prod.nombre,
+          imagenUrl: null,
+          precioUnitario: precioUnit,
+          cantidad: x.cantidadMin,
+          modificadores: [],
+          combosOpcion: [],
+          promocionId: promoActiva.id,
+          promocionNombre: promoActiva.nombre,
+        },
+      });
+    });
+    toast.success(`+ ${promoActiva.nombre}`);
   }
 
   /**
@@ -338,30 +428,76 @@ function POSScreen() {
             <p className="text-xs text-muted-foreground">{productos.length} productos</p>
           </div>
 
-          {/* Categorías */}
+          {/* Categorías + pseudo-categorías de promociones vigentes */}
           <CategoriasTabs
             categorias={categorias}
-            activa={categoriaId}
-            onSeleccionar={setCategoriaId}
+            promociones={promociones}
+            categoriaActiva={categoriaId}
+            promocionActiva={promocionId}
+            onSeleccionarCategoria={(id) => {
+              setPromocionId(null);
+              setCategoriaId(id);
+            }}
+            onSeleccionarPromocion={(id) => {
+              setCategoriaId(null);
+              setPromocionId(id);
+            }}
           />
 
-          {/* Grid */}
+          {/* Banner contextual cuando hay promo activa */}
+          {promoActiva && (
+            <div className="border-b bg-primary/5 px-4 py-2 text-xs text-primary">
+              <strong>
+                {promoActiva.iconoEmoji ?? '✨'} {promoActiva.nombre}
+              </strong>
+              {promoActiva.tipo === 'PRECIO_FIJO' && promoActiva.precioFijo
+                ? ` — precio promocional Gs. ${Number(promoActiva.precioFijo).toLocaleString('es-PY')}`
+                : promoActiva.tipo === 'PORCENTAJE' && promoActiva.porcentaje != null
+                  ? ` — ${(promoActiva.porcentaje / 100).toFixed(0)}% off`
+                  : promoActiva.tipo === 'NXM' && promoActiva.nxmLleva && promoActiva.nxmPaga
+                    ? ` — lleva ${promoActiva.nxmLleva} paga ${promoActiva.nxmPaga}`
+                    : promoActiva.tipo === 'COMBO' && promoActiva.precioFijo
+                      ? ` — combo Gs. ${Number(promoActiva.precioFijo).toLocaleString('es-PY')}`
+                      : ''}
+            </div>
+          )}
+
+          {/* Grid (o tarjeta COMBO si la promo activa es tipo COMBO) */}
           <div className="flex-1 overflow-y-auto p-4">
             {prodLoading ? (
               <div className="flex h-32 items-center justify-center">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
-            ) : productos.length === 0 ? (
+            ) : promoActiva?.tipo === 'COMBO' ? (
+              <ComboCard promo={promoActiva} productos={productos} onCargar={handleCargarCombo} />
+            ) : productosVisibles.length === 0 ? (
               <div className="rounded-md border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                No hay productos en esta categoría
+                {promoActiva
+                  ? 'Esta promoción no tiene productos disponibles ahora'
+                  : 'No hay productos en esta categoría'}
               </div>
             ) : (
               <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(140px,1fr))]">
-                {productos
+                {productosVisibles
                   .filter((p) => p.esVendible)
-                  .map((p) => (
-                    <ProductoCard key={p.id} producto={p} onClick={handleAgregar} />
-                  ))}
+                  .map((p) => {
+                    const itemPreview = promoActiva
+                      ? itemDesdeProductoEnPromo(p, promoActiva)
+                      : null;
+                    const badge =
+                      promoActiva?.tipo === 'NXM' && promoActiva.nxmLleva && promoActiva.nxmPaga
+                        ? `${promoActiva.nxmLleva}x${promoActiva.nxmPaga}`
+                        : undefined;
+                    return (
+                      <ProductoCard
+                        key={p.id}
+                        producto={p}
+                        precioOverride={itemPreview?.precioUnitario}
+                        badgePromo={badge}
+                        onClick={handleAgregar}
+                      />
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -615,9 +751,27 @@ function POSScreen() {
             productoId={configProductoId}
             onCancel={() => setConfigProductoId(null)}
             onConfirm={(item) => {
-              dispatch({ type: 'ADD', item });
+              // Si hay promo activa, inyectamos la promo al item: precio
+              // unitario promocional + metadata. Modificadores/combo se
+              // mantienen tal cual los eligió el cajero. El backend
+              // recalcula y rechaza si la promo no aplica al producto.
+              let toAdd = item;
+              if (promoActiva) {
+                const prod = productos.find((p) => p.id === configProductoId);
+                if (prod) {
+                  const promoFields = itemDesdeProductoEnPromo(prod, promoActiva);
+                  toAdd = {
+                    ...item,
+                    precioUnitario: promoFields.precioUnitario,
+                    promocionId: promoFields.promocionId,
+                    promocionNombre: promoFields.promocionNombre,
+                    promocionNxm: promoFields.promocionNxm,
+                  };
+                }
+              }
+              dispatch({ type: 'ADD', item: toAdd });
               setConfigProductoId(null);
-              toast.success(`+ ${item.nombre}`);
+              toast.success(`+ ${item.nombre}${promoActiva ? ' (promo)' : ''}`);
             }}
           />
         )}
@@ -698,35 +852,60 @@ function ModoBtn({
 
 function CategoriasTabs({
   categorias,
-  activa,
-  onSeleccionar,
+  promociones,
+  categoriaActiva,
+  promocionActiva,
+  onSeleccionarCategoria,
+  onSeleccionarPromocion,
 }: {
   categorias: Categoria[];
-  activa: string | null;
-  onSeleccionar: (id: string | null) => void;
+  promociones: Promocion[];
+  categoriaActiva: string | null;
+  promocionActiva: string | null;
+  onSeleccionarCategoria: (id: string | null) => void;
+  onSeleccionarPromocion: (id: string | null) => void;
 }) {
+  const nadaActivo = categoriaActiva === null && promocionActiva === null;
   return (
     <div className="flex gap-1 overflow-x-auto border-b bg-background px-4 py-2">
       <button
         type="button"
-        onClick={() => onSeleccionar(null)}
+        onClick={() => onSeleccionarCategoria(null)}
         className={cn(
           'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium',
-          activa === null
+          nadaActivo
             ? 'bg-primary text-primary-foreground'
             : 'text-muted-foreground hover:bg-accent',
         )}
       >
         Todas
       </button>
+      {/* Pseudo-categorías de promociones vigentes (visualmente distintas) */}
+      {promociones.map((p) => (
+        <button
+          key={`promo-${p.id}`}
+          type="button"
+          onClick={() => onSeleccionarPromocion(p.id)}
+          className={cn(
+            'shrink-0 rounded-md border-2 px-3 py-1.5 text-sm font-medium',
+            promocionActiva === p.id
+              ? 'border-primary bg-primary text-primary-foreground'
+              : 'border-primary/40 bg-primary/5 text-primary hover:bg-primary/10',
+          )}
+          title={p.descripcion ?? p.nombre}
+        >
+          <span className="mr-1">{p.iconoEmoji ?? '✨'}</span>
+          {p.nombre}
+        </button>
+      ))}
       {categorias.map((c) => (
         <button
           key={c.id}
           type="button"
-          onClick={() => onSeleccionar(c.id)}
+          onClick={() => onSeleccionarCategoria(c.id)}
           className={cn(
             'shrink-0 rounded-md px-3 py-1.5 text-sm font-medium',
-            activa === c.id
+            categoriaActiva === c.id
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-accent',
           )}
@@ -796,7 +975,19 @@ function CartItemRow({
                 </p>
               </button>
             ) : (
-              <p className="line-clamp-2 flex-1 text-sm font-semibold">{item.nombre}</p>
+              <div className="flex-1">
+                <p className="line-clamp-2 text-sm font-semibold">{item.nombre}</p>
+                {item.promocionNombre && (
+                  <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">
+                    🏷 {item.promocionNombre}
+                    {item.promocionNxm && unidadesGratisNxm(item) > 0 && (
+                      <span className="ml-1 normal-case opacity-80">
+                        ({unidadesGratisNxm(item)} gratis)
+                      </span>
+                    )}
+                  </p>
+                )}
+              </div>
             )}
             <button
               type="button"
@@ -834,5 +1025,75 @@ function CartItemRow({
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Tarjeta especial para promociones tipo COMBO. En vez de mostrar productos
+ * individuales, muestra los items del combo y un botón grande para cargarlos
+ * todos al carrito como una unidad. El backend recalcula los precios al
+ * recibir los items prorrateados.
+ */
+function ComboCard({
+  promo,
+  productos,
+  onCargar,
+}: {
+  promo: Promocion;
+  productos: ProductoListado[];
+  onCargar: () => void;
+}) {
+  const productosCombo = promo.productos
+    .map((pp) => ({
+      cantidad: pp.cantidadMin,
+      prod: productos.find((p) => p.id === pp.productoVentaId),
+    }))
+    .filter((x): x is { cantidad: number; prod: ProductoListado } => Boolean(x.prod));
+  const sumaBase = productosCombo.reduce((acc, x) => acc + Number(x.prod.precio) * x.cantidad, 0);
+  const precioCombo = Number(promo.precioFijo ?? 0);
+  const ahorro = sumaBase - precioCombo;
+
+  return (
+    <div className="mx-auto max-w-md rounded-lg border-2 border-primary/40 bg-primary/5 p-5">
+      <h3 className="mb-1 text-lg font-bold">
+        {promo.iconoEmoji ?? '✨'} {promo.nombre}
+      </h3>
+      {promo.descripcion && (
+        <p className="mb-3 text-xs text-muted-foreground">{promo.descripcion}</p>
+      )}
+      <ul className="mb-3 space-y-1 text-sm">
+        {productosCombo.map((x) => (
+          <li key={x.prod.id} className="flex justify-between gap-2">
+            <span>
+              <span className="font-mono text-xs text-muted-foreground">{x.cantidad}×</span>{' '}
+              {x.prod.nombre}
+            </span>
+            <span className="text-xs text-muted-foreground line-through tabular-nums">
+              Gs. {(Number(x.prod.precio) * x.cantidad).toLocaleString('es-PY')}
+            </span>
+          </li>
+        ))}
+      </ul>
+      <div className="mb-3 flex items-center justify-between border-t pt-2">
+        <span className="text-sm font-semibold">Total combo</span>
+        <div className="text-right">
+          <p className="text-xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+            Gs. {precioCombo.toLocaleString('es-PY')}
+          </p>
+          {ahorro > 0 && (
+            <p className="text-[10px] uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+              Ahorrás Gs. {ahorro.toLocaleString('es-PY')}
+            </p>
+          )}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={onCargar}
+        className="w-full rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground shadow hover:bg-primary/90"
+      >
+        Cargar combo
+      </button>
+    </div>
   );
 }

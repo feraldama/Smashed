@@ -315,6 +315,30 @@ export function useDescuentosPorEmpleado(rango: RangoFechas) {
   });
 }
 
+// ───── Promociones — ahorro y unidades por promo ─────
+
+export interface PromocionAhorroFila {
+  promocion_id: string;
+  nombre: string;
+  tipo: 'PRECIO_FIJO' | 'PORCENTAJE' | 'NXM' | 'COMBO';
+  activo: boolean;
+  pedidos: string;
+  unidades: string;
+  ahorro_total: string;
+  cobrado_total: string;
+}
+
+export function usePromocionesAhorro(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'promociones-ahorro', rango],
+    queryFn: () =>
+      api<{ promociones: PromocionAhorroFila[] }>(
+        `/reportes/ventas/promociones?${buildQuery(rango)}`,
+      ),
+    select: (d) => d.promociones,
+  });
+}
+
 // ───── Tiempos de cocina (promedios + percentiles) ─────
 
 export interface TiemposCocinaPorSucursal {

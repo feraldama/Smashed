@@ -47,6 +47,13 @@ export interface ItemCarrito {
   observaciones?: string;
   modificadores: ItemCarritoModificador[];
   combosOpcion: ItemCarritoCombo[];
+  /** Si el item se cargó desde una promo: id de la promo + nombre para UI. */
+  promocionId?: string;
+  promocionNombre?: string;
+  /** Si la promo es NXM (lleva N paga M), guardamos lleva/paga para calcular
+   *  las unidades gratis al cambiar la cantidad en el carrito. Para los demás
+   *  tipos queda en undefined y el precioUnitario ya viene con la promo. */
+  promocionNxm?: { lleva: number; paga: number };
 }
 
 export interface CartState {
@@ -120,7 +127,23 @@ export function precioLinea(it: ItemCarrito): number {
   const extras =
     it.modificadores.reduce((acc, m) => acc + m.precioExtra, 0) +
     it.combosOpcion.reduce((acc, c) => acc + c.precioExtra, 0);
-  return (it.precioUnitario + extras) * it.cantidad;
+  const unitario = it.precioUnitario + extras;
+  if (it.promocionNxm) {
+    const { lleva, paga } = it.promocionNxm;
+    const gratis = Math.floor(it.cantidad / lleva) * (lleva - paga);
+    return unitario * (it.cantidad - gratis);
+  }
+  return unitario * it.cantidad;
+}
+
+/**
+ * Unidades "gratis" en una línea NXM dada la cantidad actual. Devuelve 0 para
+ * items que no son NXM. Útil para mostrar el ahorro en el ticket/carrito.
+ */
+export function unidadesGratisNxm(it: ItemCarrito): number {
+  if (!it.promocionNxm) return 0;
+  const { lleva, paga } = it.promocionNxm;
+  return Math.floor(it.cantidad / lleva) * (lleva - paga);
 }
 
 export function totalCarrito(state: CartState): number {
@@ -173,6 +196,7 @@ export function aPayloadPedidoItems(state: CartState) {
       comboGrupoId: c.comboGrupoId,
       comboGrupoOpcionId: c.comboGrupoOpcionId,
     })),
+    ...(it.promocionId ? { promocionId: it.promocionId } : {}),
   }));
 }
 
@@ -189,5 +213,50 @@ export function itemDesdeProductoSimple(
     precioUnitario: Number(p.precio),
     modificadores: [],
     combosOpcion: [],
+  };
+}
+
+/**
+ * Crea un item del carrito desde un producto vinculado a una promo, con el
+ * precio promocional ya calculado en el cliente (preview UX). El backend es la
+ * autoridad — vuelve a calcular al crear el pedido y rechaza si la promo dejó
+ * de estar vigente.
+ */
+export function itemDesdeProductoEnPromo(
+  p: ProductoListado,
+  promo: {
+    id: string;
+    nombre: string;
+    tipo: string;
+    precioFijo: string | null;
+    porcentaje: number | null;
+    nxmLleva: number | null;
+    nxmPaga: number | null;
+  },
+): Omit<ItemCarrito, 'lineId' | 'cantidad'> {
+  const precioBase = Number(p.precio);
+  let precio = precioBase;
+  let promocionNxm: { lleva: number; paga: number } | undefined;
+  if (promo.tipo === 'PRECIO_FIJO' && promo.precioFijo != null) {
+    precio = Number(promo.precioFijo);
+  } else if (promo.tipo === 'PORCENTAJE' && promo.porcentaje != null) {
+    const descuento = Math.floor((precioBase * promo.porcentaje) / 10000);
+    precio = precioBase - descuento;
+  } else if (promo.tipo === 'NXM' && promo.nxmLleva != null && promo.nxmPaga != null) {
+    // En NXM `precioUnitario` queda en el precio base; el descuento sale por
+    // unidades gratis al recalcular `precioLinea`.
+    promocionNxm = { lleva: promo.nxmLleva, paga: promo.nxmPaga };
+  }
+  return {
+    productoVentaId: p.id,
+    codigo: p.codigo,
+    nombre: p.nombre,
+    imagenUrl: productoImagenSrc(p),
+    precioUnitario: precio,
+    modificadores: [],
+    combosOpcion: [],
+    promocionId: promo.id,
+    promocionNombre: promo.nombre,
+    promocionNxm,
   };
 }

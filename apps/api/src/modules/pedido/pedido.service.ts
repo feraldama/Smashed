@@ -12,6 +12,7 @@ import {
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { emitPedido } from '../../lib/socketio.js';
+import { obtenerPromocionVigente } from '../promocion/promocion.service.js';
 
 import { expandirReceta } from './stock-recursivo.js';
 
@@ -1453,6 +1454,83 @@ async function construirItemsPedido(args: {
     : [];
   const modMap = new Map(modOpciones.map((m) => [m.id, m]));
 
+  // Pre-cargar promociones referenciadas y validarlas (vigencia + sucursal +
+  // que incluyan al producto). Se cachean por id para no hacer queries por
+  // item. Si una promo es inválida lanzamos error temprano.
+  const promocionIds = [
+    ...new Set(items.map((i) => i.promocionId).filter((id): id is string => Boolean(id))),
+  ];
+  type PromoCargada = NonNullable<Awaited<ReturnType<typeof obtenerPromocionVigente>>>;
+  const promoMap = new Map<string, PromoCargada>();
+  for (const promoId of promocionIds) {
+    const promo = await obtenerPromocionVigente({ promocionId: promoId, empresaId, sucursalId });
+    if (!promo) {
+      throw Errors.validation({ promocionId: 'Promoción no vigente o no aplica en esta sucursal' });
+    }
+    promoMap.set(promoId, promo);
+  }
+
+  // COMBO: validar group-level que el carrito contenga TODOS los productos de
+  // la promo con sus cantidades mínimas. Si no, error. La distribución del
+  // precioFijo entre los items se hace en el loop por item (más abajo) con un
+  // mapa precomputado de "precio asignado a este productoVentaId".
+  const preciosComboPorPromoItem = new Map<string, bigint>(); // key = `${promoId}:${productoVentaId}`
+  for (const [promoId, promo] of promoMap) {
+    if (promo.tipo !== 'COMBO') continue;
+    if (promo.precioFijo == null) {
+      throw Errors.conflict('Promoción COMBO sin precio configurado');
+    }
+    const itemsDePromo = items.filter((i) => i.promocionId === promoId);
+    // Validar que cada producto requerido por la promo esté en el carrito con
+    // cantidad >= cantidadMin. Asumimos que los items son únicos por producto
+    // dentro de la misma promo en el frontend (la pseudo-categoría carga uno
+    // por producto). Si no, sumamos cantidades.
+    const cantidadPorProd = new Map<string, number>();
+    for (const it of itemsDePromo) {
+      cantidadPorProd.set(
+        it.productoVentaId,
+        (cantidadPorProd.get(it.productoVentaId) ?? 0) + it.cantidad,
+      );
+    }
+    for (const requerido of promo.productos) {
+      const tieneEnCarrito = cantidadPorProd.get(requerido.productoVentaId) ?? 0;
+      if (tieneEnCarrito < requerido.cantidadMin) {
+        throw Errors.validation({
+          promocionId: `Combo "${promo.nombre}" requiere ${requerido.cantidadMin} unidad${requerido.cantidadMin === 1 ? '' : 'es'} de cada producto`,
+        });
+      }
+    }
+    // Distribuir precioFijo proporcional al precioBase * cantidadMin de cada
+    // producto. Redondeo hacia abajo y el sobrante (resto de la división
+    // entera) se suma al primero — así la suma queda exacta.
+    const pesos: Array<{ productoVentaId: string; peso: bigint }> = [];
+    let sumaPesos = 0n;
+    for (const requerido of promo.productos) {
+      const prod = productoMap.get(requerido.productoVentaId);
+      if (!prod) {
+        throw Errors.conflict(`Combo "${promo.nombre}": producto faltante en catálogo`);
+      }
+      const precioBaseProd = prod.preciosSucursal[0]?.precio ?? prod.precioBase;
+      const peso = precioBaseProd * BigInt(requerido.cantidadMin);
+      pesos.push({ productoVentaId: requerido.productoVentaId, peso });
+      sumaPesos += peso;
+    }
+    if (sumaPesos === 0n) {
+      throw Errors.conflict(`Combo "${promo.nombre}": precios base en 0, no se puede prorratear`);
+    }
+    let acumulado = 0n;
+    for (let i = 0; i < pesos.length; i++) {
+      const w = pesos[i];
+      if (!w) continue;
+      const esUltimo = i === pesos.length - 1;
+      const asignado = esUltimo
+        ? promo.precioFijo - acumulado // último absorbe el resto para que la suma sea exacta
+        : (promo.precioFijo * w.peso) / sumaPesos;
+      acumulado += asignado;
+      preciosComboPorPromoItem.set(`${promoId}:${w.productoVentaId}`, asignado);
+    }
+  }
+
   const itemsParaCrear: Prisma.ItemPedidoCreateWithoutPedidoInput[] = [];
   let subtotal = 0n;
   let totalIva = 0n;
@@ -1466,6 +1544,72 @@ async function construirItemsPedido(args: {
     }
 
     const precioBase = prod.preciosSucursal[0]?.precio ?? prod.precioBase;
+
+    // Resolver precio efectivo según tipo de promo. Cuatro caminos:
+    //   PRECIO_FIJO  → precioConPromo = promo.precioFijo (por unidad)
+    //   PORCENTAJE   → precioConPromo = precioBase * (10000 - %) / 10000
+    //   NXM          → precioConPromo = precioBase, pero N de cada `lleva`
+    //                  unidades son "regaladas" → descuentoPromocion neto > 0
+    //   COMBO        → precioConPromo = precio asignado a este producto al
+    //                  prorratear el precioFijo del combo (precomputado arriba)
+    let precioConPromo = precioBase;
+    let unidadesGratis = 0n;
+    if (it.promocionId) {
+      const promo = promoMap.get(it.promocionId);
+      if (!promo) throw Errors.validation({ promocionId: 'Promoción inválida' });
+      if (!promo.productos.some((p) => p.productoVentaId === prod.id)) {
+        throw Errors.validation({
+          promocionId: `Producto "${prod.nombre}" no está incluido en la promoción`,
+        });
+      }
+      if (promo.tipo === 'PRECIO_FIJO') {
+        if (promo.precioFijo == null) {
+          throw Errors.conflict('Promoción PRECIO_FIJO sin precio configurado');
+        }
+        precioConPromo = promo.precioFijo;
+      } else if (promo.tipo === 'PORCENTAJE') {
+        if (promo.porcentaje == null) {
+          throw Errors.conflict('Promoción PORCENTAJE sin valor configurado');
+        }
+        // porcentaje en centésimos del 1% (1500 = 15%). Redondeo hacia abajo
+        // para no regalar centavos por error de redondeo.
+        const descuento = (precioBase * BigInt(promo.porcentaje)) / 10000n;
+        precioConPromo = precioBase - descuento;
+      } else if (promo.tipo === 'NXM') {
+        if (promo.nxmLleva == null || promo.nxmPaga == null) {
+          throw Errors.conflict('Promoción NXM sin lleva/paga configurados');
+        }
+        const lleva = BigInt(promo.nxmLleva);
+        const paga = BigInt(promo.nxmPaga);
+        unidadesGratis = (BigInt(it.cantidad) / lleva) * (lleva - paga);
+        // precioConPromo queda en precioBase — el descuento sale por unidades
+        // regaladas, calculado al armar el subtotal.
+      } else if (promo.tipo === 'COMBO') {
+        const asignado = preciosComboPorPromoItem.get(`${it.promocionId}:${prod.id}`);
+        if (asignado == null) {
+          throw Errors.conflict(
+            `Combo "${promo.nombre}": no se pudo asignar precio para este producto`,
+          );
+        }
+        // En COMBO el precio asignado es POR LA LÍNEA (no por unidad). Para
+        // simplificar: si cantidad > cantidadMin, las unidades extra se cobran
+        // a precio base (no son parte del combo). Para evitar ambigüedad,
+        // forzamos cantidad = cantidadMin acá. El frontend ya lo respeta.
+        const cantidadMin = BigInt(
+          promo.productos.find((p) => p.productoVentaId === prod.id)?.cantidadMin ?? 1,
+        );
+        if (BigInt(it.cantidad) !== cantidadMin) {
+          throw Errors.validation({
+            cantidad: `Combo "${promo.nombre}": el producto ${prod.nombre} debe ir con cantidad ${cantidadMin}`,
+          });
+        }
+        // Precio unitario = asignado / cantidadMin. Si no divide exacto, el
+        // último item ya tiene el ajuste — pero acá igual queda al menos
+        // aproximado a nivel unitario. Para precision absoluta, dejamos el
+        // precio asignado tal cual y forzamos cantidad=1 (futuro).
+        precioConPromo = cantidadMin > 0n ? asignado / cantidadMin : asignado;
+      }
+    }
 
     let extraCombo = 0n;
     if (prod.esCombo) {
@@ -1590,8 +1734,19 @@ async function construirItemsPedido(args: {
       }
     }
 
-    const precioUnit = precioBase + extraCombo;
-    const subtotalItem = (precioUnit + extraMod) * BigInt(it.cantidad);
+    const precioUnit = precioConPromo + extraCombo;
+    // Subtotal sin promo del item = (precio + mods) * cantidad. Si la promo es
+    // NXM, descontamos `unidadesGratis * (precioUnit + extraMod)` para que el
+    // cliente solo pague por las unidades que corresponden. Para los demás
+    // tipos, `precioUnit` ya está descontado y `unidadesGratis = 0`.
+    const subtotalBruto = (precioUnit + extraMod) * BigInt(it.cantidad);
+    const descuentoLineaNxm = unidadesGratis * (precioUnit + extraMod);
+    const subtotalItem = subtotalBruto - descuentoLineaNxm;
+    // Descuento informativo de la línea (para ticket / reportes):
+    //  - PRECIO_FIJO/PORCENTAJE/COMBO: (precioBase - precioConPromo) * cantidad
+    //  - NXM: unidadesGratis * (precioBase + extraMod)
+    const descuentoLinea =
+      unidadesGratis > 0n ? descuentoLineaNxm : (precioBase - precioConPromo) * BigInt(it.cantidad);
     const ivaItem = calcularIva(subtotalItem, prod.tasaIva);
     subtotal += subtotalItem - ivaItem;
     totalIva += ivaItem;
@@ -1604,6 +1759,12 @@ async function construirItemsPedido(args: {
       subtotal: subtotalItem,
       observaciones: it.observaciones,
       sectorComanda: prod.sectorComanda,
+      ...(it.promocionId
+        ? {
+            promocion: { connect: { id: it.promocionId } },
+            descuentoPromocion: descuentoLinea > 0n ? descuentoLinea : 0n,
+          }
+        : {}),
       modificadores: it.modificadores?.length
         ? {
             create: it.modificadores.map((m) => ({

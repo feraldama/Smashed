@@ -154,6 +154,7 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
   { path: '/usuarios', label: 'Usuarios', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/sucursales', label: 'Sucursales', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/descuentos', label: 'Descuentos', grupo: 'Configuración', defaults: ROLES_GESTION },
+  { path: '/promociones', label: 'Promociones', grupo: 'Configuración', defaults: ROLES_GESTION },
   { path: '/empresa', label: 'Empresa', grupo: 'Configuración', defaults: ROLES_GESTION },
 ] as const;
 

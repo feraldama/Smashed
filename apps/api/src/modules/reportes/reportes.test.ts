@@ -915,6 +915,90 @@ describe('GET /reportes/ventas/descuentos-por-empleado', () => {
   });
 });
 
+describe('GET /reportes/ventas/promociones', () => {
+  it('agrega ahorro y unidades por promoción', async () => {
+    await reset();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    // Limpiamos promos previas
+    await prisma.promocionProducto.deleteMany({ where: { promocion: { empresaId: empresa.id } } });
+    await prisma.promocionSucursal.deleteMany({ where: { promocion: { empresaId: empresa.id } } });
+    await prisma.promocion.deleteMany({ where: { empresaId: empresa.id } });
+
+    // Promo PRECIO_FIJO sobre HAM-001 (35.000 → 20.000)
+    const ham = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
+    const promo = await prisma.promocion.create({
+      data: {
+        empresaId: empresa.id,
+        nombre: 'Promo reporte',
+        tipo: 'PRECIO_FIJO',
+        precioFijo: 20000n,
+        diasSemana: [],
+        productos: { create: [{ productoVentaId: ham.id }] },
+      },
+    });
+
+    const tAdmin = await login(ADMIN);
+    const punto = await prisma.modificadorOpcion.findFirstOrThrow({
+      where: { modificadorGrupo: { nombre: 'Punto de cocción' }, nombre: 'Medio' },
+    });
+
+    // 2 pedidos con la promo, 3 unidades total → ahorro 3 * 15.000 = 45.000.
+    await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: ham.id,
+            cantidad: 2,
+            promocionId: promo.id,
+            modificadores: [{ modificadorOpcionId: punto.id }],
+          },
+        ],
+      });
+    await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: ham.id,
+            cantidad: 1,
+            promocionId: promo.id,
+            modificadores: [{ modificadorOpcionId: punto.id }],
+          },
+        ],
+      });
+
+    const res = await request(app)
+      .get('/reportes/ventas/promociones?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(res.body.promociones.length).toBe(1);
+    const fila = res.body.promociones[0];
+    expect(fila.promocion_id).toBe(promo.id);
+    expect(fila.pedidos).toBe('2');
+    expect(fila.unidades).toBe('3');
+    // ahorro = 3 * (35000 - 20000) = 45.000
+    expect(fila.ahorro_total).toBe('45000');
+    // cobrado = 3 * 20000 = 60.000
+    expect(fila.cobrado_total).toBe('60000');
+  });
+
+  it('exporta CSV con headers correctos', async () => {
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/ventas/promociones?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
+    expect(lineas[0]).toContain('Promoción');
+    expect(lineas[0]).toContain('Ahorro cliente');
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });

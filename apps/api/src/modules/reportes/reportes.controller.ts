@@ -183,6 +183,25 @@ export async function descuentosListado(req: Request, res: Response) {
   res.json({ descuentos: result });
 }
 
+export async function promocionesAhorro(req: Request, res: Response) {
+  const c = ctx(req);
+  const q = rangoFechasQuery.parse(req.query);
+  const result = await service.promocionesAhorro(c, q);
+  if (q.formato === 'csv') {
+    const csv = csvFromRows(result, [
+      { key: 'nombre', label: 'Promoción' },
+      { key: 'tipo', label: 'Tipo' },
+      { key: 'pedidos', label: 'Pedidos' },
+      { key: 'unidades', label: 'Unidades' },
+      { key: 'ahorro_total', label: 'Ahorro cliente (Gs.)' },
+      { key: 'cobrado_total', label: 'Cobrado (Gs.)' },
+    ]);
+    sendCsv(res, nombreArchivo('promociones', q.desde, q.hasta), csv);
+    return;
+  }
+  res.json({ promociones: result });
+}
+
 export async function descuentosPorEmpleado(req: Request, res: Response) {
   const c = ctx(req);
   const q = rangoFechasQuery.parse(req.query);

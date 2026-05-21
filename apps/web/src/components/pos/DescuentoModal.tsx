@@ -24,13 +24,26 @@ interface Props {
   pedidoId: string;
   /** Subtotal + IVA del pedido (lo que paga el cliente sin descuento ni recargo). */
   base: number;
+  /** Monto (Gs.) de los items que están en promoción y por lo tanto NO reciben
+   *  descuento adicional. Si > 0, el preview se calcula sobre `base - excluidoPorPromo`
+   *  y se muestra un banner informativo. */
+  excluidoPorPromo?: number;
   onCancel: () => void;
   onAplicado: (pedido: PedidoConDescuento) => void;
 }
 
 const PRESETS_PORCENTAJE = [5, 10, 15, 20] as const;
 
-export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) {
+export function DescuentoModal({
+  pedidoId,
+  base,
+  excluidoPorPromo = 0,
+  onCancel,
+  onAplicado,
+}: Props) {
+  // Base efectiva para el cálculo del descuento: el monto del pedido menos los
+  // items que ya tienen promoción (el backend hace el mismo cálculo).
+  const baseDescuento = Math.max(0, base - excluidoPorPromo);
   const { data: motivos = [], isLoading: cargandoMotivos } = useMotivosDescuento();
   const { data: empresa } = useEmpresa();
   const { data: empleados = [], isLoading: cargandoEmpleados } = useEmpleadosBeneficiarios();
@@ -60,14 +73,17 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
   }
 
   // ───── Preview del descuento ─────
+  // El descuento se aplica solo a `baseDescuento` (excluyendo items en promo).
+  // El total final sigue siendo `base - previewMonto` porque los items en promo
+  // ya están con su precio promocional dentro de `base`.
   const previewMonto = useMemo(() => {
-    if (esMotivoEmpleado) return Math.floor((base * porcentajeEmpleado) / 100);
+    if (esMotivoEmpleado) return Math.floor((baseDescuento * porcentajeEmpleado) / 100);
     const n = Number.parseFloat(valor.replace(',', '.'));
-    if (tipo === 'CORTESIA') return base;
+    if (tipo === 'CORTESIA') return baseDescuento;
     if (!Number.isFinite(n) || n <= 0) return 0;
-    if (tipo === 'PORCENTAJE') return Math.floor((base * n) / 100);
-    return Math.min(n, base); // MONTO cappeado a la base
-  }, [tipo, valor, base, esMotivoEmpleado, porcentajeEmpleado]);
+    if (tipo === 'PORCENTAJE') return Math.floor((baseDescuento * n) / 100);
+    return Math.min(n, baseDescuento); // MONTO cappeado a la base efectiva
+  }, [tipo, valor, baseDescuento, esMotivoEmpleado, porcentajeEmpleado]);
 
   const totalConDescuento = Math.max(0, base - previewMonto);
 
@@ -156,6 +172,23 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
+          {/* Banner: si hay items en promo, avisamos que NO reciben descuento */}
+          {excluidoPorPromo > 0 && (
+            <div className="flex items-start gap-2 rounded-md border border-emerald-300 bg-emerald-50 p-3 text-xs text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">
+              <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div>
+                <p>
+                  <strong>Gs. {formatGs(excluidoPorPromo)}</strong> del pedido está en una promoción
+                  y no recibe descuento adicional.
+                </p>
+                <p className="mt-0.5 opacity-90">
+                  El descuento se aplica sobre el resto:{' '}
+                  <strong>Gs. {formatGs(baseDescuento)}</strong>.
+                </p>
+              </div>
+            </div>
+          )}
+
           {/* Paso 1: Motivo — primero, porque cambia todo el flujo si es del sistema */}
           <Field label="1. Motivo (obligatorio)">
             {cargandoMotivos ? (
@@ -316,6 +349,12 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
               <span>Subtotal del pedido</span>
               <span className="tabular-nums">{formatGs(base)}</span>
             </div>
+            {excluidoPorPromo > 0 && (
+              <div className="flex justify-between text-xs text-emerald-700 dark:text-emerald-400">
+                <span>En promo (excluido)</span>
+                <span className="tabular-nums">−{formatGs(excluidoPorPromo)}</span>
+              </div>
+            )}
             <div className="flex justify-between font-medium text-red-700 dark:text-red-400">
               <span>Descuento</span>
               <span className="tabular-nums">−{formatGs(previewMonto)}</span>

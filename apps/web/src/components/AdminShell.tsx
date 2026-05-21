@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   ShoppingCart,
   Sliders,
+  Sparkles,
   Tags,
   Truck,
   UserCog,
@@ -86,6 +87,7 @@ const NAV: NavItem[] = [
   { href: '/usuarios', label: 'Usuarios', icon: UserCog, group: 'Configuración' },
   { href: '/sucursales', label: 'Sucursales', icon: Building2, group: 'Configuración' },
   { href: '/descuentos', label: 'Descuentos', icon: Percent, group: 'Configuración' },
+  { href: '/promociones', label: 'Promociones', icon: Sparkles, group: 'Configuración' },
   { href: '/empresa', label: 'Empresa', icon: Settings, group: 'Configuración' },
 ];
 

@@ -198,6 +198,10 @@ export interface PedidoDetalleItem {
   };
   modificadores: PedidoDetalleItemModificador[];
   combosOpcion: PedidoDetalleItemComboOpcion[];
+  /** Si el item se cargó dentro de una promoción, queda atado para reportes y
+   *  para excluirlo del cálculo de descuentos manuales. */
+  promocionId: string | null;
+  descuentoPromocion: string;
 }
 
 export interface PedidoDetalle {

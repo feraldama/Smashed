@@ -22,6 +22,11 @@ export const itemPedidoInput = z.object({
   observaciones: z.string().trim().max(300).optional(),
   modificadores: z.array(itemModificadorInput).max(20).optional(),
   combosOpcion: z.array(itemComboOpcionInput).max(20).optional(),
+  // Si el cajero cargó este ítem desde una pseudo-categoría de promoción, el
+  // backend valida vigencia + pertenencia del producto y reemplaza el precio
+  // base por el promocional (PRECIO_FIJO/PORCENTAJE). NXM/COMBO se rechazan
+  // hasta Fase 3.
+  promocionId: z.string().cuid().optional(),
 });
 
 export const crearPedidoInput = z

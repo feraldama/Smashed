@@ -117,6 +117,17 @@ export function CobrarModal({
     );
   }, [pedidoDetalle, totalInicial]);
 
+  // Suma del subtotal de los items que están en una promoción — esos items
+  // quedan EXCLUIDOS del cálculo de descuento manual (las promos son
+  // excluyentes con descuentos de pedido).
+  const montoEnPromo = useMemo(() => {
+    if (!pedidoDetalle) return 0;
+    return pedidoDetalle.items.reduce(
+      (acc, it) => acc + (it.promocionId ? Number.parseInt(it.subtotal, 10) : 0),
+      0,
+    );
+  }, [pedidoDetalle]);
+
   const total = descuento ? descuento.totalConDescuento : totalSinDescuento;
   const [pagos, setPagos] = useState<Pago[]>([nuevoPago(totalInicial)]);
 
@@ -530,6 +541,7 @@ export function CobrarModal({
         <DescuentoModal
           pedidoId={pedidoId}
           base={totalSinDescuento}
+          excluidoPorPromo={montoEnPromo}
           onCancel={() => setShowDescuento(false)}
           onAplicado={handleDescuentoAplicado}
         />

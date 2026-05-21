@@ -310,8 +310,22 @@ export async function aplicarDescuento(
     });
   }
 
-  // Base del descuento: subtotal + IVA (no se descuenta el recargo delivery).
-  const base = pedido.subtotal + pedido.totalIva;
+  // Base del descuento: subtotal + IVA del pedido, EXCLUYENDO los items que ya
+  // están en una promoción. Las promos son excluyentes con descuentos manuales
+  // (decidido en Fase 1 del módulo promoción) — un item que ya tiene su precio
+  // promocional no recibe descuento adicional. El monto a excluir es la suma
+  // del `subtotal` de cada ItemPedido con `promocionId` no nulo (incluye IVA).
+  const sumaItemsEnPromo = await prisma.itemPedido.aggregate({
+    where: { pedidoId, promocionId: { not: null } },
+    _sum: { subtotal: true },
+  });
+  const excluidoPorPromo = sumaItemsEnPromo._sum.subtotal ?? 0n;
+  const base = pedido.subtotal + pedido.totalIva - excluidoPorPromo;
+  if (base <= 0n) {
+    throw Errors.validation({
+      valor: 'No se puede aplicar descuento — todos los items del pedido ya tienen una promoción',
+    });
+  }
   const { monto, porcentajeEfectivo } = calcularDescuento(tipoEfectivo, valorEfectivo, base);
 
   if (monto <= 0n) {
@@ -364,7 +378,10 @@ export async function aplicarDescuento(
       }
     }
 
-    const nuevoTotal = base + pedido.recargoDelivery - monto;
+    // El total incluye TODOS los items (los en promo también, con su precio
+    // promocional). Solo el `monto` del descuento se calculó excluyéndolos.
+    const totalBruto = pedido.subtotal + pedido.totalIva;
+    const nuevoTotal = totalBruto + pedido.recargoDelivery - monto;
     const actualizado = await tx.pedido.update({
       where: { id: pedidoId },
       data: {

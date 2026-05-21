@@ -18,6 +18,7 @@ router.get('/ventas/por-canal', requireGestion, asyncH(ctrl.ventasPorCanal));
 router.get('/ventas/metodos-pago', requireGestion, asyncH(ctrl.metodosPago));
 router.get('/ventas/descuentos', requireGestion, asyncH(ctrl.descuentosListado));
 router.get('/ventas/descuentos-por-empleado', requireGestion, asyncH(ctrl.descuentosPorEmpleado));
+router.get('/ventas/promociones', requireGestion, asyncH(ctrl.promocionesAhorro));
 
 router.get('/cocina/tiempos', requireGestion, asyncH(ctrl.tiemposCocina));
 

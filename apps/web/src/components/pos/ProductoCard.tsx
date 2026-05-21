@@ -7,12 +7,22 @@ import { cn } from '@/lib/utils';
 
 interface Props {
   producto: ProductoListado;
+  /** Si viene, se muestra como precio principal y el precio base tachado al lado.
+   *  El POS lo usa al renderizar productos dentro de una promo vigente. */
+  precioOverride?: number;
+  /** Etiqueta corta a mostrar en el badge superior derecho (ej "2x1", "Promo").
+   *  Si no viene y `precioOverride` indica descuento, se muestra "Promo" por defecto. */
+  badgePromo?: string;
   onClick: (p: ProductoListado) => void;
 }
 
-export function ProductoCard({ producto, onClick }: Props) {
+export function ProductoCard({ producto, precioOverride, badgePromo, onClick }: Props) {
   const requiereConfig = producto.esCombo || producto.tieneModificadores;
   const imgSrc = productoImagenSrc(producto);
+  const precioBase = Number(producto.precio);
+  const conDescuento = precioOverride != null && precioOverride < precioBase;
+  const enPromo = conDescuento || Boolean(badgePromo);
+  const labelBadge = badgePromo ?? (conDescuento ? 'Promo' : null);
 
   return (
     <button
@@ -41,7 +51,12 @@ export function ProductoCard({ producto, onClick }: Props) {
             Combo
           </span>
         )}
-        {producto.tienePrecioSucursal && (
+        {labelBadge && (
+          <span className="absolute right-2 top-2 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white shadow">
+            {labelBadge}
+          </span>
+        )}
+        {!enPromo && producto.tienePrecioSucursal && (
           <span className="absolute right-2 top-2 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white shadow">
             Precio sucursal
           </span>
@@ -55,10 +70,22 @@ export function ProductoCard({ producto, onClick }: Props) {
             {producto.codigo}
           </p>
         )}
-        <div className="mt-auto flex items-baseline justify-between pt-1">
-          <span className="text-base font-bold tabular-nums">
-            Gs. {Number(producto.precio).toLocaleString('es-PY')}
-          </span>
+        <div className="mt-auto flex items-baseline justify-between gap-1 pt-1">
+          <div className="min-w-0">
+            <span
+              className={cn(
+                'text-base font-bold tabular-nums',
+                conDescuento && 'text-emerald-600 dark:text-emerald-400',
+              )}
+            >
+              Gs. {(precioOverride ?? precioBase).toLocaleString('es-PY')}
+            </span>
+            {conDescuento && (
+              <span className="ml-1 text-[10px] text-muted-foreground line-through tabular-nums">
+                Gs. {precioBase.toLocaleString('es-PY')}
+              </span>
+            )}
+          </div>
           {requiereConfig && (
             <span className="text-[10px] uppercase text-muted-foreground">elegir</span>
           )}

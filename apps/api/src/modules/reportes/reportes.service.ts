@@ -430,6 +430,57 @@ export async function descuentosListado(user: UserCtx, q: DescuentosListadoQuery
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  PROMOCIONES — ahorro y veces aplicada por promo
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Agrega el ahorro generado por cada promoción en el rango: cuántos pedidos la
+ * usaron, cuántas unidades se vendieron en promo, monto total que el cliente
+ * ahorró (suma de `item_pedido.descuento_promocion`) y el monto realmente
+ * cobrado por los items en promo. Excluye pedidos CANCELADO.
+ *
+ * Útil para responder "¿cuánto nos costó cada promoción?" y comparar contra
+ * el incremento de ventas que generó.
+ */
+export async function promocionesAhorro(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      promocion_id: string;
+      nombre: string;
+      tipo: string;
+      activo: boolean;
+      pedidos: bigint;
+      unidades: bigint;
+      ahorro_total: bigint;
+      cobrado_total: bigint;
+    }[]
+  >`
+    SELECT
+      pr.id AS promocion_id,
+      pr."nombre",
+      pr."tipo"::text AS tipo,
+      pr."activo",
+      COUNT(DISTINCT ip."pedido_id")::bigint AS pedidos,
+      COALESCE(SUM(ip."cantidad"), 0)::bigint AS unidades,
+      COALESCE(SUM(ip."descuento_promocion"), 0)::bigint AS ahorro_total,
+      COALESCE(SUM(ip."subtotal"), 0)::bigint AS cobrado_total
+    FROM item_pedido ip
+    INNER JOIN promocion pr ON pr.id = ip."promocion_id"
+    INNER JOIN pedido p ON p.id = ip."pedido_id"
+    WHERE
+      pr."empresa_id" = ${user.empresaId}
+      AND p."deleted_at" IS NULL
+      AND p."estado" <> 'CANCELADO'::"EstadoPedido"
+      AND p."created_at" >= ${q.desde}
+      AND p."created_at" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND p."sucursal_id" = ${sucursalId}` : Prisma.empty}
+    GROUP BY pr.id, pr."nombre", pr."tipo", pr."activo"
+    ORDER BY ahorro_total DESC
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  DESCUENTOS POR EMPLEADO — agregación por beneficiario
 // ═══════════════════════════════════════════════════════════════════════════
 

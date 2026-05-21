@@ -14,6 +14,7 @@ import menuRolRoutes from './modules/menuRol/menuRol.routes.js';
 import mesaRoutes from './modules/mesa/mesa.routes.js';
 import modificadorRoutes from './modules/modificador/modificador.routes.js';
 import pedidoRoutes from './modules/pedido/pedido.routes.js';
+import promocionRoutes from './modules/promocion/promocion.routes.js';
 import proveedorRoutes from './modules/proveedor/proveedor.routes.js';
 import reportesRoutes from './modules/reportes/reportes.routes.js';
 import sucursalRoutes from './modules/sucursal/sucursal.routes.js';
@@ -44,6 +45,7 @@ router.use('/pedidos', pedidoRoutes);
 router.use('/comprobantes', comprobanteRoutes);
 router.use('/reportes', reportesRoutes);
 router.use('/descuentos', descuentoRoutes);
+router.use('/promociones', promocionRoutes);
 router.use('/', cajaRoutes); // expone /cajas y /cajas/aperturas/...
 
 export default router;

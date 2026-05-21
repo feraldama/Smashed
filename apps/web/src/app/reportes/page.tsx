@@ -12,6 +12,7 @@ import {
   Percent,
   Printer,
   Receipt,
+  Sparkles,
   Tags,
   Timer,
   TrendingUp,
@@ -34,6 +35,7 @@ import {
   useDescuentosListado,
   useDescuentosPorEmpleado,
   useMetodosPago,
+  usePromocionesAhorro,
   useMovimientosResumen,
   useMovimientosStock,
   useProductosRentabilidad,
@@ -62,7 +64,7 @@ type Tab =
   | 'sucursales'
   | 'inventario';
 
-type SubTabVentas = 'resumen' | 'canales' | 'descuentos' | 'descuento-empleado';
+type SubTabVentas = 'resumen' | 'canales' | 'descuentos' | 'descuento-empleado' | 'promociones';
 type SubTabInventario = 'stock' | 'movimientos';
 
 export default function ReportesPage() {
@@ -206,12 +208,20 @@ function TabVentas({ rango }: { rango: DateRange }) {
         >
           Por empleado
         </SubTabBtn>
+        <SubTabBtn
+          active={sub === 'promociones'}
+          onClick={() => setSub('promociones')}
+          icon={Sparkles}
+        >
+          Promociones
+        </SubTabBtn>
       </nav>
 
       {sub === 'resumen' && <VentasResumen rango={rango} />}
       {sub === 'canales' && <VentasPorCanal rango={rango} />}
       {sub === 'descuentos' && <VentasDescuentos rango={rango} />}
       {sub === 'descuento-empleado' && <DescuentosPorEmpleado rango={rango} />}
+      {sub === 'promociones' && <PromocionesAhorro rango={rango} />}
     </div>
   );
 }
@@ -538,6 +548,115 @@ function DescuentosPorEmpleado({ rango }: { rango: DateRange }) {
                       −{formatGs(totales.descontado)}
                     </td>
                     <td className="px-2 py-2 text-right font-mono">{formatGs(totales.cobrado)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// ───── Promociones — ahorro y unidades por promo ─────
+
+function PromocionesAhorro({ rango }: { rango: DateRange }) {
+  const { data: filas = [], isLoading } = usePromocionesAhorro(rango);
+
+  const totales = filas.reduce(
+    (acc, f) => ({
+      pedidos: acc.pedidos + Number(f.pedidos),
+      unidades: acc.unidades + Number(f.unidades),
+      ahorro: acc.ahorro + Number(f.ahorro_total),
+      cobrado: acc.cobrado + Number(f.cobrado_total),
+    }),
+    { pedidos: 0, unidades: 0, ahorro: 0, cobrado: 0 },
+  );
+
+  const tipoLabel: Record<string, string> = {
+    PRECIO_FIJO: 'Precio fijo',
+    PORCENTAJE: '% descuento',
+    NXM: 'NxM',
+    COMBO: 'Combo',
+  };
+
+  return (
+    <div className="space-y-4">
+      <ExportarBtns
+        rango={rango}
+        items={[{ endpoint: '/reportes/ventas/promociones', label: 'Promociones' }]}
+      />
+
+      <section className="grid gap-3 sm:grid-cols-4">
+        <KpiCard
+          label="Promos usadas"
+          value={String(filas.length)}
+          loading={isLoading}
+          icon={Sparkles}
+        />
+        <KpiCard label="Unidades en promo" value={String(totales.unidades)} loading={isLoading} />
+        <KpiCard
+          label="Ahorro al cliente"
+          value={`-${formatGs(totales.ahorro)}`}
+          loading={isLoading}
+        />
+        <KpiCard label="Cobrado en promo" value={formatGs(totales.cobrado)} loading={isLoading} />
+      </section>
+
+      <Card title="Detalle por promoción">
+        {isLoading ? (
+          <SkeletonChart />
+        ) : filas.length === 0 ? (
+          <Empty mensaje="No se aplicaron promociones en este período" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-left uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-2">Promoción</th>
+                  <th className="px-2 py-2">Tipo</th>
+                  <th className="px-2 py-2 text-right">Pedidos</th>
+                  <th className="px-2 py-2 text-right">Unidades</th>
+                  <th className="px-2 py-2 text-right">Cobrado</th>
+                  <th className="px-2 py-2 text-right">Ahorro cliente</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filas.map((f) => (
+                  <tr key={f.promocion_id}>
+                    <td className="px-2 py-2 font-medium">
+                      {f.nombre}
+                      {!f.activo && (
+                        <span className="ml-1 rounded bg-amber-100 px-1 py-0.5 text-[9px] uppercase text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                          inactiva
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-2 py-2 text-muted-foreground">
+                      {tipoLabel[f.tipo] ?? f.tipo}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono">{f.pedidos}</td>
+                    <td className="px-2 py-2 text-right font-mono">{f.unidades}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatGs(f.cobrado_total)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-emerald-700 dark:text-emerald-300">
+                      −{formatGs(f.ahorro_total)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {filas.length > 0 && (
+                <tfoot className="border-t-2 font-bold">
+                  <tr>
+                    <td className="px-2 py-2" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono">{totales.pedidos}</td>
+                    <td className="px-2 py-2 text-right font-mono">{totales.unidades}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatGs(totales.cobrado)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-emerald-700 dark:text-emerald-300">
+                      −{formatGs(totales.ahorro)}
+                    </td>
                   </tr>
                 </tfoot>
               )}

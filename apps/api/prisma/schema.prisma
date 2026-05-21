@@ -138,6 +138,13 @@ enum TipoDescuento {
   CORTESIA
 }
 
+enum TipoPromocion {
+  PRECIO_FIJO   // precio especial fijo (ej. chopp a 8.000 en happy hour)
+  PORCENTAJE    // % de descuento sobre precioBase (centésimos del 1%)
+  NXM           // lleva N paga M (ej. 2x1 → nxmLleva=2 nxmPaga=1)
+  COMBO         // varios productos a precio fijo conjunto
+}
+
 enum EstadoPedido {
   PENDIENTE
   CONFIRMADO
@@ -289,6 +296,7 @@ model Empresa {
   motivosDescuento MotivoDescuento[]
   limitesDescuento LimiteDescuentoRol[]
   codigosDescuento CodigoAutorizacionDescuento[]
+  promociones      Promocion[]
 
   @@index([deletedAt])
   @@map("empresa")
@@ -474,6 +482,7 @@ model Sucursal {
   transferenciasDestino TransferenciaStock[] @relation("TransferenciaDestino")
   compras          Compra[]
   auditLogs        AuditLog[]
+  promociones      PromocionSucursal[]
 
   @@unique([empresaId, codigo])
   @@unique([empresaId, establecimiento])
@@ -861,6 +870,7 @@ model ProductoVenta {
   preciosSucursal    PrecioPorSucursal[]
   itemsPedido        ItemPedido[]
   itemsComboOpcion   ComboGrupoOpcion[]
+  promociones        PromocionProducto[]
   // Si este producto es una sub-preparación, aparece como insumo en otras recetas
   itemsRecetaSubProd ItemReceta[] @relation("SubProductoReceta")
 
@@ -905,6 +915,95 @@ model PrecioPorSucursal {
   @@unique([productoVentaId, sucursalId, vigenteDesde])
   @@index([sucursalId, productoVentaId, vigenteHasta])
   @@map("precio_por_sucursal")
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  PROMOCIONES — ofertas por día/horario que se renderizan en el POS como
+//  pseudo-categoría visible sólo cuando están vigentes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Promoción aplicable a un set de productos durante días/horarios concretos.
+/// La vigencia se evalúa server-side al pedir las promos activas — la combinación
+/// de fecha (vigenciaDesde/Hasta), día de la semana (diasSemana) y rango horario
+/// (horaInicio/Fin) define cuándo aparece en el POS. Si `sucursales` está vacío,
+/// aplica a TODAS las sucursales de la empresa.
+///
+/// Reglas por tipo:
+///  - PRECIO_FIJO: el item se cobra a `precioFijo` (Gs.), ignorando precio base.
+///  - PORCENTAJE: descuento `porcentaje` (centésimos del 1%, 1500 = 15%) sobre precio base.
+///  - NXM: lleva `nxmLleva` paga `nxmPaga` (ej. 2x1 → lleva=2, paga=1). El descuento
+///    se calcula al agrupar items con la misma promo.
+///  - COMBO: el conjunto de productos asociados se cobra a `precioFijo` como unidad.
+///    Cada PromocionProducto.cantidadMin define cuántas unidades del producto entran.
+model Promocion {
+  id          String   @id @default(cuid())
+  empresaId   String   @map("empresa_id")
+  empresa     Empresa  @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  nombre      String
+  descripcion String?
+  tipo        TipoPromocion
+
+  // Campos condicionales por tipo (no todos se usan a la vez).
+  precioFijo  BigInt?   @map("precio_fijo")    // PRECIO_FIJO o COMBO
+  porcentaje  Int?                              // PORCENTAJE (centésimos del 1%)
+  nxmLleva    Int?      @map("nxm_lleva")      // NXM
+  nxmPaga     Int?      @map("nxm_paga")       // NXM
+
+  // Vigencia absoluta (rango de fechas). Null = sin tope.
+  vigenciaDesde DateTime? @map("vigencia_desde")
+  vigenciaHasta DateTime? @map("vigencia_hasta")
+
+  // Días de la semana en que aplica (0=Domingo … 6=Sábado). Vacío = todos.
+  diasSemana Int[]   @map("dias_semana")
+
+  // Rango horario en TZ de la empresa, formato "HH:mm". Null = todo el día.
+  horaInicio String? @map("hora_inicio") @db.VarChar(5)
+  horaFin    String? @map("hora_fin")    @db.VarChar(5)
+
+  activo     Boolean @default(true)
+  // Para distinguir la pestaña en el POS — emoji o icono corto.
+  iconoEmoji String? @map("icono_emoji") @db.VarChar(8)
+  ordenMenu  Int     @default(0) @map("orden_menu")
+
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  productos   PromocionProducto[]
+  sucursales  PromocionSucursal[]
+  itemsPedido ItemPedido[]
+
+  @@unique([empresaId, nombre])
+  @@index([empresaId, activo, deletedAt])
+  @@map("promocion")
+}
+
+model PromocionProducto {
+  promocionId    String        @map("promocion_id")
+  promocion      Promocion     @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  productoVentaId String       @map("producto_venta_id")
+  productoVenta  ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
+  // Cuántas unidades de este producto entran en la promo. Para PRECIO_FIJO,
+  // PORCENTAJE y NXM se ignora (es 1). Para COMBO define la composición.
+  cantidadMin    Int           @default(1) @map("cantidad_min")
+
+  @@id([promocionId, productoVentaId])
+  @@index([productoVentaId])
+  @@map("promocion_producto")
+}
+
+/// Sucursales donde aplica la promoción. Si la promo no tiene filas en esta
+/// tabla, aplica a TODAS las sucursales de la empresa (convención simple).
+model PromocionSucursal {
+  promocionId String    @map("promocion_id")
+  promocion   Promocion @relation(fields: [promocionId], references: [id], onDelete: Cascade)
+  sucursalId  String    @map("sucursal_id")
+  sucursal    Sucursal  @relation(fields: [sucursalId], references: [id], onDelete: Cascade)
+
+  @@id([promocionId, sucursalId])
+  @@index([sucursalId])
+  @@map("promocion_sucursal")
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1372,6 +1471,16 @@ model ItemPedido {
   subtotal        BigInt
   observaciones   String?
 
+  // Si este item fue cargado desde una promoción, queda atado a ella. Permite
+  // mostrar la promo en el ticket/KDS y excluir el item del cálculo de
+  // descuentos manuales sobre el pedido (las promos son excluyentes).
+  promocionId        String? @map("promocion_id")
+  promocion          Promocion? @relation(fields: [promocionId], references: [id], onDelete: SetNull)
+  // Descuento aplicado por la promo a este item (BigInt Gs.). Para NXM se
+  // recalcula al cambiar la cantidad; para PRECIO_FIJO/PORCENTAJE puede quedar
+  // en 0 porque el precioUnitario ya viene con el precio promocional.
+  descuentoPromocion BigInt @default(0) @map("descuento_promocion")
+
   // Estado por línea (útil cuando un mismo pedido tiene items en distintos sectores)
   estado          EstadoPedido @default(PENDIENTE)
   sectorComanda   SectorComanda? @map("sector_comanda")
@@ -1387,6 +1496,7 @@ model ItemPedido {
   @@index([pedidoId])
   @@index([productoVentaId])
   @@index([sectorComanda, estado])
+  @@index([promocionId])
   @@map("item_pedido")
 }
 
