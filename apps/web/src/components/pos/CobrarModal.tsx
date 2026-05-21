@@ -56,6 +56,8 @@ interface DescuentoAplicado {
   motivoNombre: string;
   /** Si vino de supervisor o código, lo señalamos para que se entienda. */
   autorizadoPorNombre: string | null;
+  /** Empleado beneficiario cuando es descuento del sistema. */
+  empleadoNombre: string | null;
 }
 
 const METODOS: {
@@ -129,6 +131,7 @@ export function CobrarModal({
       totalDescuento,
       motivoNombre: pedidoDetalle.motivoDescuento?.nombre ?? '—',
       autorizadoPorNombre: pedidoDetalle.descuentoAutorizadoPor?.nombreCompleto ?? null,
+      empleadoNombre: pedidoDetalle.empleadoBeneficiario?.nombreCompleto ?? null,
     });
     setPagos([nuevoPago(totalConDescuento)]);
     // Una vez hidratado, no volvemos a tocar — el usuario controla.
@@ -151,6 +154,7 @@ export function CobrarModal({
       totalDescuento,
       motivoNombre: p.motivoDescuento?.nombre ?? '—',
       autorizadoPorNombre: p.descuentoAutorizadoPor?.nombreCompleto ?? null,
+      empleadoNombre: p.empleadoBeneficiario?.nombreCompleto ?? null,
     });
     // Resetear pagos al nuevo total — el cajero arma el pago de cero.
     setPagos([nuevoPago(totalNuevo)]);
@@ -303,6 +307,11 @@ export function CobrarModal({
                   <p className="mt-1 text-sm font-medium">
                     −{formatGs(descuento.totalDescuento)} · {descuento.motivoNombre}
                   </p>
+                  {descuento.empleadoNombre && (
+                    <p className="text-[11px] text-muted-foreground">
+                      Empleado: {descuento.empleadoNombre}
+                    </p>
+                  )}
                   {descuento.autorizadoPorNombre && (
                     <p className="text-[11px] text-muted-foreground">
                       Autorizado por {descuento.autorizadoPorNombre}

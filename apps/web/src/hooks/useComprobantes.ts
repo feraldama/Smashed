@@ -32,7 +32,14 @@ export interface ComprobanteResumen {
   total: string;
   fechaEmision: string;
   cliente: { id: string; razonSocial: string; ruc: string | null; dv: string | null } | null;
-  pedido: { id: string; numero: number } | null;
+  pedido: {
+    id: string;
+    numero: number;
+    totalDescuento: string;
+    descuentoTipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA' | null;
+    motivoDescuento: { id: string; nombre: string; codigoSistema: string | null } | null;
+    empleadoBeneficiario: { id: string; nombreCompleto: string } | null;
+  } | null;
 }
 
 export interface ItemComprobante {
@@ -111,6 +118,14 @@ export interface ComprobanteDetalle {
   emitidoPor: { id: string; nombreCompleto: string };
   timbrado: { numero: string; fechaFinVigencia: string };
   eventosSifen: EventoSifen[];
+  pedido: {
+    id: string;
+    numero: number;
+    totalDescuento: string;
+    descuentoTipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA' | null;
+    motivoDescuento: { id: string; nombre: string; codigoSistema: string | null } | null;
+    empleadoBeneficiario: { id: string; nombreCompleto: string } | null;
+  } | null;
 }
 
 // ───── Listado / detalle ─────

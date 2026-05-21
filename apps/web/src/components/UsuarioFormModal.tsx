@@ -38,6 +38,9 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
   const [telefono, setTelefono] = useState(usuario?.telefono ?? '');
   const [rol, setRol] = useState<Rol>((usuario?.rol as Rol) ?? 'CAJERO');
   const [activo, setActivo] = useState(usuario?.activo ?? true);
+  const [esEmpleadoConDescuento, setEsEmpleadoConDescuento] = useState(
+    usuario?.esEmpleadoConDescuento ?? false,
+  );
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -109,6 +112,7 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
           telefono: telefono.trim() || null,
           rol,
           activo,
+          esEmpleadoConDescuento,
           sucursales,
         });
         toast.success('Usuario actualizado');
@@ -120,6 +124,7 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
           documento: documento.trim() || undefined,
           telefono: telefono.trim() || undefined,
           rol,
+          esEmpleadoConDescuento,
           sucursales,
         });
         toast.success('Usuario creado');
@@ -252,6 +257,14 @@ export function UsuarioFormModal({ usuario, onClose }: Props) {
                 onCheckedChange={setActivo}
               />
             )}
+
+            {/* Empleado beneficiario del descuento empleado */}
+            <SwitchField
+              label="Empleado con descuento"
+              description="Si está activo, aparece en el selector del POS al aplicar descuento empleado."
+              checked={esEmpleadoConDescuento}
+              onCheckedChange={setEsEmpleadoConDescuento}
+            />
 
             {/* Sucursales */}
             <div>

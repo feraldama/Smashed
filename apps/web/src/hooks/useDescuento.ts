@@ -4,6 +4,10 @@ import { api } from '@/lib/api';
 
 export type TipoDescuento = 'PORCENTAJE' | 'MONTO' | 'CORTESIA';
 
+/** Código estable de motivos creados por el sistema. El UI lo usa para
+ *  ramificar el flujo (ej. mostrar selector de empleado en lugar de tipo/valor). */
+export const CODIGO_MOTIVO_DESCUENTO_EMPLEADO = 'DESCUENTO_EMPLEADO';
+
 export interface MotivoDescuento {
   id: string;
   empresaId: string;
@@ -11,6 +15,8 @@ export interface MotivoDescuento {
   requiereAutorizacion: boolean;
   activo: boolean;
   ordenMenu: number;
+  esSistema: boolean;
+  codigoSistema: string | null;
 }
 
 export interface LimiteDescuentoRol {
@@ -44,9 +50,11 @@ export interface PedidoConDescuento {
   descuentoAplicadoPorId: string | null;
   descuentoAutorizadoPorId: string | null;
   codigoAutorizacionId: string | null;
-  motivoDescuento: { id: string; nombre: string } | null;
+  empleadoBeneficiarioId: string | null;
+  motivoDescuento: { id: string; nombre: string; codigoSistema: string | null } | null;
   descuentoAplicadoPor: { id: string; nombreCompleto: string } | null;
   descuentoAutorizadoPor: { id: string; nombreCompleto: string } | null;
+  empleadoBeneficiario: { id: string; nombreCompleto: string } | null;
 }
 
 // ───── Aplicar / remover ─────
@@ -59,6 +67,9 @@ export interface AplicarDescuentoInput {
   observacion?: string;
   supervisorAuth?: { email: string; password: string };
   codigoAutorizacion?: string;
+  /** Solo cuando el motivo es del sistema DESCUENTO_EMPLEADO. El backend ignora
+   *  tipo/valor en ese caso y aplica el % global de ConfiguracionEmpresa. */
+  empleadoBeneficiarioId?: string;
 }
 
 export function useAplicarDescuento(pedidoId: string | null) {
@@ -219,5 +230,22 @@ export function useEliminarCodigo() {
   return useMutation({
     mutationFn: (id: string) => api<void>(`/descuentos/codigos/${id}`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['descuentos', 'codigos'] }),
+  });
+}
+
+// ───── Empleados beneficiarios (para el modal de descuento empleado) ─────
+
+export interface EmpleadoBeneficiario {
+  id: string;
+  nombreCompleto: string;
+  rol: string;
+}
+
+export function useEmpleadosBeneficiarios() {
+  return useQuery({
+    queryKey: ['descuentos', 'empleados-beneficiarios'],
+    queryFn: () =>
+      api<{ empleados: EmpleadoBeneficiario[] }>('/descuentos/empleados-beneficiarios'),
+    select: (d) => d.empleados,
   });
 }

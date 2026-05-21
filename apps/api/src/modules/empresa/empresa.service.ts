@@ -36,6 +36,7 @@ const SELECT_EMPRESA = {
       redondearTotales: true,
       ivaIncluidoEnPrecio: true,
       emitirTicketPorDefecto: true,
+      porcentajeDescuentoEmpleado: true,
     },
   },
   _count: {

@@ -364,7 +364,7 @@ describe('GET /cajas/cierres/:id — descuentos del turno', () => {
     // previos y armamos lo mínimo para que ADMIN pueda aplicar sin escalado.
     const empresa = await prisma.empresa.findFirstOrThrow();
     await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
-    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
     await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
     const motivo = await prisma.motivoDescuento.create({
       data: { empresaId: empresa.id, nombre: 'Cliente frecuente' },
@@ -458,7 +458,7 @@ describe('GET /cajas/cierres/:id — descuentos del turno', () => {
     expect(totalSinDesc - montoDesc).toBe(totalConDesc);
 
     // Cleanup motivo/límite para no afectar tests siguientes.
-    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
     await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
   });
 

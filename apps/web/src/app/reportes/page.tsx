@@ -32,6 +32,7 @@ import {
   useCajaTurnos,
   useComparativaSucursales,
   useDescuentosListado,
+  useDescuentosPorEmpleado,
   useMetodosPago,
   useMovimientosResumen,
   useMovimientosStock,
@@ -61,7 +62,7 @@ type Tab =
   | 'sucursales'
   | 'inventario';
 
-type SubTabVentas = 'resumen' | 'canales' | 'descuentos';
+type SubTabVentas = 'resumen' | 'canales' | 'descuentos' | 'descuento-empleado';
 type SubTabInventario = 'stock' | 'movimientos';
 
 export default function ReportesPage() {
@@ -198,11 +199,19 @@ function TabVentas({ rango }: { rango: DateRange }) {
         >
           Descuentos
         </SubTabBtn>
+        <SubTabBtn
+          active={sub === 'descuento-empleado'}
+          onClick={() => setSub('descuento-empleado')}
+          icon={Users}
+        >
+          Por empleado
+        </SubTabBtn>
       </nav>
 
       {sub === 'resumen' && <VentasResumen rango={rango} />}
       {sub === 'canales' && <VentasPorCanal rango={rango} />}
       {sub === 'descuentos' && <VentasDescuentos rango={rango} />}
+      {sub === 'descuento-empleado' && <DescuentosPorEmpleado rango={rango} />}
     </div>
   );
 }
@@ -441,6 +450,97 @@ function VentasDescuentos({ rango }: { rango: DateRange }) {
                   </tr>
                 ))}
               </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function DescuentosPorEmpleado({ rango }: { rango: DateRange }) {
+  const { data: filas = [], isLoading } = useDescuentosPorEmpleado(rango);
+
+  const totales = filas.reduce(
+    (acc, f) => ({
+      ventas: acc.ventas + Number(f.cantidad_ventas),
+      descontado: acc.descontado + Number(f.total_descontado),
+      cobrado: acc.cobrado + Number(f.total_cobrado),
+    }),
+    { ventas: 0, descontado: 0, cobrado: 0 },
+  );
+
+  return (
+    <div className="space-y-4">
+      <ExportarBtns
+        rango={rango}
+        items={[{ endpoint: '/reportes/ventas/descuentos-por-empleado', label: 'Por empleado' }]}
+      />
+
+      <section className="grid gap-3 sm:grid-cols-3">
+        <KpiCard
+          label="Empleados beneficiados"
+          value={String(filas.length)}
+          loading={isLoading}
+          icon={Users}
+        />
+        <KpiCard
+          label="Total descontado"
+          value={`-${formatGs(totales.descontado)}`}
+          loading={isLoading}
+        />
+        <KpiCard label="Total cobrado neto" value={formatGs(totales.cobrado)} loading={isLoading} />
+      </section>
+
+      <Card title="Detalle por empleado">
+        {isLoading ? (
+          <SkeletonChart />
+        ) : filas.length === 0 ? (
+          <Empty mensaje="No hay descuentos empleado en este período" />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-left uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-2 py-2">Empleado</th>
+                  <th className="px-2 py-2">Rol</th>
+                  <th className="px-2 py-2 text-right">Ventas</th>
+                  <th className="px-2 py-2 text-right">Base original</th>
+                  <th className="px-2 py-2 text-right">Descontado</th>
+                  <th className="px-2 py-2 text-right">Cobrado neto</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {filas.map((f) => (
+                  <tr key={f.empleado_id}>
+                    <td className="px-2 py-2 font-medium">{f.empleado_nombre}</td>
+                    <td className="px-2 py-2 text-muted-foreground">{f.empleado_rol}</td>
+                    <td className="px-2 py-2 text-right font-mono">{f.cantidad_ventas}</td>
+                    <td className="px-2 py-2 text-right font-mono">{formatGs(f.base_original)}</td>
+                    <td className="px-2 py-2 text-right font-mono text-red-700 dark:text-red-300">
+                      −{formatGs(f.total_descontado)}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono font-semibold">
+                      {formatGs(f.total_cobrado)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              {filas.length > 0 && (
+                <tfoot className="border-t-2 font-bold">
+                  <tr>
+                    <td className="px-2 py-2" colSpan={2}>
+                      Total
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono">{totales.ventas}</td>
+                    <td className="px-2 py-2" />
+                    <td className="px-2 py-2 text-right font-mono text-red-700 dark:text-red-300">
+                      −{formatGs(totales.descontado)}
+                    </td>
+                    <td className="px-2 py-2 text-right font-mono">{formatGs(totales.cobrado)}</td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         )}

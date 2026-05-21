@@ -46,6 +46,7 @@ const SELECT_USUARIO = {
   telefono: true,
   rol: true,
   activo: true,
+  esEmpleadoConDescuento: true,
   ultimoLogin: true,
   createdAt: true,
   updatedAt: true,
@@ -156,6 +157,7 @@ export async function crearUsuario(user: UserCtx, input: CrearUsuarioInput) {
         documento: input.documento,
         telefono: input.telefono,
         rol: input.rol,
+        esEmpleadoConDescuento: input.esEmpleadoConDescuento,
         ...(input.sucursales.length > 0
           ? {
               sucursales: {
@@ -253,6 +255,9 @@ export async function actualizarUsuario(user: UserCtx, id: string, input: Actual
     if (input.telefono !== undefined) data.telefono = input.telefono;
     if (input.rol !== undefined) data.rol = input.rol;
     if (input.activo !== undefined) data.activo = input.activo;
+    if (input.esEmpleadoConDescuento !== undefined) {
+      data.esEmpleadoConDescuento = input.esEmpleadoConDescuento;
+    }
 
     await tx.usuario.update({ where: { id }, data });
 

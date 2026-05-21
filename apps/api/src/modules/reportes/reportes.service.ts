@@ -430,6 +430,59 @@ export async function descuentosListado(user: UserCtx, q: DescuentosListadoQuery
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  DESCUENTOS POR EMPLEADO — agregación por beneficiario
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Agrupa los descuentos del rango por empleado beneficiario. Solo cuenta
+ * pedidos con `empleado_beneficiario_id` no nulo y `total_descuento > 0`
+ * (descarta descuentos removidos). Excluye pedidos CANCELADO.
+ *
+ * Usa `created_at` del pedido para el rango — coherente con cómo se mide el
+ * tope "1 descuento empleado por día por empleado".
+ *
+ * Retorna por empleado: cantidad de ventas, total descontado, base original
+ * (subtotal + IVA) y total cobrado neto.
+ */
+export async function descuentosPorEmpleado(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      empleado_id: string;
+      empleado_nombre: string;
+      empleado_rol: string;
+      cantidad_ventas: bigint;
+      total_descontado: bigint;
+      base_original: bigint;
+      total_cobrado: bigint;
+    }[]
+  >`
+    SELECT
+      u.id AS empleado_id,
+      u."nombre_completo" AS empleado_nombre,
+      u."rol"::text AS empleado_rol,
+      COUNT(*)::bigint AS cantidad_ventas,
+      COALESCE(SUM(p."total_descuento"), 0)::bigint AS total_descontado,
+      COALESCE(SUM(p."subtotal" + p."total_iva"), 0)::bigint AS base_original,
+      COALESCE(SUM(p."total"), 0)::bigint AS total_cobrado
+    FROM pedido p
+    INNER JOIN usuario u ON u.id = p."empleado_beneficiario_id"
+    WHERE
+      p."empresa_id" = ${user.empresaId}
+      AND p."deleted_at" IS NULL
+      AND p."empleado_beneficiario_id" IS NOT NULL
+      AND p."total_descuento" > 0
+      AND p."estado" <> 'CANCELADO'::"EstadoPedido"
+      AND p."created_at" >= ${q.desde}
+      AND p."created_at" <= ${q.hasta}
+      ${sucursalId ? Prisma.sql`AND p."sucursal_id" = ${sucursalId}` : Prisma.empty}
+      ${q.usuarioId ? Prisma.sql`AND p."empleado_beneficiario_id" = ${q.usuarioId}` : Prisma.empty}
+    GROUP BY u.id, u."nombre_completo", u."rol"
+    ORDER BY total_descontado DESC
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  TIEMPOS DE COCINA — promedios + percentiles
 // ═══════════════════════════════════════════════════════════════════════════
 

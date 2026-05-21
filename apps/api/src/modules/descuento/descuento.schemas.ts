@@ -30,6 +30,10 @@ export const aplicarDescuentoInput = z
     observacion: z.string().trim().max(500).optional(),
     supervisorAuth: supervisorAuthSchema.optional(),
     codigoAutorizacion: z.string().trim().min(4).max(32).optional(),
+    // Solo cuando el motivo es del sistema "DESCUENTO_EMPLEADO". El service
+    // valida que la combinación motivo+empleado sea coherente; si el motivo es
+    // de empleado y falta, o si no es de empleado y viene, devuelve 422.
+    empleadoBeneficiarioId: z.string().cuid().optional(),
   })
   .refine((d) => !(d.supervisorAuth && d.codigoAutorizacion), {
     message: 'No mandes supervisorAuth Y codigoAutorizacion juntos — elegí uno',
@@ -37,6 +41,8 @@ export const aplicarDescuentoInput = z
   })
   .refine(
     (d) => {
+      // Descuento empleado: tipo/valor son ignorados por el service.
+      if (d.empleadoBeneficiarioId) return true;
       if (d.tipo === 'PORCENTAJE') return d.valor >= 1 && d.valor <= 10000;
       if (d.tipo === 'MONTO') return d.valor >= 1;
       // CORTESIA: valor irrelevante.

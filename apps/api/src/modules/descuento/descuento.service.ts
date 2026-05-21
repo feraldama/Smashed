@@ -46,6 +46,21 @@ interface UserCtx {
 const ESTADOS_INMUTABLES: EstadoPedido[] = [EstadoPedido.FACTURADO, EstadoPedido.CANCELADO];
 const ROLES_GESTION: Rol[] = ['ADMIN_EMPRESA', 'GERENTE_SUCURSAL', 'SUPER_ADMIN'];
 
+/**
+ * Código estable del motivo del sistema para descuento empleado. Vive como
+ * `MotivoDescuento.codigoSistema` y se siembra al crear cada empresa. El
+ * nombre humano del motivo es renombrable, este código no.
+ */
+export const CODIGO_MOTIVO_DESCUENTO_EMPLEADO = 'DESCUENTO_EMPLEADO';
+
+/** Inicio del día actual en la zona horaria del servidor (Paraguay). Lo usamos
+ *  para validar el tope "1 descuento empleado por día por empleado". */
+function inicioDelDiaActual(): Date {
+  const ahora = new Date();
+  ahora.setHours(0, 0, 0, 0);
+  return ahora;
+}
+
 function requireEmpresa(user: UserCtx): string {
   if (!user.empresaId) throw Errors.forbidden('Usuario sin empresa');
   return user.empresaId;
@@ -230,24 +245,93 @@ export async function aplicarDescuento(
   });
   if (!motivo) throw Errors.validation({ motivoDescuentoId: 'Motivo inexistente o inactivo' });
 
+  // Motivo del sistema "Descuento empleado": flujo especial.
+  //  - Empleado beneficiario obligatorio (Usuario con esEmpleadoConDescuento=true).
+  //  - Tipo y valor se IGNORAN del input — usamos el % global de la empresa.
+  //  - Tope: 1 descuento empleado por empleado por día (server-side, race-free).
+  // Para otros motivos: empleadoBeneficiarioId no puede venir.
+  const esMotivoEmpleado = motivo.codigoSistema === CODIGO_MOTIVO_DESCUENTO_EMPLEADO;
+
+  let tipoEfectivo = input.tipo;
+  let valorEfectivo = BigInt(input.valor);
+  let empleadoValidadoId: string | null = null;
+
+  if (esMotivoEmpleado) {
+    if (!input.empleadoBeneficiarioId) {
+      throw Errors.validation({
+        empleadoBeneficiarioId: 'Para descuento empleado hay que elegir el empleado',
+      });
+    }
+    const empleado = await prisma.usuario.findFirst({
+      where: {
+        id: input.empleadoBeneficiarioId,
+        empresaId,
+        esEmpleadoConDescuento: true,
+        activo: true,
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (!empleado) {
+      throw Errors.validation({
+        empleadoBeneficiarioId: 'Empleado inválido o sin derecho a descuento',
+      });
+    }
+    empleadoValidadoId = empleado.id;
+
+    const config = await prisma.configuracionEmpresa.findUnique({
+      where: { empresaId },
+      select: { porcentajeDescuentoEmpleado: true },
+    });
+    const pct = config?.porcentajeDescuentoEmpleado ?? 50;
+    // Forzamos PORCENTAJE y valor según config (centésimos del 1%).
+    tipoEfectivo = 'PORCENTAJE';
+    valorEfectivo = BigInt(pct * 100);
+
+    // Tope diario: si ya usó hoy el descuento empleado, bloquear.
+    const desde = inicioDelDiaActual();
+    const yaUsoHoy = await prisma.pedido.count({
+      where: {
+        empresaId,
+        empleadoBeneficiarioId: empleado.id,
+        estado: { not: EstadoPedido.CANCELADO },
+        createdAt: { gte: desde },
+        // Tolerar pedidos previos del mismo flujo: en el día, mientras siga
+        // existiendo el descuento (totalDescuento > 0) ya cuenta.
+        totalDescuento: { gt: 0n },
+      },
+    });
+    if (yaUsoHoy > 0) {
+      throw Errors.conflict('El empleado ya usó su descuento hoy');
+    }
+  } else if (input.empleadoBeneficiarioId) {
+    throw Errors.validation({
+      empleadoBeneficiarioId: 'Solo se usa con el motivo "Descuento empleado"',
+    });
+  }
+
   // Base del descuento: subtotal + IVA (no se descuenta el recargo delivery).
   const base = pedido.subtotal + pedido.totalIva;
-  const valorBigInt = BigInt(input.valor);
-  const { monto, porcentajeEfectivo } = calcularDescuento(input.tipo, valorBigInt, base);
+  const { monto, porcentajeEfectivo } = calcularDescuento(tipoEfectivo, valorEfectivo, base);
 
   if (monto <= 0n) {
     throw Errors.validation({ valor: 'El descuento calculado es 0 — revisá tipo y valor' });
   }
 
-  const auth = await validarAutorizacion({
-    empresaId,
-    user,
-    tipo: input.tipo,
-    porcentajeEfectivo,
-    motivoRequiereAutorizacion: motivo.requiereAutorizacion,
-    supervisorAuth: input.supervisorAuth,
-    codigoAutorizacion: input.codigoAutorizacion,
-  });
+  // Descuento empleado: el % lo dicta la empresa, no el cajero. La política
+  // (decidida con el dueño del producto) es que el cajero puede aplicarlo
+  // libremente sin escalado. Salteamos la matriz de límites por rol.
+  const auth: AutorizacionResultado = esMotivoEmpleado
+    ? { autorizadoPorId: null, codigoAutorizacionId: null }
+    : await validarAutorizacion({
+        empresaId,
+        user,
+        tipo: tipoEfectivo,
+        porcentajeEfectivo,
+        motivoRequiereAutorizacion: motivo.requiereAutorizacion,
+        supervisorAuth: input.supervisorAuth,
+        codigoAutorizacion: input.codigoAutorizacion,
+      });
 
   // Persistir en transacción: actualizar pedido + marcar código como usado si aplica.
   return prisma.$transaction(async (tx) => {
@@ -262,24 +346,44 @@ export async function aplicarDescuento(
       }
     }
 
+    // Re-chequeo del tope dentro de la transacción para cerrar la ventana de
+    // carrera (otro pedido pudo aplicar el descuento entre el count y el update).
+    if (empleadoValidadoId) {
+      const desde = inicioDelDiaActual();
+      const yaUsoHoyTx = await tx.pedido.count({
+        where: {
+          empresaId,
+          empleadoBeneficiarioId: empleadoValidadoId,
+          estado: { not: EstadoPedido.CANCELADO },
+          createdAt: { gte: desde },
+          totalDescuento: { gt: 0n },
+        },
+      });
+      if (yaUsoHoyTx > 0) {
+        throw Errors.conflict('El empleado ya usó su descuento hoy');
+      }
+    }
+
     const nuevoTotal = base + pedido.recargoDelivery - monto;
     const actualizado = await tx.pedido.update({
       where: { id: pedidoId },
       data: {
-        descuentoTipo: input.tipo,
-        descuentoValor: valorBigInt,
+        descuentoTipo: tipoEfectivo,
+        descuentoValor: valorEfectivo,
         totalDescuento: monto,
         motivoDescuentoId: input.motivoDescuentoId,
         descuentoObservacion: input.observacion ?? null,
         descuentoAplicadoPorId: user.userId,
         descuentoAutorizadoPorId: auth.autorizadoPorId,
         codigoAutorizacionId: auth.codigoAutorizacionId,
+        empleadoBeneficiarioId: empleadoValidadoId,
         total: nuevoTotal,
       },
       include: {
-        motivoDescuento: { select: { id: true, nombre: true } },
+        motivoDescuento: { select: { id: true, nombre: true, codigoSistema: true } },
         descuentoAplicadoPor: { select: { id: true, nombreCompleto: true } },
         descuentoAutorizadoPor: { select: { id: true, nombreCompleto: true } },
+        empleadoBeneficiario: { select: { id: true, nombreCompleto: true } },
       },
     });
 
@@ -291,13 +395,15 @@ export async function aplicarDescuento(
         entidad: 'Pedido',
         entidadId: pedidoId,
         metadata: {
-          tipo: input.tipo,
+          tipo: tipoEfectivo,
           valorInput: input.valor,
+          valorEfectivo: valorEfectivo.toString(),
           montoAplicado: monto.toString(),
           porcentajeEfectivo,
           motivoId: input.motivoDescuentoId,
           autorizadoPorId: auth.autorizadoPorId,
           codigoUsadoId: auth.codigoAutorizacionId,
+          empleadoBeneficiarioId: empleadoValidadoId,
         },
       },
     });
@@ -353,6 +459,7 @@ export async function removerDescuento(user: UserCtx, pedidoId: string) {
         descuentoAplicadoPorId: null,
         descuentoAutorizadoPorId: null,
         codigoAutorizacionId: null,
+        empleadoBeneficiarioId: null,
         total: nuevoTotal,
       },
     });
@@ -440,6 +547,19 @@ export async function actualizarMotivo(user: UserCtx, id: string, input: Actuali
     where: { id, empresaId, deletedAt: null },
   });
   if (!motivo) throw Errors.notFound('Motivo no encontrado');
+  // Motivos del sistema: solo se permite togglear `activo` (caso de uso real
+  // es desactivar temporalmente el descuento empleado). Nombre y demás campos
+  // son inmutables — la UI debería esconderlos.
+  if (motivo.esSistema) {
+    const camposPermitidos: Array<keyof ActualizarMotivoInput> = ['activo'];
+    const camposEnviados = Object.keys(input) as Array<keyof ActualizarMotivoInput>;
+    const invalidos = camposEnviados.filter((c) => !camposPermitidos.includes(c));
+    if (invalidos.length > 0) {
+      throw Errors.conflict(
+        `Motivo del sistema: solo se puede modificar ${camposPermitidos.join(', ')}`,
+      );
+    }
+  }
   if (input.nombre && input.nombre !== motivo.nombre) {
     const dup = await prisma.motivoDescuento.findFirst({
       where: { empresaId, nombre: input.nombre, deletedAt: null, id: { not: id } },
@@ -456,10 +576,36 @@ export async function eliminarMotivo(user: UserCtx, id: string) {
     where: { id, empresaId, deletedAt: null },
   });
   if (!motivo) throw Errors.notFound('Motivo no encontrado');
+  if (motivo.esSistema) {
+    throw Errors.conflict('No se puede eliminar un motivo del sistema');
+  }
   // Soft delete: hay pedidos históricos que pueden referenciarlo.
   await prisma.motivoDescuento.update({
     where: { id },
     data: { deletedAt: new Date(), activo: false },
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════
+//  EMPLEADOS BENEFICIARIOS (lectura — la usa el POS al aplicar descuento)
+// ═════════════════════════════════════════════════════════════════════════
+
+/**
+ * Lista los usuarios habilitados como beneficiarios del descuento empleado.
+ * Accesible a cualquier usuario logueado de la empresa (incluido el cajero)
+ * — sólo expone id + nombre, no datos sensibles.
+ */
+export async function listarEmpleadosBeneficiarios(user: UserCtx) {
+  const empresaId = requireEmpresa(user);
+  return prisma.usuario.findMany({
+    where: {
+      empresaId,
+      esEmpleadoConDescuento: true,
+      activo: true,
+      deletedAt: null,
+    },
+    select: { id: true, nombreCompleto: true, rol: true },
+    orderBy: { nombreCompleto: 'asc' },
   });
 }
 

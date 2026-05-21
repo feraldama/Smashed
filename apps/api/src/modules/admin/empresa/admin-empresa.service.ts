@@ -106,6 +106,20 @@ export async function crearEmpresa(user: SuperAdminCtx, input: CrearEmpresaInput
       },
     });
 
+    // Motivo del sistema "Descuento empleado": permite al cajero marcar ventas
+    // a empleados con el % configurado en ConfiguracionEmpresa. No se puede
+    // eliminar/renombrar desde la UI; se identifica por codigo_sistema.
+    await tx.motivoDescuento.create({
+      data: {
+        empresaId: empresa.id,
+        nombre: 'Descuento empleado',
+        requiereAutorizacion: false,
+        activo: true,
+        esSistema: true,
+        codigoSistema: 'DESCUENTO_EMPLEADO',
+      },
+    });
+
     // Usuario ADMIN_EMPRESA inicial — desde acá el cliente termina de configurar todo.
     const admin = await tx.usuario.create({
       data: {

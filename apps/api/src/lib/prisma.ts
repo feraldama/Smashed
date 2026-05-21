@@ -25,6 +25,25 @@ const logConfig = [
 ] as const;
 
 function createPrismaClient() {
+  // Guard defensivo: en modo test, la URL DEBE apuntar a una BD distinta de la
+  // que indica DATABASE_URL_TEST. Si la config de vitest está rota o alguien
+  // ejecuta tests con NODE_ENV=test directamente, abortamos antes de destruir
+  // datos de desarrollo. Los tests hacen deleteMany() — no son reversibles.
+  if (env.NODE_ENV === 'test') {
+    const testUrl = process.env.DATABASE_URL_TEST;
+    if (!testUrl) {
+      throw new Error(
+        'NODE_ENV=test pero DATABASE_URL_TEST no está definido. ' +
+          'Agregalo al .env y creá la BD con: pnpm --filter @smash/api test:db:setup',
+      );
+    }
+    if (env.DATABASE_URL !== testUrl) {
+      throw new Error(
+        'NODE_ENV=test pero DATABASE_URL no apunta a DATABASE_URL_TEST. ' +
+          'Los tests destruyen datos — usá pnpm test, no node/tsx directos.',
+      );
+    }
+  }
   // Prisma 7 ya no acepta `url` en el datasource del schema; el cliente recibe
   // la conexión vía driver adapter (pg para PostgreSQL).
   const adapter = new PrismaPg({ connectionString: env.DATABASE_URL });

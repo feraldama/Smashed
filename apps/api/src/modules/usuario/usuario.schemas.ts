@@ -21,6 +21,7 @@ export const crearUsuarioInput = z.object({
   documento: z.string().trim().max(30).optional(),
   telefono: z.string().trim().max(40).optional(),
   rol: z.nativeEnum(Rol),
+  esEmpleadoConDescuento: z.boolean().default(false),
   sucursales: z.array(sucursalAsignacionSchema).max(20).default([]),
 });
 
@@ -31,6 +32,7 @@ export const actualizarUsuarioInput = z.object({
   telefono: z.string().trim().max(40).nullable().optional(),
   rol: z.nativeEnum(Rol).optional(),
   activo: z.boolean().optional(),
+  esEmpleadoConDescuento: z.boolean().optional(),
   sucursales: z.array(sucursalAsignacionSchema).max(20).optional(),
 });
 

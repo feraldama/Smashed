@@ -183,6 +183,25 @@ export async function descuentosListado(req: Request, res: Response) {
   res.json({ descuentos: result });
 }
 
+export async function descuentosPorEmpleado(req: Request, res: Response) {
+  const c = ctx(req);
+  const q = rangoFechasQuery.parse(req.query);
+  const result = await service.descuentosPorEmpleado(c, q);
+  if (q.formato === 'csv') {
+    const csv = csvFromRows(result, [
+      { key: 'empleado_nombre', label: 'Empleado' },
+      { key: 'empleado_rol', label: 'Rol' },
+      { key: 'cantidad_ventas', label: 'Cantidad de ventas' },
+      { key: 'base_original', label: 'Base original (Gs.)' },
+      { key: 'total_descontado', label: 'Total descontado (Gs.)' },
+      { key: 'total_cobrado', label: 'Total cobrado (Gs.)' },
+    ]);
+    sendCsv(res, nombreArchivo('descuentos_por_empleado', q.desde, q.hasta), csv);
+    return;
+  }
+  res.json({ empleados: result });
+}
+
 export async function tiemposCocina(req: Request, res: Response) {
   const c = ctx(req);
   const q = rangoFechasQuery.parse(req.query);

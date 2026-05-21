@@ -9,7 +9,10 @@ const hexColor = z
 export const actualizarEmpresaInput = z.object({
   nombreFantasia: z.string().trim().min(2).max(120).optional(),
   razonSocial: z.string().trim().min(2).max(200).optional(),
-  ruc: z.string().regex(/^\d{6,8}$/, 'RUC debe tener 6-8 dígitos').optional(),
+  ruc: z
+    .string()
+    .regex(/^\d{6,8}$/, 'RUC debe tener 6-8 dígitos')
+    .optional(),
   dv: z.string().regex(/^\d$/, 'DV debe ser 1 dígito').optional(),
   direccion: z.string().trim().max(300).nullable().optional(),
   telefono: z.string().trim().max(40).nullable().optional(),
@@ -21,7 +24,12 @@ export const actualizarEmpresaInput = z.object({
     .nullable()
     .optional()
     .or(z.literal('').transform(() => null)),
-  logoUrl: z.string().url().nullable().optional().or(z.literal('').transform(() => null)),
+  logoUrl: z
+    .string()
+    .url()
+    .nullable()
+    .optional()
+    .or(z.literal('').transform(() => null)),
   colorPrimario: hexColor,
   colorSecundario: hexColor,
   zonaHoraria: z.string().trim().min(3).max(60).optional(),
@@ -32,6 +40,7 @@ export const actualizarConfiguracionInput = z.object({
   redondearTotales: z.boolean().optional(),
   ivaIncluidoEnPrecio: z.boolean().optional(),
   emitirTicketPorDefecto: z.boolean().optional(),
+  porcentajeDescuentoEmpleado: z.number().int().min(0).max(100).optional(),
 });
 
 export type ActualizarEmpresaInput = z.infer<typeof actualizarEmpresaInput>;

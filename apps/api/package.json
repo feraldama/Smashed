@@ -12,6 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:db:setup": "tsx prisma/setup-test-db.ts",
+    "test:db:reset": "tsx prisma/setup-test-db.ts --reset",
     "clean": "rimraf dist .turbo *.tsbuildinfo",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

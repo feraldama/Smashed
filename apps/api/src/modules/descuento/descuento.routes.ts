@@ -18,6 +18,9 @@ router.delete('/pedidos/:id/descuento', asyncH(ctrl.remover));
 // ───── Verificar supervisor (pre-check de UI) ─────
 router.post('/auth/verificar-supervisor', asyncH(ctrl.verificarSupervisor));
 
+// ───── Empleados beneficiarios del descuento empleado (lectura para POS) ─────
+router.get('/empleados-beneficiarios', asyncH(ctrl.listarEmpleadosBeneficiarios));
+
 // ───── Motivos (cualquier rol auth lee; gestión escribe) ─────
 router.get('/motivos', asyncH(ctrl.listarMotivos));
 router.post('/motivos', requireGestion, asyncH(ctrl.crearMotivo));

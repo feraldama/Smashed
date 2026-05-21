@@ -1,19 +1,22 @@
 'use client';
 
-import { Gift, Loader2, Percent, ShieldAlert, Wallet, X } from 'lucide-react';
+import { Gift, Loader2, Percent, ShieldAlert, UserCircle, Wallet, X } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
 import { toast } from '@/components/Toast';
-import { Field, Input } from '@/components/ui/Input';
+import { Field, Input, Select } from '@/components/ui/Input';
 import {
   type AplicarDescuentoInput,
+  CODIGO_MOTIVO_DESCUENTO_EMPLEADO,
   type MotivoDescuento,
   type PedidoConDescuento,
   type TipoDescuento,
   useAplicarDescuento,
+  useEmpleadosBeneficiarios,
   useMotivosDescuento,
   useVerificarSupervisor,
 } from '@/hooks/useDescuento';
+import { useEmpresa } from '@/hooks/useEmpresa';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -29,6 +32,8 @@ const PRESETS_PORCENTAJE = [5, 10, 15, 20] as const;
 
 export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) {
   const { data: motivos = [], isLoading: cargandoMotivos } = useMotivosDescuento();
+  const { data: empresa } = useEmpresa();
+  const { data: empleados = [], isLoading: cargandoEmpleados } = useEmpleadosBeneficiarios();
   const aplicar = useAplicarDescuento(pedidoId);
 
   const [tipo, setTipo] = useState<TipoDescuento>('PORCENTAJE');
@@ -36,6 +41,7 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
   // Para MONTO guardamos Gs. directos.
   const [valor, setValor] = useState<string>('10');
   const [motivoId, setMotivoId] = useState<string>('');
+  const [empleadoBeneficiarioId, setEmpleadoBeneficiarioId] = useState<string>('');
   const [observacion, setObservacion] = useState('');
   const [escalado, setEscalado] = useState<EscaladoState | null>(null);
 
@@ -44,20 +50,33 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
     setMotivoId(motivos[0].id);
   }
 
+  const motivoActual = motivos.find((m) => m.id === motivoId) ?? null;
+  const esMotivoEmpleado = motivoActual?.codigoSistema === CODIGO_MOTIVO_DESCUENTO_EMPLEADO;
+  const porcentajeEmpleado = empresa?.configuracion.porcentajeDescuentoEmpleado ?? 50;
+
+  // Si el cajero cambia a un motivo no-empleado, descartamos el beneficiario.
+  if (!esMotivoEmpleado && empleadoBeneficiarioId) {
+    setEmpleadoBeneficiarioId('');
+  }
+
   // ───── Preview del descuento ─────
   const previewMonto = useMemo(() => {
+    if (esMotivoEmpleado) return Math.floor((base * porcentajeEmpleado) / 100);
     const n = Number.parseFloat(valor.replace(',', '.'));
     if (tipo === 'CORTESIA') return base;
     if (!Number.isFinite(n) || n <= 0) return 0;
     if (tipo === 'PORCENTAJE') return Math.floor((base * n) / 100);
     return Math.min(n, base); // MONTO cappeado a la base
-  }, [tipo, valor, base]);
+  }, [tipo, valor, base, esMotivoEmpleado, porcentajeEmpleado]);
 
   const totalConDescuento = Math.max(0, base - previewMonto);
-  const motivoActual = motivos.find((m) => m.id === motivoId) ?? null;
 
   function validar(): string | null {
     if (!motivoId) return 'Elegí un motivo';
+    if (esMotivoEmpleado) {
+      if (!empleadoBeneficiarioId) return 'Elegí el empleado beneficiario';
+      return null;
+    }
     if (tipo === 'CORTESIA') return null;
     const n = Number.parseFloat(valor.replace(',', '.'));
     if (!Number.isFinite(n) || n <= 0) return 'Ingresá un valor mayor a 0';
@@ -69,6 +88,20 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
     supervisorAuth?: { email: string; password: string };
     codigo?: string;
   }): AplicarDescuentoInput {
+    // Motivo del sistema: tipo/valor son ignorados por el backend; mandamos
+    // PORCENTAJE + 0 como placeholder (zod exige enum válido). El % real lo
+    // calcula el backend desde la config de la empresa.
+    if (esMotivoEmpleado) {
+      return {
+        tipo: 'PORCENTAJE',
+        valor: 0,
+        motivoDescuentoId: motivoId,
+        empleadoBeneficiarioId,
+        observacion: observacion.trim() || undefined,
+        supervisorAuth: auth?.supervisorAuth,
+        codigoAutorizacion: auth?.codigo,
+      };
+    }
     let valorWire = 0;
     if (tipo === 'PORCENTAJE') {
       valorWire = Math.round(Number.parseFloat(valor.replace(',', '.')) * 100);
@@ -123,89 +156,8 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
         </div>
 
         <div className="flex-1 space-y-5 overflow-y-auto p-5">
-          {/* Paso 1: Tipo */}
-          <div>
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              1. Tipo de descuento
-            </p>
-            <div className="grid grid-cols-3 gap-2">
-              <TipoBtn
-                active={tipo === 'PORCENTAJE'}
-                icon={<Percent className="h-4 w-4" />}
-                label="%"
-                hint="Porcentaje"
-                onClick={() => setTipo('PORCENTAJE')}
-              />
-              <TipoBtn
-                active={tipo === 'MONTO'}
-                icon={<Wallet className="h-4 w-4" />}
-                label="Gs."
-                hint="Monto fijo"
-                onClick={() => setTipo('MONTO')}
-              />
-              <TipoBtn
-                active={tipo === 'CORTESIA'}
-                icon={<Gift className="h-4 w-4" />}
-                label="Cortesía"
-                hint="100% off"
-                onClick={() => setTipo('CORTESIA')}
-              />
-            </div>
-          </div>
-
-          {/* Paso 2: Presets (solo para PORCENTAJE) */}
-          {tipo === 'PORCENTAJE' && (
-            <div>
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                2. Presets rápidos
-              </p>
-              <div className="grid grid-cols-4 gap-2">
-                {PRESETS_PORCENTAJE.map((p) => {
-                  const active = Number.parseFloat(valor.replace(',', '.')) === p;
-                  return (
-                    <button
-                      key={p}
-                      type="button"
-                      onClick={() => setValor(String(p))}
-                      className={cn(
-                        'rounded-md border py-2 text-sm font-semibold transition-colors',
-                        active
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-input hover:bg-accent',
-                      )}
-                    >
-                      {p}%
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Paso 3: Valor */}
-          {tipo !== 'CORTESIA' && (
-            <Field
-              label={tipo === 'PORCENTAJE' ? '3. Otro porcentaje (%)' : '3. Monto (Gs.)'}
-              hint={
-                tipo === 'PORCENTAJE'
-                  ? 'Aplica sobre el subtotal del pedido'
-                  : 'Se descuenta este monto exacto (cappeado al subtotal)'
-              }
-            >
-              <Input
-                type="number"
-                value={valor}
-                onChange={(e) => setValor(e.target.value)}
-                min={0}
-                max={tipo === 'PORCENTAJE' ? 100 : undefined}
-                step={tipo === 'PORCENTAJE' ? '0.01' : '500'}
-                placeholder={tipo === 'PORCENTAJE' ? '15' : '5000'}
-              />
-            </Field>
-          )}
-
-          {/* Paso 4: Motivo */}
-          <Field label="4. Motivo (obligatorio)">
+          {/* Paso 1: Motivo — primero, porque cambia todo el flujo si es del sistema */}
+          <Field label="1. Motivo (obligatorio)">
             {cargandoMotivos ? (
               <p className="text-xs text-muted-foreground">Cargando motivos…</p>
             ) : motivos.length === 0 ? (
@@ -213,31 +165,150 @@ export function DescuentoModal({ pedidoId, base, onCancel, onAplicado }: Props) 
                 No hay motivos configurados. Pedile al admin que cree motivos en /descuentos.
               </p>
             ) : (
-              <select
-                value={motivoId}
-                onChange={(e) => setMotivoId(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
+              <Select value={motivoId} onChange={(e) => setMotivoId(e.target.value)}>
                 {motivos.map((m) => (
                   <option key={m.id} value={m.id}>
                     {m.nombre}
                     {m.requiereAutorizacion ? ' (escala siempre)' : ''}
                   </option>
                 ))}
-              </select>
+              </Select>
             )}
           </Field>
 
-          {/* Paso 5: Observación */}
-          <Field label="5. Observación (opcional)">
-            <Input
-              type="text"
-              value={observacion}
-              onChange={(e) => setObservacion(e.target.value)}
-              maxLength={500}
-              placeholder="Ej: Cliente frecuente, error en pedido, etc."
-            />
-          </Field>
+          {esMotivoEmpleado ? (
+            <>
+              {/* Selector de empleado beneficiario */}
+              <Field
+                label="2. Empleado beneficiario"
+                hint={`Se aplica ${porcentajeEmpleado}% — máximo 1 descuento por día por empleado`}
+              >
+                {cargandoEmpleados ? (
+                  <p className="text-xs text-muted-foreground">Cargando empleados…</p>
+                ) : empleados.length === 0 ? (
+                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                    No hay empleados habilitados. Marcá un usuario como empleado en /usuarios.
+                  </p>
+                ) : (
+                  <Select
+                    value={empleadoBeneficiarioId}
+                    onChange={(e) => setEmpleadoBeneficiarioId(e.target.value)}
+                  >
+                    <option value="">— Elegir empleado —</option>
+                    {empleados.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.nombreCompleto}
+                      </option>
+                    ))}
+                  </Select>
+                )}
+              </Field>
+
+              <div className="flex items-start gap-2 rounded-md border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                <UserCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  El porcentaje ({porcentajeEmpleado}%) se configura en la sección de empresa. El
+                  cajero no lo puede modificar acá.
+                </span>
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Paso 2: Tipo */}
+              <div>
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  2. Tipo de descuento
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <TipoBtn
+                    active={tipo === 'PORCENTAJE'}
+                    icon={<Percent className="h-4 w-4" />}
+                    label="%"
+                    hint="Porcentaje"
+                    onClick={() => setTipo('PORCENTAJE')}
+                  />
+                  <TipoBtn
+                    active={tipo === 'MONTO'}
+                    icon={<Wallet className="h-4 w-4" />}
+                    label="Gs."
+                    hint="Monto fijo"
+                    onClick={() => setTipo('MONTO')}
+                  />
+                  <TipoBtn
+                    active={tipo === 'CORTESIA'}
+                    icon={<Gift className="h-4 w-4" />}
+                    label="Cortesía"
+                    hint="100% off"
+                    onClick={() => setTipo('CORTESIA')}
+                  />
+                </div>
+              </div>
+
+              {/* Paso 3: Presets (solo para PORCENTAJE) */}
+              {tipo === 'PORCENTAJE' && (
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    3. Presets rápidos
+                  </p>
+                  <div className="grid grid-cols-4 gap-2">
+                    {PRESETS_PORCENTAJE.map((p) => {
+                      const active = Number.parseFloat(valor.replace(',', '.')) === p;
+                      return (
+                        <button
+                          key={p}
+                          type="button"
+                          onClick={() => setValor(String(p))}
+                          className={cn(
+                            'rounded-md border py-2 text-sm font-semibold transition-colors',
+                            active
+                              ? 'border-primary bg-primary text-primary-foreground'
+                              : 'border-input hover:bg-accent',
+                          )}
+                        >
+                          {p}%
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Paso 4: Valor */}
+              {tipo !== 'CORTESIA' && (
+                <Field
+                  label={tipo === 'PORCENTAJE' ? '4. Otro porcentaje (%)' : '4. Monto (Gs.)'}
+                  hint={
+                    tipo === 'PORCENTAJE'
+                      ? 'Aplica sobre el subtotal del pedido'
+                      : 'Se descuenta este monto exacto (cappeado al subtotal)'
+                  }
+                >
+                  <Input
+                    type="number"
+                    value={valor}
+                    onChange={(e) => setValor(e.target.value)}
+                    min={0}
+                    max={tipo === 'PORCENTAJE' ? 100 : undefined}
+                    step={tipo === 'PORCENTAJE' ? '0.01' : '500'}
+                    placeholder={tipo === 'PORCENTAJE' ? '15' : '5000'}
+                  />
+                </Field>
+              )}
+            </>
+          )}
+
+          {/* Observación: oculta para descuento empleado (no aporta) */}
+          {!esMotivoEmpleado && (
+            <Field label="5. Observación (opcional)">
+              <Input
+                type="text"
+                value={observacion}
+                onChange={(e) => setObservacion(e.target.value)}
+                maxLength={500}
+                placeholder="Ej: Cliente frecuente, error en pedido, etc."
+              />
+            </Field>
+          )}
 
           {/* Resumen */}
           <div className="rounded-md border bg-muted/30 p-3 text-sm">

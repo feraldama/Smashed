@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
@@ -165,7 +165,14 @@ function TabMotivos() {
             <li key={m.id} className="flex items-center gap-3 px-4 py-3">
               <Tag className="h-4 w-4 shrink-0 text-muted-foreground" />
               <div className="min-w-0 flex-1">
-                <p className="font-medium">{m.nombre}</p>
+                <p className="flex items-center gap-1.5 font-medium">
+                  {m.nombre}
+                  {m.esSistema && (
+                    <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700 dark:bg-blue-950/40 dark:text-blue-300">
+                      Sistema
+                    </span>
+                  )}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {m.requiereAutorizacion
                     ? 'Siempre requiere autorización de supervisor/código'
@@ -202,6 +209,9 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
   const eliminar = useEliminarMotivo();
   const isPending = crear.isPending || actualizar.isPending || eliminar.isPending;
   const isEdit = Boolean(motivo);
+  // Motivos del sistema (ej. "Descuento empleado"): el backend rechaza cambios
+  // que no sean del campo `activo`. La UI bloquea los otros para no marear al usuario.
+  const esSistema = motivo?.esSistema ?? false;
 
   const [nombre, setNombre] = useState(motivo?.nombre ?? '');
   const [requiereAutorizacion, setRequiereAutorizacion] = useState(
@@ -214,6 +224,17 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    // Motivo del sistema: solo mandamos `activo`. El backend rechaza otros campos.
+    if (esSistema && motivo) {
+      try {
+        await actualizar.mutateAsync({ id: motivo.id, activo });
+        toast.success('Motivo actualizado');
+        onClose();
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Error al guardar');
+      }
+      return;
+    }
     if (!nombre.trim()) return setError('Nombre requerido');
     const orden = Number.parseInt(ordenMenu, 10);
     if (!Number.isFinite(orden) || orden < 0) return setError('Orden inválido');
@@ -276,12 +297,19 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
           }}
           className="space-y-4 p-5"
         >
+          {esSistema && (
+            <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-xs text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+              Motivo del sistema — solo se puede activar / desactivar. El nombre y resto de
+              propiedades los gestiona la aplicación.
+            </div>
+          )}
           <Field label="Nombre" required hint="ej: Cliente frecuente, Cortesía gerencial">
             <Input
-              autoFocus
+              autoFocus={!esSistema}
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               maxLength={100}
+              disabled={esSistema}
             />
           </Field>
           <Field label="Orden" hint="Menor número aparece antes en el dropdown">
@@ -291,6 +319,7 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
               onChange={(e) => setOrdenMenu(e.target.value)}
               min={0}
               max={9999}
+              disabled={esSistema}
             />
           </Field>
           <SwitchField
@@ -298,6 +327,7 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
             description="Si está activado, este motivo SIEMPRE pide supervisor/código aunque el % esté dentro del límite del rol. Para motivos sensibles (cortesía gerencial, error grueso, etc)."
             checked={requiereAutorizacion}
             onCheckedChange={setRequiereAutorizacion}
+            disabled={esSistema}
           />
           <SwitchField
             label="Activo"
@@ -311,7 +341,7 @@ function MotivoFormModal({ motivo, onClose }: { motivo?: MotivoDescuento; onClos
             </div>
           )}
           <div className="flex justify-between gap-2 border-t pt-3">
-            {isEdit ? (
+            {isEdit && !esSistema ? (
               <button
                 type="button"
                 onClick={() => {
@@ -367,7 +397,10 @@ function TabLimites() {
   const [touched, setTouched] = useState(false);
 
   // Hidratar el draft cuando llegan los datos (solo si no se tocó nada).
-  useMemo(() => {
+  // useEffect (no useMemo) para no setear estado durante el render — el
+  // fallback `data ?? []` crea un nuevo `[]` por render mientras data es
+  // undefined, así que con useMemo se disparaba "Too many re-renders".
+  useEffect(() => {
     if (touched) return;
     const inicial: Record<string, LimiteInput> = {};
     for (const rol of ROLES_CONFIGURABLES) {

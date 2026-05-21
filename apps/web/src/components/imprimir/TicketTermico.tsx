@@ -111,6 +111,21 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
             <Row label="IVA 10%" value={formatGsCorto(BigInt(comp.totalIva10))} />
           </>
         )}
+        {comp.pedido && BigInt(comp.pedido.totalDescuento) > 0n && (
+          <>
+            <Row
+              label={`Descuento${
+                comp.pedido.motivoDescuento ? ` (${comp.pedido.motivoDescuento.nombre})` : ''
+              }`}
+              value={`-${formatGsCorto(BigInt(comp.pedido.totalDescuento))}`}
+            />
+            {comp.pedido.empleadoBeneficiario && (
+              <p style={{ margin: 0, fontSize: '10px' }}>
+                Empleado: {comp.pedido.empleadoBeneficiario.nombreCompleto}
+              </p>
+            )}
+          </>
+        )}
         <Row
           label="TOTAL"
           value={formatGsCorto(BigInt(comp.total))}

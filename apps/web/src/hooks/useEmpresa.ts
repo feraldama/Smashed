@@ -23,6 +23,7 @@ export interface Empresa {
     redondearTotales: boolean;
     ivaIncluidoEnPrecio: boolean;
     emitirTicketPorDefecto: boolean;
+    porcentajeDescuentoEmpleado: number;
   };
   _count: {
     sucursales: number;
@@ -49,6 +50,7 @@ export interface ActualizarConfiguracionInput {
   redondearTotales?: boolean;
   ivaIncluidoEnPrecio?: boolean;
   emitirTicketPorDefecto?: boolean;
+  porcentajeDescuentoEmpleado?: number;
 }
 
 export function useEmpresa(opts: { enabled?: boolean } = {}) {

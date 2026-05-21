@@ -213,9 +213,10 @@ export interface PedidoDetalle {
   descuentoTipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA' | null;
   descuentoValor: string;
   descuentoObservacion: string | null;
-  motivoDescuento: { id: string; nombre: string } | null;
+  motivoDescuento: { id: string; nombre: string; codigoSistema: string | null } | null;
   descuentoAplicadoPor: { id: string; nombreCompleto: string } | null;
   descuentoAutorizadoPor: { id: string; nombreCompleto: string } | null;
+  empleadoBeneficiario: { id: string; nombreCompleto: string } | null;
   numeroPager: number | null;
   observaciones: string | null;
   createdAt: string;

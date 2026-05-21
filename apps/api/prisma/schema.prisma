@@ -332,6 +332,13 @@ model MotivoDescuento {
   requiereAutorizacion Boolean @default(false) @map("requiere_autorizacion")
   activo               Boolean @default(true)
   ordenMenu            Int     @default(0) @map("orden_menu")
+  // Motivos creados/gestionados por el sistema (ej. "Descuento empleado"). No
+  // se pueden eliminar ni renombrar desde la UI — viven mientras viva la empresa.
+  esSistema            Boolean @default(false) @map("es_sistema")
+  // Identificador estable para motivos del sistema (ej. "DESCUENTO_EMPLEADO").
+  // Permite buscarlos desde el código sin depender del `nombre` (renombrable).
+  // Null para motivos creados por el usuario.
+  codigoSistema        String? @map("codigo_sistema")
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -340,6 +347,7 @@ model MotivoDescuento {
   pedidos Pedido[]
 
   @@unique([empresaId, nombre])
+  @@unique([empresaId, codigoSistema])
   @@index([empresaId, activo, ordenMenu])
   @@map("motivo_descuento")
 }
@@ -406,6 +414,10 @@ model ConfiguracionEmpresa {
   // Facturación
   ivaIncluidoEnPrecio    Boolean @default(true) @map("iva_incluido_en_precio")
   emitirTicketPorDefecto Boolean @default(true) @map("emitir_ticket_por_defecto")
+
+  // Descuento empleado: porcentaje fijo aplicable cuando el cajero marca la
+  // venta como "descuento empleado" y elige un beneficiario. Entero 0–100.
+  porcentajeDescuentoEmpleado Int @default(50) @map("porcentaje_descuento_empleado")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -534,6 +546,11 @@ model Usuario {
   activo          Boolean @default(true)
   ultimoLogin     DateTime? @map("ultimo_login")
 
+  // Habilita que este usuario aparezca como "empleado beneficiario" en el modal
+  // de descuento empleado. No todos los usuarios del sistema lo son (un
+  // SUPER_ADMIN o un usuario técnico no debería poder consumirlo).
+  esEmpleadoConDescuento Boolean @default(false) @map("es_empleado_con_descuento")
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -550,6 +567,7 @@ model Usuario {
   descuentosAplicados   Pedido[] @relation("PedidoDescuentoAplicado")
   descuentosAutorizados Pedido[] @relation("PedidoDescuentoAutorizado")
   codigosDescuentoCreados CodigoAutorizacionDescuento[] @relation("CodigoDescuentoCreador")
+  pedidosComoBeneficiarioDescuento Pedido[] @relation("PedidoEmpleadoBeneficiario")
 
   @@unique([empresaId, email])
   @@index([empresaId, deletedAt])
@@ -1302,6 +1320,11 @@ model Pedido {
   descuentoAutorizadoPor   Usuario?          @relation("PedidoDescuentoAutorizado", fields: [descuentoAutorizadoPorId], references: [id], onDelete: SetNull)
   codigoAutorizacionId     String?           @map("codigo_autorizacion_id")
   codigoAutorizacion       CodigoAutorizacionDescuento? @relation(fields: [codigoAutorizacionId], references: [id], onDelete: SetNull)
+  // Empleado al que se asignó el descuento empleado (cuando motivo es del sistema).
+  // Sólo se llena si el descuento es de tipo "Descuento empleado". Permite reporte
+  // por beneficiario y validar tope de 1 descuento por día por empleado.
+  empleadoBeneficiarioId   String?           @map("empleado_beneficiario_id")
+  empleadoBeneficiario     Usuario?          @relation("PedidoEmpleadoBeneficiario", fields: [empleadoBeneficiarioId], references: [id], onDelete: SetNull)
 
   // Tiempos para métricas KDS / SLA
   tomadoEn        DateTime? @map("tomado_en")
@@ -1332,6 +1355,7 @@ model Pedido {
   @@index([sucursalId, tipo, estado])
   @@index([clienteId])
   @@index([mesaId])
+  @@index([empleadoBeneficiarioId, createdAt])
   @@map("pedido")
 }
 

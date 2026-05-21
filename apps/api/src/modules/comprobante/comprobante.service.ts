@@ -530,6 +530,18 @@ export async function obtenerComprobante(user: UserCtx, id: string) {
       sucursal: { select: { nombre: true, direccion: true } },
       empresa: { select: { razonSocial: true, ruc: true, dv: true, direccion: true } },
       eventosSifen: { orderBy: { enviadoEn: 'desc' } },
+      // Datos del descuento aplicado al pedido — para mostrar en el ticket
+      // impreso (línea "Descuento ...", beneficiario si es empleado).
+      pedido: {
+        select: {
+          id: true,
+          numero: true,
+          totalDescuento: true,
+          descuentoTipo: true,
+          motivoDescuento: { select: { id: true, nombre: true, codigoSistema: true } },
+          empleadoBeneficiario: { select: { id: true, nombreCompleto: true } },
+        },
+      },
     },
   });
   if (!c) throw Errors.notFound('Comprobante no encontrado');

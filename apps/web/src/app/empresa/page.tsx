@@ -396,8 +396,72 @@ function ConfiguracionCard({ empresa }: { empresa: Empresa }) {
           }}
           disabled={actualizar.isPending}
         />
+        <PorcentajeDescuentoEmpleadoField
+          valor={empresa.configuracion.porcentajeDescuentoEmpleado}
+          onChange={(n) => {
+            void update({ porcentajeDescuentoEmpleado: n });
+          }}
+          disabled={actualizar.isPending}
+        />
       </div>
     </section>
+  );
+}
+
+/** Input numérico 0–100. Commit en blur o Enter (no en cada tecla). */
+function PorcentajeDescuentoEmpleadoField({
+  valor,
+  onChange,
+  disabled,
+}: {
+  valor: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+}) {
+  const [draft, setDraft] = useState(String(valor));
+  // Si cambia el valor del servidor (otro tab, refetch), resincroniza.
+  useEffect(() => {
+    setDraft(String(valor));
+  }, [valor]);
+
+  function commit() {
+    const n = Number.parseInt(draft, 10);
+    if (!Number.isFinite(n) || n < 0 || n > 100) {
+      setDraft(String(valor));
+      return;
+    }
+    if (n !== valor) onChange(n);
+  }
+
+  return (
+    <div className="flex items-start justify-between gap-3 py-2">
+      <div className="flex-1">
+        <p className="text-sm font-medium leading-tight">% de descuento empleado</p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          Se aplica cuando el cajero marca una venta como descuento empleado. Cada empleado puede
+          usarlo 1 vez por día.
+        </p>
+      </div>
+      <div className="flex items-center gap-1">
+        <Input
+          type="number"
+          min={0}
+          max={100}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commit();
+            }
+          }}
+          disabled={disabled}
+          className="w-20 text-right"
+        />
+        <span className="text-sm text-muted-foreground">%</span>
+      </div>
+    </div>
   );
 }
 

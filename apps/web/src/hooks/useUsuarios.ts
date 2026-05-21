@@ -26,6 +26,7 @@ export interface Usuario {
   telefono: string | null;
   rol: Rol;
   activo: boolean;
+  esEmpleadoConDescuento: boolean;
   ultimoLogin: string | null;
   createdAt: string;
   updatedAt: string;
@@ -79,6 +80,7 @@ export interface CrearUsuarioInput {
   documento?: string;
   telefono?: string;
   rol: Rol;
+  esEmpleadoConDescuento?: boolean;
   sucursales: SucursalAsignacionInput[];
 }
 
@@ -89,6 +91,7 @@ export interface ActualizarUsuarioInput {
   telefono?: string | null;
   rol?: Rol;
   activo?: boolean;
+  esEmpleadoConDescuento?: boolean;
   sucursales?: SucursalAsignacionInput[];
 }
 

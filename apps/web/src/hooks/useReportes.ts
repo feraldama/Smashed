@@ -292,6 +292,29 @@ export function useDescuentosListado(rango: RangoFechas, filtros: FiltrosDescuen
   });
 }
 
+// ───── Descuentos por empleado (agregado) ─────
+
+export interface DescuentoPorEmpleado {
+  empleado_id: string;
+  empleado_nombre: string;
+  empleado_rol: string;
+  cantidad_ventas: string;
+  total_descontado: string;
+  base_original: string;
+  total_cobrado: string;
+}
+
+export function useDescuentosPorEmpleado(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'descuentos-por-empleado', rango],
+    queryFn: () =>
+      api<{ empleados: DescuentoPorEmpleado[] }>(
+        `/reportes/ventas/descuentos-por-empleado?${buildQuery(rango)}`,
+      ),
+    select: (d) => d.empleados,
+  });
+}
+
 // ───── Tiempos de cocina (promedios + percentiles) ─────
 
 export interface TiemposCocinaPorSucursal {

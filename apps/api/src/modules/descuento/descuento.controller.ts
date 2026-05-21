@@ -117,3 +117,11 @@ export async function eliminarCodigo(req: Request, res: Response) {
   await service.eliminarCodigo(ctx, id);
   res.status(204).end();
 }
+
+// ───── Empleados beneficiarios (lectura para POS) ─────
+
+export async function listarEmpleadosBeneficiarios(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const empleados = await service.listarEmpleadosBeneficiarios(ctx);
+  res.json({ empleados });
+}
