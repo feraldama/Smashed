@@ -17,6 +17,7 @@ import { useParams } from 'next/navigation';
 import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
+import { AnularComprobanteModal } from '@/components/AnularComprobanteModal';
 import { AuthGate } from '@/components/AuthGate';
 import { CancelarSifenModal } from '@/components/CancelarSifenModal';
 import { EstadoSifenBadge } from '@/components/EstadoSifenBadge';
@@ -69,6 +70,7 @@ function ComprobanteDetalleScreen() {
 
 function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
   const [showCancelar, setShowCancelar] = useState(false);
+  const [showAnular, setShowAnular] = useState(false);
 
   return (
     <div>
@@ -97,7 +99,11 @@ function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
           </div>
         </div>
 
-        <SifenAcciones comp={comp} onPedirCancelacion={() => setShowCancelar(true)} />
+        <SifenAcciones
+          comp={comp}
+          onPedirCancelacion={() => setShowCancelar(true)}
+          onPedirAnulacion={() => setShowAnular(true)}
+        />
       </header>
 
       {comp.motivoRechazoSifen && (
@@ -276,6 +282,15 @@ function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
           onClose={() => setShowCancelar(false)}
         />
       )}
+
+      {showAnular && (
+        <AnularComprobanteModal
+          comprobanteId={comp.id}
+          numeroDocumento={comp.numeroDocumento}
+          aprobadoEnSifen={comp.estadoSifen === 'APROBADO'}
+          onClose={() => setShowAnular(false)}
+        />
+      )}
     </div>
   );
 }
@@ -287,9 +302,11 @@ function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
 function SifenAcciones({
   comp,
   onPedirCancelacion,
+  onPedirAnulacion,
 }: {
   comp: ComprobanteDetalle;
   onPedirCancelacion: () => void;
+  onPedirAnulacion: () => void;
 }) {
   const enviar = useEnviarSifen();
   const consultar = useConsultarEstadoSifen(comp.id);
@@ -303,6 +320,7 @@ function SifenAcciones({
       comp.estadoSifen === 'RECHAZADO');
   const puedeCancelar = comp.estadoSifen === 'APROBADO';
   const puedeConsultar = Boolean(comp.cdc);
+  const puedeAnular = comp.estado !== 'ANULADO';
 
   async function handleEnviar() {
     try {
@@ -345,6 +363,15 @@ function SifenAcciones({
         >
           <Printer className="h-4 w-4" /> Imprimir
         </Link>
+        {puedeAnular && (
+          <button
+            type="button"
+            onClick={onPedirAnulacion}
+            className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200 dark:hover:bg-red-950/50"
+          >
+            <Ban className="h-4 w-4" /> Anular
+          </button>
+        )}
         <span className="rounded-md border border-muted-foreground/20 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
           Los tickets no se envían a SIFEN
         </span>
@@ -403,6 +430,15 @@ function SifenAcciones({
           className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-200"
         >
           <Ban className="h-4 w-4" /> Cancelar en SIFEN
+        </button>
+      )}
+      {puedeAnular && (
+        <button
+          type="button"
+          onClick={onPedirAnulacion}
+          className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200 dark:hover:bg-red-950/50"
+        >
+          <Ban className="h-4 w-4" /> Anular
         </button>
       )}
     </div>

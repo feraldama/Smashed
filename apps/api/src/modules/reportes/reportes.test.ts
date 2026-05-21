@@ -422,7 +422,7 @@ describe('GET /reportes/ventas/descuentos', () => {
     // Setup mínimo de descuentos: motivo + límite ADMIN_EMPRESA = 100%.
     const empresa = await prisma.empresa.findFirstOrThrow();
     await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
-    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
     await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
     const motivo = await prisma.motivoDescuento.create({
       data: { empresaId: empresa.id, nombre: 'Test report descuento' },
@@ -471,7 +471,7 @@ describe('GET /reportes/ventas/descuentos', () => {
     expect(conFiltro.body.descuentos.length).toBe(1);
 
     // Cleanup
-    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
     await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
   });
 });
@@ -740,6 +740,178 @@ describe('Export CSV (?formato=csv)', () => {
     const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
     expect(lineas[0]).toContain('Fecha,Tickets,Total');
     expect(lineas.length).toBeGreaterThan(1);
+  });
+});
+
+describe('GET /reportes/ventas/descuentos-por-empleado', () => {
+  it('agrega cantidad y montos por empleado beneficiario', async () => {
+    await reset();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    // Limpieza + setup: motivo del sistema "Descuento empleado" + límite admin.
+    await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+    const motivo = await prisma.motivoDescuento.upsert({
+      where: {
+        empresaId_codigoSistema: { empresaId: empresa.id, codigoSistema: 'DESCUENTO_EMPLEADO' },
+      },
+      create: {
+        empresaId: empresa.id,
+        nombre: 'Descuento empleado',
+        activo: true,
+        esSistema: true,
+        codigoSistema: 'DESCUENTO_EMPLEADO',
+      },
+      update: { activo: true },
+    });
+    await prisma.limiteDescuentoRol.create({
+      data: { empresaId: empresa.id, rol: 'ADMIN_EMPRESA', maxPorcentaje: 100 },
+    });
+    await prisma.configuracionEmpresa.upsert({
+      where: { empresaId: empresa.id },
+      create: { empresaId: empresa.id, porcentajeDescuentoEmpleado: 50 },
+      update: { porcentajeDescuentoEmpleado: 50 },
+    });
+    // Marcamos al gerente como beneficiario.
+    const gerente = await prisma.usuario.findFirstOrThrow({
+      where: { email: 'gerente.centro@smash.com.py' },
+    });
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: true },
+    });
+
+    const tAdmin = await login(ADMIN);
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${tAdmin}`);
+    const caja = cajas.body.cajas.find((c: { nombre: string }) => c.nombre === 'Caja 1');
+    await request(app)
+      .post(`/cajas/${caja.id}/abrir`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ montoInicial: 100000 });
+
+    // Pedido con descuento empleado al gerente — Coca de Gs. 10.000 → -5.000.
+    const beb = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
+    const pedido = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: beb.id, cantidad: 1 }] });
+    const aplicar = await request(app)
+      .post(`/descuentos/pedidos/${pedido.body.pedido.id}/descuento`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 0,
+        motivoDescuentoId: motivo.id,
+        empleadoBeneficiarioId: gerente.id,
+      });
+    expect(aplicar.status).toBe(200);
+
+    const res = await request(app)
+      .get('/reportes/ventas/descuentos-por-empleado?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.empleados)).toBe(true);
+    expect(res.body.empleados.length).toBe(1);
+
+    const fila = res.body.empleados[0];
+    expect(fila.empleado_id).toBe(gerente.id);
+    expect(fila.cantidad_ventas).toBe('1');
+    expect(fila.total_descontado).toBe('5000');
+    expect(fila.base_original).toBe('10000');
+    expect(fila.total_cobrado).toBe('5000');
+
+    // Cleanup
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: false },
+    });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+  });
+
+  it('excluye pedidos CANCELADO', async () => {
+    await reset();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId: empresa.id } });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+    const motivo = await prisma.motivoDescuento.upsert({
+      where: {
+        empresaId_codigoSistema: { empresaId: empresa.id, codigoSistema: 'DESCUENTO_EMPLEADO' },
+      },
+      create: {
+        empresaId: empresa.id,
+        nombre: 'Descuento empleado',
+        activo: true,
+        esSistema: true,
+        codigoSistema: 'DESCUENTO_EMPLEADO',
+      },
+      update: { activo: true },
+    });
+    await prisma.limiteDescuentoRol.create({
+      data: { empresaId: empresa.id, rol: 'ADMIN_EMPRESA', maxPorcentaje: 100 },
+    });
+    const gerente = await prisma.usuario.findFirstOrThrow({
+      where: { email: 'gerente.centro@smash.com.py' },
+    });
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: true },
+    });
+
+    const tAdmin = await login(ADMIN);
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${tAdmin}`);
+    const caja = cajas.body.cajas.find((c: { nombre: string }) => c.nombre === 'Caja 1');
+    await request(app)
+      .post(`/cajas/${caja.id}/abrir`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ montoInicial: 100000 });
+
+    const beb = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
+    const pedido = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({ tipo: 'MOSTRADOR', items: [{ productoVentaId: beb.id, cantidad: 1 }] });
+    await request(app)
+      .post(`/descuentos/pedidos/${pedido.body.pedido.id}/descuento`)
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 0,
+        motivoDescuentoId: motivo.id,
+        empleadoBeneficiarioId: gerente.id,
+      });
+
+    // Cancelamos el pedido → debe desaparecer del reporte.
+    await prisma.pedido.update({
+      where: { id: pedido.body.pedido.id },
+      data: { estado: 'CANCELADO' },
+    });
+
+    const res = await request(app)
+      .get('/reportes/ventas/descuentos-por-empleado?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    expect(res.body.empleados.length).toBe(0);
+
+    // Cleanup
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: false },
+    });
+    await prisma.motivoDescuento.deleteMany({ where: { empresaId: empresa.id, esSistema: false } });
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId: empresa.id } });
+  });
+
+  it('exporta CSV con headers correctos', async () => {
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/ventas/descuentos-por-empleado?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
+    expect(lineas[0]).toContain('Empleado');
+    expect(lineas[0]).toContain('Total descontado');
   });
 });
 

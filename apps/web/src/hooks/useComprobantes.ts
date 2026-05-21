@@ -190,6 +190,28 @@ export function useEmitirComprobante() {
   });
 }
 
+// ───── Anulación ─────
+
+export function useAnularComprobante(id: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { motivo: string }) =>
+      api<{ comprobante: ComprobanteDetalle }>(`/comprobantes/${id ?? ''}/anular`, {
+        method: 'POST',
+        body: input,
+      }),
+    onSuccess: () => {
+      // Invalidamos lista + detalle + apertura de caja (los movimientos de caja
+      // se borran si la caja sigue abierta) + pedido (puede haber pasado a CANCELADO).
+      void qc.invalidateQueries({ queryKey: ['admin', 'comprobantes'] });
+      if (id) void qc.invalidateQueries({ queryKey: ['admin', 'comprobante', id] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'caja', 'mi-apertura'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'pedido'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'pedidos'] });
+    },
+  });
+}
+
 // ───── Acciones SIFEN ─────
 
 export interface EnviarSifenResponse {

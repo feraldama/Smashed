@@ -77,7 +77,7 @@ async function setLimite(
 async function limpiarConfig(empresaId: string) {
   // Borrar config para empezar cada bloque desde cero.
   await prisma.codigoAutorizacionDescuento.deleteMany({ where: { empresaId } });
-  await prisma.motivoDescuento.deleteMany({ where: { empresaId } });
+  await prisma.motivoDescuento.deleteMany({ where: { empresaId, esSistema: false } });
   await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId } });
 }
 
@@ -659,6 +659,386 @@ describe('Guards adicionales', () => {
   });
 });
 
+// ───────────────────────────────────────────────────────────────────────────
+//  DESCUENTO EMPLEADO — motivo del sistema con flujo dedicado
+// ───────────────────────────────────────────────────────────────────────────
+
+describe('Descuento empleado (motivo del sistema)', () => {
+  let empresaId: string;
+  let motivoEmpleadoId: string;
+  let motivoComunId: string;
+  let cajeroUserId: string;
+  let gerenteUserId: string;
+
+  beforeAll(async () => {
+    empresaId = await getEmpresaId();
+  });
+
+  beforeEach(async () => {
+    await limpiarConfig(empresaId);
+    await resetPedidos();
+
+    // Cajero con tope alto: aislamos los tests del flujo de autorización.
+    await setLimite(empresaId, 'CAJERO', { maxPorcentaje: 100 });
+    await setLimite(empresaId, 'ADMIN_EMPRESA', {
+      maxPorcentaje: 100,
+      puedeAutorizarOtros: true,
+    });
+
+    // Motivo del sistema (preservado por limpiarConfig — upsert defensivo si
+    // por algún motivo no existiera en este entorno) + uno común.
+    const me = await prisma.motivoDescuento.upsert({
+      where: { empresaId_codigoSistema: { empresaId, codigoSistema: 'DESCUENTO_EMPLEADO' } },
+      create: {
+        empresaId,
+        nombre: 'Descuento empleado',
+        requiereAutorizacion: false,
+        activo: true,
+        esSistema: true,
+        codigoSistema: 'DESCUENTO_EMPLEADO',
+      },
+      update: { activo: true, requiereAutorizacion: false },
+    });
+    motivoEmpleadoId = me.id;
+    const mc = await prisma.motivoDescuento.create({
+      data: { empresaId, nombre: 'Cliente frecuente' },
+    });
+    motivoComunId = mc.id;
+
+    // Resolvemos IDs de cajero y gerente (los usa el seed) y marcamos al
+    // gerente como beneficiario válido. Cajero NO está marcado por default.
+    const cajero = await prisma.usuario.findFirstOrThrow({ where: { email: CAJERO.email } });
+    const gerente = await prisma.usuario.findFirstOrThrow({ where: { email: GERENTE.email } });
+    cajeroUserId = cajero.id;
+    gerenteUserId = gerente.id;
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: true },
+    });
+    await prisma.usuario.update({
+      where: { id: cajero.id },
+      data: { esEmpleadoConDescuento: false },
+    });
+
+    // % global del descuento empleado = 50.
+    await prisma.configuracionEmpresa.upsert({
+      where: { empresaId },
+      create: { empresaId, porcentajeDescuentoEmpleado: 50 },
+      update: { porcentajeDescuentoEmpleado: 50 },
+    });
+  });
+
+  it('cajero sin límite de descuento puede aplicar descuento empleado (sin escalado)', async () => {
+    // Setup específico: borrar el límite del cajero — vuelve al default (0%).
+    // El descuento empleado debe bypassear esta matriz y no pedir autorización.
+    await prisma.limiteDescuentoRol.deleteMany({ where: { empresaId, rol: 'CAJERO' } });
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 0,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.pedido.totalDescuento).toBe('35000');
+    expect(res.body.pedido.descuentoAutorizadoPorId).toBeNull();
+  });
+
+  it('aplica el % de config y persiste empleadoBeneficiarioId', async () => {
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    expect(p.total).toBe('70000');
+
+    // Mandamos valor 1500 (=15%) para verificar que es ignorado y se usa el 50% de config.
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 1500,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.pedido.totalDescuento).toBe('35000'); // 50% de 70000
+    expect(res.body.pedido.total).toBe('35000');
+    expect(res.body.pedido.empleadoBeneficiarioId).toBe(gerenteUserId);
+    expect(res.body.pedido.descuentoTipo).toBe('PORCENTAJE');
+    // valorEfectivo = 50 * 100 = 5000
+    expect(res.body.pedido.descuentoValor).toBe('5000');
+  });
+
+  it('respeta % aunque cambie la config (snapshot al aplicar)', async () => {
+    await prisma.configuracionEmpresa.update({
+      where: { empresaId },
+      data: { porcentajeDescuentoEmpleado: 30 },
+    });
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 9999,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.pedido.totalDescuento).toBe('21000'); // 30% de 70000
+  });
+
+  it('falta empleadoBeneficiarioId → 400 validación', async () => {
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('empleado sin esEmpleadoConDescuento → 400', async () => {
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    // cajeroUserId NO está marcado como empleado con descuento.
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: cajeroUserId,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('motivo NO empleado + empleadoBeneficiarioId → 400', async () => {
+    const token = await login(CAJERO);
+    const p = await crearPedidoTest(token);
+    const res = await request(app)
+      .post(`/descuentos/pedidos/${p.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 500,
+        motivoDescuentoId: motivoComunId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('tope diario: segundo intento del mismo empleado en el día → 409', async () => {
+    const token = await login(CAJERO);
+    const p1 = await crearPedidoTest(token);
+    const r1 = await request(app)
+      .post(`/descuentos/pedidos/${p1.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(r1.status).toBe(200);
+
+    const p2 = await crearPedidoTest(token);
+    const r2 = await request(app)
+      .post(`/descuentos/pedidos/${p2.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(r2.status).toBe(409);
+  });
+
+  it('pedido CANCELADO no consume cupo del día', async () => {
+    const token = await login(CAJERO);
+    const p1 = await crearPedidoTest(token);
+    await request(app)
+      .post(`/descuentos/pedidos/${p1.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    await prisma.pedido.update({
+      where: { id: p1.id },
+      data: { estado: 'CANCELADO' satisfies EstadoPedido },
+    });
+
+    const p2 = await crearPedidoTest(token);
+    const r2 = await request(app)
+      .post(`/descuentos/pedidos/${p2.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(r2.status).toBe(200);
+  });
+
+  it('remover descuento libera el cupo del día', async () => {
+    const token = await login(CAJERO);
+    const p1 = await crearPedidoTest(token);
+    await request(app)
+      .post(`/descuentos/pedidos/${p1.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    const del = await request(app)
+      .delete(`/descuentos/pedidos/${p1.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(del.status).toBe(200);
+
+    // Verificar que se limpió empleadoBeneficiarioId.
+    const tras = await prisma.pedido.findUniqueOrThrow({ where: { id: p1.id } });
+    expect(tras.empleadoBeneficiarioId).toBeNull();
+
+    // Y que se puede aplicar de nuevo (al mismo empleado, otro pedido).
+    const p2 = await crearPedidoTest(token);
+    const r2 = await request(app)
+      .post(`/descuentos/pedidos/${p2.id}/descuento`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'PORCENTAJE',
+        valor: 5000,
+        motivoDescuentoId: motivoEmpleadoId,
+        empleadoBeneficiarioId: gerenteUserId,
+      });
+    expect(r2.status).toBe(200);
+  });
+});
+
+describe('Motivo del sistema — protección de CRUD', () => {
+  let empresaId: string;
+  let motivoSistemaId: string;
+  let motivoComunId: string;
+
+  beforeAll(async () => {
+    empresaId = await getEmpresaId();
+  });
+
+  beforeEach(async () => {
+    await limpiarConfig(empresaId);
+    await setLimite(empresaId, 'ADMIN_EMPRESA', { maxPorcentaje: 100 });
+    const sys = await prisma.motivoDescuento.upsert({
+      where: { empresaId_codigoSistema: { empresaId, codigoSistema: 'DESCUENTO_EMPLEADO' } },
+      create: {
+        empresaId,
+        nombre: 'Descuento empleado',
+        activo: true,
+        esSistema: true,
+        codigoSistema: 'DESCUENTO_EMPLEADO',
+      },
+      update: { activo: true },
+    });
+    motivoSistemaId = sys.id;
+    const com = await prisma.motivoDescuento.create({
+      data: { empresaId, nombre: 'Común' },
+    });
+    motivoComunId = com.id;
+  });
+
+  it('PATCH motivo del sistema cambiando nombre → 409', async () => {
+    const t = await login(ADMIN);
+    const r = await request(app)
+      .patch(`/descuentos/motivos/${motivoSistemaId}`)
+      .set('Authorization', `Bearer ${t}`)
+      .send({ nombre: 'Renombrado' });
+    expect(r.status).toBe(409);
+  });
+
+  it('PATCH motivo del sistema cambiando solo activo → 200', async () => {
+    const t = await login(ADMIN);
+    const r = await request(app)
+      .patch(`/descuentos/motivos/${motivoSistemaId}`)
+      .set('Authorization', `Bearer ${t}`)
+      .send({ activo: false });
+    expect(r.status).toBe(200);
+    expect(r.body.motivo.activo).toBe(false);
+  });
+
+  it('DELETE motivo del sistema → 409', async () => {
+    const t = await login(ADMIN);
+    const r = await request(app)
+      .delete(`/descuentos/motivos/${motivoSistemaId}`)
+      .set('Authorization', `Bearer ${t}`);
+    expect(r.status).toBe(409);
+  });
+
+  it('DELETE motivo común → 204', async () => {
+    const t = await login(ADMIN);
+    const r = await request(app)
+      .delete(`/descuentos/motivos/${motivoComunId}`)
+      .set('Authorization', `Bearer ${t}`);
+    expect(r.status).toBe(204);
+  });
+});
+
+describe('GET /descuentos/empleados-beneficiarios', () => {
+  beforeEach(async () => {
+    // No tocamos limpiarConfig: este endpoint sólo lee de Usuario.
+    // Marcamos el gerente como empleado y el cajero como NO.
+    const gerente = await prisma.usuario.findFirstOrThrow({ where: { email: GERENTE.email } });
+    const cajero = await prisma.usuario.findFirstOrThrow({ where: { email: CAJERO.email } });
+    await prisma.usuario.update({
+      where: { id: gerente.id },
+      data: { esEmpleadoConDescuento: true },
+    });
+    await prisma.usuario.update({
+      where: { id: cajero.id },
+      data: { esEmpleadoConDescuento: false },
+    });
+  });
+
+  it('CAJERO puede listar (sin permisos de gestión)', async () => {
+    const t = await login(CAJERO);
+    const r = await request(app)
+      .get('/descuentos/empleados-beneficiarios')
+      .set('Authorization', `Bearer ${t}`);
+    expect(r.status).toBe(200);
+    expect(Array.isArray(r.body.empleados)).toBe(true);
+    const emails = r.body.empleados.map((e: { nombreCompleto: string }) => e.nombreCompleto);
+    expect(emails.length).toBeGreaterThan(0);
+  });
+
+  it('solo retorna usuarios con flag esEmpleadoConDescuento=true y activos', async () => {
+    const t = await login(ADMIN);
+    const r = await request(app)
+      .get('/descuentos/empleados-beneficiarios')
+      .set('Authorization', `Bearer ${t}`);
+    expect(r.status).toBe(200);
+    const ids = (r.body.empleados as { id: string }[]).map((e) => e.id);
+
+    // Recolectar IDs reales para verificar.
+    const gerente = await prisma.usuario.findFirstOrThrow({ where: { email: GERENTE.email } });
+    const cajero = await prisma.usuario.findFirstOrThrow({ where: { email: CAJERO.email } });
+    expect(ids).toContain(gerente.id);
+    expect(ids).not.toContain(cajero.id);
+  });
+});
+
 beforeAll(async () => {
   await prisma.$connect();
 });
@@ -667,5 +1047,10 @@ afterAll(async () => {
   const empresaId = await getEmpresaId();
   await limpiarConfig(empresaId);
   await resetPedidos();
+  // Restaurar flag para no afectar otros tests del repo.
+  await prisma.usuario.updateMany({
+    where: { empresaId },
+    data: { esEmpleadoConDescuento: false },
+  });
   await prisma.$disconnect();
 });
