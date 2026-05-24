@@ -482,6 +482,12 @@ export const PEDIDO_INCLUDE_PARA_CONFIRMAR = {
           comboGrupoOpcion: { select: { productoVentaId: true } },
         },
       },
+      modificadores: {
+        select: {
+          modificadorOpcionId: true,
+          modificadorOpcion: { select: { productoVentaId: true } },
+        },
+      },
     },
   },
 } satisfies Prisma.PedidoInclude;
@@ -526,6 +532,19 @@ export async function aplicarConfirmacionInline(
       }
     } else {
       const subConsumo = await expandirReceta(tx, item.productoVentaId, item.cantidad);
+      for (const [insumoId, cant] of subConsumo) {
+        consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
+      }
+    }
+
+    // Modificadores vinculados a un ProductoVenta (típicamente sub-preparaciones
+    // como "Cheddar — porción") descuentan stock de su receta, multiplicado
+    // por la cantidad del item. Opciones sin productoVenta (ej. "sin sal") no
+    // descuentan nada.
+    for (const mod of item.modificadores) {
+      const modProdId = mod.modificadorOpcion.productoVentaId;
+      if (!modProdId) continue;
+      const subConsumo = await expandirReceta(tx, modProdId, item.cantidad);
       for (const [insumoId, cant] of subConsumo) {
         consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
       }

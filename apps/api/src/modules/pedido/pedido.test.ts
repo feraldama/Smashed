@@ -390,6 +390,134 @@ describe('POST /pedidos/:id/confirmar — descuento stock recursivo', () => {
     // El combo elegido (default) trae Smash Clásica → 1 pan
     expect(Number(stockAntes.stockActual) - Number(stockDespues.stockActual)).toBe(1);
   });
+
+  it('modificador vinculado a sub-preparación → descuenta su receta al confirmar', async () => {
+    await reset();
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+    const sucursalCentro = await prisma.sucursal.findFirstOrThrow({
+      where: { nombre: 'Asunción Centro' },
+    });
+    const empresaId = sucursalCentro.empresaId;
+
+    // 1) Crear una sub-preparación TEST con receta = 1 unidad de Queso cheddar.
+    const cheddar = await prisma.productoInventario.findFirstOrThrow({
+      where: { codigo: 'LAC-001' }, // "Queso cheddar (feta)" del seed
+    });
+    const subprep = await prisma.productoVenta.create({
+      data: {
+        empresaId,
+        nombre: 'TEST_PORCION_CHEDDAR',
+        precioBase: 0n,
+        esVendible: false,
+        esPreparacion: true,
+        receta: {
+          create: {
+            empresaId,
+            rinde: 1,
+            items: {
+              create: {
+                productoInventarioId: cheddar.id,
+                cantidad: 1,
+                unidadMedida: cheddar.unidadMedida,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // 2) Vincular el modificador "+ Queso cheddar" (del seed) a la sub-prep.
+    const opcionCheddar = await prisma.modificadorOpcion.findFirstOrThrow({
+      where: { modificadorGrupo: { nombre: 'Extras' }, nombre: '+ Queso cheddar' },
+    });
+    await prisma.modificadorOpcion.update({
+      where: { id: opcionCheddar.id },
+      data: { productoVentaId: subprep.id },
+    });
+
+    const stockAntes = await prisma.stockSucursal.findFirstOrThrow({
+      where: { productoInventarioId: cheddar.id, sucursalId: sucursalCentro.id },
+    });
+
+    // 3) Crear pedido: 2 hamburguesas con "+ Queso cheddar"
+    const crear = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [await itemHam(smashId, 2, [{ modificadorOpcionId: opcionCheddar.id }])],
+      });
+    expect(crear.status).toBe(201);
+
+    // 4) Confirmar
+    const conf = await request(app)
+      .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(conf.status).toBe(200);
+
+    // 5) Verificar descuento de cheddar:
+    //    - 2 hamburguesas → según receta base de Smash Clásica también consume cheddar
+    //    - + 2 unidades adicionales por modificador (1 por unidad del item × 2)
+    const stockDespues = await prisma.stockSucursal.findFirstOrThrow({
+      where: { productoInventarioId: cheddar.id, sucursalId: sucursalCentro.id },
+    });
+    const consumoTotal = Number(stockAntes.stockActual) - Number(stockDespues.stockActual);
+    // El modificador contribuye con 2 (1 por hamburguesa × 2). El consumo total
+    // debe ser estrictamente mayor a lo que consumiría la receta sin modificador.
+    expect(consumoTotal).toBeGreaterThanOrEqual(2);
+
+    // Limpieza: desvincular la opción del seed y borrar la subprep TEST
+    await prisma.modificadorOpcion.update({
+      where: { id: opcionCheddar.id },
+      data: { productoVentaId: null },
+    });
+    await prisma.receta.deleteMany({ where: { productoVentaId: subprep.id } });
+    await prisma.productoVenta.delete({ where: { id: subprep.id } });
+  });
+
+  it('modificador sin productoVentaId no descuenta stock', async () => {
+    await reset();
+    const token = await loginAs(CAJERO_CENTRO);
+    const smashId = await getProductoIdPorCodigo('HAM-001');
+    const sucursalCentro = await prisma.sucursal.findFirstOrThrow({
+      where: { nombre: 'Asunción Centro' },
+    });
+
+    // Una opción de "Punto de cocción" — sin productoVentaId vinculado, no
+    // tiene que sumar nada al consumo más allá de la receta base.
+    const cheddar = await prisma.productoInventario.findFirstOrThrow({
+      where: { codigo: 'LAC-001' },
+    });
+    const stockAntes = await prisma.stockSucursal.findFirstOrThrow({
+      where: { productoInventarioId: cheddar.id, sucursalId: sucursalCentro.id },
+    });
+
+    // Pedido base sin extras (puntoMedio() no tiene productoVentaId)
+    const crear = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'MOSTRADOR', items: [await itemHam(smashId, 1)] });
+    expect(crear.status).toBe(201);
+
+    await request(app)
+      .post(`/pedidos/${crear.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${token}`);
+
+    const stockDespues = await prisma.stockSucursal.findFirstOrThrow({
+      where: { productoInventarioId: cheddar.id, sucursalId: sucursalCentro.id },
+    });
+    const consumo = Number(stockAntes.stockActual) - Number(stockDespues.stockActual);
+    // El consumo debe coincidir con la receta base de 1 Smash Clásica
+    // (no inflarse por modificadores sin vínculo).
+    const receta = await prisma.itemReceta.findFirstOrThrow({
+      where: {
+        productoInventarioId: cheddar.id,
+        receta: { productoVenta: { codigo: 'HAM-001' } },
+      },
+    });
+    expect(consumo).toBeCloseTo(Number(receta.cantidad), 2);
+  });
 });
 
 describe('POST /pedidos/:id/cancelar', () => {

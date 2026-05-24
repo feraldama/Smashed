@@ -11,6 +11,14 @@ export interface ModificadorOpcion {
   precioExtra: string; // BigInt serializado
   orden: number;
   activo: boolean;
+  productoVentaId: string | null;
+  productoVenta: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    esPreparacion: boolean;
+    activo: boolean;
+  } | null;
 }
 
 export interface ModificadorGrupo {
@@ -65,6 +73,7 @@ export interface OpcionInput {
   precioExtra?: number;
   orden?: number;
   activo?: boolean;
+  productoVentaId?: string | null;
 }
 
 export interface CrearGrupoInput {

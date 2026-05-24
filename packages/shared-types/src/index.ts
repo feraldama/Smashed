@@ -101,6 +101,12 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
     defaults: ROLES_ADMIN,
   },
   { path: '/recetas', label: 'Recetas', grupo: 'Catálogo', defaults: ROLES_ADMIN },
+  {
+    path: '/subpreparaciones',
+    label: 'Sub-preparaciones',
+    grupo: 'Catálogo',
+    defaults: ROLES_ADMIN,
+  },
 
   // Inventario
   { path: '/insumos', label: 'Insumos', grupo: 'Inventario', defaults: ROLES_ADMIN },

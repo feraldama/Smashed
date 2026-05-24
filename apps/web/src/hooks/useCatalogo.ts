@@ -30,6 +30,7 @@ export interface ProductoListado {
   sectorComanda: string | null;
   esCombo: boolean;
   esVendible: boolean;
+  esPreparacion: boolean;
   tienePrecioSucursal: boolean;
   /** True si el producto tiene al menos un grupo de modificadores vinculado.
    * El POS lo usa para decidir si abrir el modal de configuración antes de añadir al carrito. */

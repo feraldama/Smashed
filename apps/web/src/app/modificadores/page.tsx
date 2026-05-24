@@ -3,7 +3,9 @@
 import {
   ChevronDown,
   ChevronRight,
+  FlaskConical,
   Loader2,
+  Package,
   Pencil,
   Plus,
   Search,
@@ -347,6 +349,26 @@ function OpcionRow({
         {opcion.orden}
       </span>
       <span className="flex-1 truncate">{opcion.nombre}</span>
+      {opcion.productoVenta ? (
+        <span
+          className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
+          title={`Descuenta stock según la receta de "${opcion.productoVenta.nombre}"`}
+        >
+          {opcion.productoVenta.esPreparacion ? (
+            <FlaskConical className="h-3 w-3" />
+          ) : (
+            <Package className="h-3 w-3" />
+          )}
+          <span className="max-w-[10rem] truncate">{opcion.productoVenta.nombre}</span>
+        </span>
+      ) : (
+        <span
+          className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-300"
+          title="Esta opción no descuenta stock al vender"
+        >
+          Sin stock
+        </span>
+      )}
       {!opcion.activo && (
         <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase text-muted-foreground">
           Inactiva

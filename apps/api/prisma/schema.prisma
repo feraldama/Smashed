@@ -102,6 +102,18 @@ enum TipoMovimientoStock {
   SALIDA_CONSUMO_INTERNO
 }
 
+// Modo de gestión de stock de una sub-preparación con receta:
+//  - CALCULADA: no tiene stock propio. Al vender un producto que la usa, se
+//    expande recursivamente hasta los insumos crudos y se descuentan esos.
+//    Es el comportamiento default e histórico.
+//  - LOTE: la sub-preparación se "produce" de antemano en cantidad fija (1L de
+//    salsa, 30 medallones). Tiene stock real vía un ProductoInventario espejo.
+//    Al vender, se descuenta del lote preparado, no se expande a insumos crudos.
+enum ModoStockReceta {
+  CALCULADA
+  LOTE
+}
+
 enum EstadoTransferencia {
   PENDIENTE
   APROBADA
@@ -802,6 +814,8 @@ model ProductoInventario {
   movimientosStock   MovimientoStock[]
   itemsTransferencia ItemTransferencia[]
   itemsCompra        ItemCompra[]
+  // Recetas de sub-preparaciones en modo LOTE que usan este insumo como espejo.
+  recetasEspejo      Receta[]          @relation("RecetaEspejo")
 
   @@unique([empresaId, codigoBarras])
   @@unique([empresaId, codigo])
@@ -873,6 +887,8 @@ model ProductoVenta {
   promociones        PromocionProducto[]
   // Si este producto es una sub-preparación, aparece como insumo en otras recetas
   itemsRecetaSubProd ItemReceta[] @relation("SubProductoReceta")
+  // Opciones de modificadores vinculadas a este producto (para descuento de stock).
+  modificadorOpciones ModificadorOpcion[] @relation("ModificadorProducto")
 
   @@unique([empresaId, codigo])
   @@unique([empresaId, codigoBarras])
@@ -1024,6 +1040,17 @@ model Receta {
   rinde           Decimal  @default(1) @db.Decimal(10, 3)
   notas           String?
 
+  // Modo de gestión de stock — sólo relevante para sub-preparaciones (esPreparacion=true).
+  // En CALCULADA (default), la receta se expande hasta insumos crudos al vender.
+  // En LOTE, la subprep tiene un ProductoInventario "espejo" con stock real
+  // que se produce de antemano. Ver enum ModoStockReceta.
+  modoStock              ModoStockReceta @default(CALCULADA) @map("modo_stock")
+  // Espejo en inventario para modo LOTE — al producir el lote, suma acá; al
+  // vender un producto que usa esta subprep, descuenta de acá en vez de
+  // recursar hasta insumos crudos.
+  productoInventarioId   String?        @map("producto_inventario_id")
+  productoInventarioEspejo ProductoInventario? @relation("RecetaEspejo", fields: [productoInventarioId], references: [id], onDelete: SetNull)
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -1031,6 +1058,7 @@ model Receta {
   items ItemReceta[]
 
   @@index([empresaId, deletedAt])
+  @@index([productoInventarioId])
   @@map("receta")
 }
 
@@ -1173,12 +1201,21 @@ model ModificadorOpcion {
   orden       Int     @default(0)
   activo      Boolean @default(true)
 
+  // Vínculo opcional a un ProductoVenta (idealmente esPreparacion=true, ej.
+  // "Cheddar — porción") para descontar stock al confirmar el pedido. Si es
+  // null, la opción no descuenta nada (caso: "sin sal", "extra picante" sin
+  // costo de insumo). Al vender, se expande recursivamente la receta del
+  // producto vinculado, multiplicado por la cantidad del item del pedido.
+  productoVentaId String?        @map("producto_venta_id")
+  productoVenta   ProductoVenta? @relation("ModificadorProducto", fields: [productoVentaId], references: [id], onDelete: SetNull)
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   itemsPedidoMod ItemPedidoModificador[]
 
   @@index([modificadorGrupoId])
+  @@index([productoVentaId])
   @@map("modificador_opcion")
 }
 

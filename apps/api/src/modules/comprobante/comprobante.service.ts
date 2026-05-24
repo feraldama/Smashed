@@ -18,6 +18,7 @@ import {
   aplicarCancelacionInline,
   aplicarConfirmacionInline,
   obtenerPedidoParaKds,
+  PEDIDO_INCLUDE_PARA_CONFIRMAR,
 } from '../pedido/pedido.service.js';
 
 import type {
@@ -287,18 +288,7 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
         if (estadoOriginal === EstadoPedido.PENDIENTE) {
           const pedidoParaConfirmar = await tx.pedido.findUniqueOrThrow({
             where: { id: pedido.id },
-            include: {
-              items: {
-                include: {
-                  combosOpcion: {
-                    select: {
-                      comboGrupoOpcionId: true,
-                      comboGrupoOpcion: { select: { productoVentaId: true } },
-                    },
-                  },
-                },
-              },
-            },
+            include: PEDIDO_INCLUDE_PARA_CONFIRMAR,
           });
           await aplicarConfirmacionInline(tx, user, pedidoParaConfirmar);
         }

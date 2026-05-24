@@ -4,8 +4,9 @@ import { Loader2, Save, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { toast } from '@/components/Toast';
-import { Field, Input } from '@/components/ui/Input';
-import { SwitchField } from '@/components/ui/Switch';
+import { Field, Input, Select } from '@/components/ui/Input';
+import { Switch, SwitchField } from '@/components/ui/Switch';
+import { useProductos } from '@/hooks/useCatalogo';
 import {
   type ModificadorOpcion,
   useActualizarOpcion,
@@ -30,7 +31,14 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
   const [precioExtra, setPrecioExtra] = useState(opcion ? String(opcion.precioExtra) : '0');
   const [orden, setOrden] = useState(String(opcion?.orden ?? 0));
   const [activo, setActivo] = useState(opcion?.activo ?? true);
+  const [productoVentaId, setProductoVentaId] = useState<string>(opcion?.productoVentaId ?? '');
+  const [soloSubprep, setSoloSubprep] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Incluir no-vendibles (las sub-preparaciones se excluyen del listado default).
+  const { data: productos = [], isLoading: loadingProductos } = useProductos({
+    incluirNoVendibles: true,
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,6 +50,7 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
     if (Number.isNaN(ord) || ord < 0) return setError('Orden debe ser ≥ 0');
 
     try {
+      const productoVentaIdValue = productoVentaId.trim() === '' ? null : productoVentaId;
       if (opcion) {
         await actualizar.mutateAsync({
           opcionId: opcion.id,
@@ -49,6 +58,7 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
           precioExtra: precio,
           orden: ord,
           activo,
+          productoVentaId: productoVentaIdValue,
         });
         toast.success('Opción actualizada');
       } else {
@@ -57,6 +67,7 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
           precioExtra: precio,
           orden: ord,
           activo,
+          productoVentaId: productoVentaIdValue,
         });
         toast.success('Opción creada');
       }
@@ -139,6 +150,48 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
               checked={activo}
               onCheckedChange={setActivo}
             />
+
+            <div className="rounded-md border bg-muted/10 p-3">
+              <div className="mb-2 flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Stock al vender
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-muted-foreground">Solo sub-preparaciones</span>
+                  <Switch
+                    size="sm"
+                    checked={soloSubprep}
+                    onCheckedChange={setSoloSubprep}
+                    aria-label="Filtrar solo sub-preparaciones"
+                  />
+                </div>
+              </div>
+              <Field
+                label="Producto vinculado"
+                hint={
+                  productoVentaId
+                    ? 'Al vender un ítem con esta opción, se descontará el stock según la receta del producto vinculado, multiplicado por la cantidad del ítem.'
+                    : 'Sin vínculo: la opción no descuenta stock (ej: "sin sal", "extra picante").'
+                }
+              >
+                <Select
+                  value={productoVentaId}
+                  onChange={(e) => setProductoVentaId(e.target.value)}
+                  disabled={loadingProductos}
+                >
+                  <option value="">— Sin descuento de stock —</option>
+                  {productos
+                    .filter((p) => (soloSubprep ? p.esPreparacion : true))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.esPreparacion ? '🧪 ' : ''}
+                        {p.nombre}
+                        {p.codigo ? ` (${p.codigo})` : ''}
+                      </option>
+                    ))}
+                </Select>
+              </Field>
+            </div>
 
             {error && (
               <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">

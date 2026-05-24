@@ -30,6 +30,20 @@ async function getGrupoOwned(empresaId: string, grupoId: string) {
   return grupo;
 }
 
+async function assertProductoVentaOwned(empresaId: string, productoVentaId: string) {
+  const prod = await prisma.productoVenta.findFirst({
+    where: { id: productoVentaId, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!prod) throw Errors.notFound('Producto vinculado no encontrado');
+}
+
+const opcionInclude = {
+  productoVenta: {
+    select: { id: true, nombre: true, codigo: true, esPreparacion: true, activo: true },
+  },
+} as const;
+
 // ═════════════════════════════════════════════════════════════════════════
 //  GRUPOS
 // ═════════════════════════════════════════════════════════════════════════
@@ -44,7 +58,7 @@ export async function listarGrupos(user: UserCtx, q: { busqueda?: string }) {
     },
     orderBy: { nombre: 'asc' },
     include: {
-      opciones: { orderBy: { orden: 'asc' } },
+      opciones: { orderBy: { orden: 'asc' }, include: opcionInclude },
       _count: { select: { productosVentaAplicados: true } },
     },
   });
@@ -56,7 +70,7 @@ export async function obtenerGrupo(user: UserCtx, grupoId: string) {
   const grupo = await prisma.modificadorGrupo.findFirst({
     where: { id: grupoId, empresaId, deletedAt: null },
     include: {
-      opciones: { orderBy: { orden: 'asc' } },
+      opciones: { orderBy: { orden: 'asc' }, include: opcionInclude },
       productosVentaAplicados: {
         include: {
           productoVenta: { select: { id: true, codigo: true, nombre: true } },
@@ -76,6 +90,14 @@ export async function crearGrupo(user: UserCtx, input: CrearGrupoInput) {
   });
   if (dup) throw Errors.conflict(`Ya existe un grupo "${input.nombre}"`);
 
+  // Validar pertenencia de productos vinculados en las opciones iniciales.
+  const productoIds = (input.opciones ?? [])
+    .map((o) => o.productoVentaId)
+    .filter((id): id is string => !!id);
+  for (const id of new Set(productoIds)) {
+    await assertProductoVentaOwned(empresaId, id);
+  }
+
   return prisma.modificadorGrupo.create({
     data: {
       empresaId,
@@ -92,12 +114,13 @@ export async function crearGrupo(user: UserCtx, input: CrearGrupoInput) {
                 precioExtra: BigInt(o.precioExtra ?? 0),
                 orden: o.orden ?? idx + 1,
                 activo: o.activo ?? true,
+                productoVentaId: o.productoVentaId ?? null,
               })),
             },
           }
         : {}),
     },
-    include: { opciones: { orderBy: { orden: 'asc' } } },
+    include: { opciones: { orderBy: { orden: 'asc' }, include: opcionInclude } },
   });
 }
 
@@ -115,7 +138,7 @@ export async function actualizarGrupo(user: UserCtx, grupoId: string, input: Act
   return prisma.modificadorGrupo.update({
     where: { id: grupoId },
     data: input,
-    include: { opciones: { orderBy: { orden: 'asc' } } },
+    include: { opciones: { orderBy: { orden: 'asc' }, include: opcionInclude } },
   });
 }
 
@@ -142,6 +165,10 @@ export async function crearOpcion(user: UserCtx, grupoId: string, input: CrearOp
   const empresaId = requireEmpresa(user);
   await getGrupoOwned(empresaId, grupoId);
 
+  if (input.productoVentaId) {
+    await assertProductoVentaOwned(empresaId, input.productoVentaId);
+  }
+
   return prisma.modificadorOpcion.create({
     data: {
       modificadorGrupoId: grupoId,
@@ -149,7 +176,9 @@ export async function crearOpcion(user: UserCtx, grupoId: string, input: CrearOp
       precioExtra: BigInt(input.precioExtra ?? 0),
       orden: input.orden ?? 0,
       activo: input.activo ?? true,
+      productoVentaId: input.productoVentaId ?? null,
     },
+    include: opcionInclude,
   });
 }
 
@@ -167,6 +196,10 @@ export async function actualizarOpcion(
   });
   if (!opcion) throw Errors.notFound('Opción no encontrada');
 
+  if (input.productoVentaId) {
+    await assertProductoVentaOwned(empresaId, input.productoVentaId);
+  }
+
   return prisma.modificadorOpcion.update({
     where: { id: opcionId },
     data: {
@@ -174,7 +207,11 @@ export async function actualizarOpcion(
       ...(input.precioExtra !== undefined ? { precioExtra: BigInt(input.precioExtra) } : {}),
       ...(input.orden !== undefined ? { orden: input.orden } : {}),
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
+      ...(input.productoVentaId !== undefined
+        ? { productoVentaId: input.productoVentaId ?? null }
+        : {}),
     },
+    include: opcionInclude,
   });
 }
 

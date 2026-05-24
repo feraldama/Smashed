@@ -92,6 +92,7 @@ export async function listarProductos(args: {
         tiempoPrepSegundos: true,
         esCombo: true,
         esVendible: true,
+        esPreparacion: true,
         // Sólo necesitamos saber si tiene grupos vinculados (para que el POS
         // sepa si abrir el modal de configuración). Un count basta.
         _count: { select: { modificadorGrupos: true } },

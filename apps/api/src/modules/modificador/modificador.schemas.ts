@@ -6,6 +6,9 @@ const opcionBaseInput = z.object({
   precioExtra: z.number().int().min(0).max(99_999_999).optional(),
   orden: z.number().int().min(0).max(9999).optional(),
   activo: z.boolean().optional(),
+  // Vínculo opcional a un ProductoVenta para descuento de stock al vender.
+  // null explícito desvincula; undefined deja como está (en update).
+  productoVentaId: z.string().cuid().nullable().optional(),
 });
 
 export const crearGrupoInput = z
@@ -46,6 +49,7 @@ export const actualizarOpcionInput = z.object({
   precioExtra: z.number().int().min(0).max(99_999_999).optional(),
   orden: z.number().int().min(0).max(9999).optional(),
   activo: z.boolean().optional(),
+  productoVentaId: z.string().cuid().nullable().optional(),
 });
 
 export const vincularProductoInput = z.object({

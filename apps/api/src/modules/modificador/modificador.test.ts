@@ -205,6 +205,69 @@ describe('POST/PATCH/DELETE /modificadores/:id/opciones', () => {
     expect(res.body.opcion.orden).toBe(3);
   });
 
+  it('crea opción con productoVentaId vinculado para descuento de stock', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const subprep = await prisma.productoVenta.findFirst({
+      where: { esPreparacion: true, deletedAt: null },
+    });
+    if (!subprep) throw new Error('No hay sub-preparaciones en el seed');
+
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_STOCK' });
+    const res = await request(app)
+      .post(`/modificadores/${grupo.body.grupo.id}/opciones`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'Con cheddar', precioExtra: 5000, productoVentaId: subprep.id });
+    expect(res.status).toBe(201);
+    expect(res.body.opcion.productoVentaId).toBe(subprep.id);
+    expect(res.body.opcion.productoVenta?.id).toBe(subprep.id);
+    expect(res.body.opcion.productoVenta?.esPreparacion).toBe(true);
+  });
+
+  it('rechaza productoVentaId de otra empresa → 404', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_OTRA_EMPRESA' });
+    // CUID de un producto que no existe — el service lo trata como "no encontrado"
+    const res = await request(app)
+      .post(`/modificadores/${grupo.body.grupo.id}/opciones`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'Inválida', productoVentaId: 'cl000000000000000000000000' });
+    expect(res.status).toBe(404);
+  });
+
+  it('PATCH desvincula productoVentaId con null', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const subprep = await prisma.productoVenta.findFirstOrThrow({
+      where: { esPreparacion: true, deletedAt: null },
+    });
+
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: 'TEST_OPC_UNLINK',
+        opciones: [{ nombre: 'Mod1', productoVentaId: subprep.id }],
+      });
+    expect(grupo.body.grupo.opciones[0].productoVentaId).toBe(subprep.id);
+
+    const opcionId = grupo.body.grupo.opciones[0].id;
+    const res = await request(app)
+      .patch(`/modificadores/${grupo.body.grupo.id}/opciones/${opcionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ productoVentaId: null });
+    expect(res.status).toBe(200);
+    expect(res.body.opcion.productoVentaId).toBeNull();
+    expect(res.body.opcion.productoVenta).toBeNull();
+  });
+
   it('actualiza precio y desactiva', async () => {
     await cleanupTest();
     const token = await login(ADMIN);
