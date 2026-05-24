@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3019",
-    "build": "next build",
+    "build": "cross-env NODE_OPTIONS=--max-old-space-size=8192 next build",
     "start": "next start -p 3019",
     "lint": "next lint --max-warnings 0",
     "typecheck": "tsc --noEmit",
@@ -37,6 +37,7 @@
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
     "eslint-config-next": "^15.0.0",
     "postcss": "^8.4.47",
     "rimraf": "^6.0.1",
