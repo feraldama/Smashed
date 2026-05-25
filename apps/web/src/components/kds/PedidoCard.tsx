@@ -671,18 +671,25 @@ function ComboSubficha({
       };
   return (
     <div className={cn('border-l-4', palette.wrapper)}>
-      <div className="flex items-center gap-2 px-3 py-1.5">
-        <span
-          className={cn(
-            'rounded-md px-1.5 text-[11px] font-bold uppercase tracking-wide',
-            palette.badge,
-          )}
-        >
-          combo
-        </span>
-        <p className="text-sm font-bold">
-          {parent.cantidad}× {parent.productoVenta.nombre}
-        </p>
+      <div className="px-3 py-1.5">
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              'rounded-md px-1.5 text-[11px] font-bold uppercase tracking-wide',
+              palette.badge,
+            )}
+          >
+            combo
+          </span>
+          <p className="text-sm font-bold">
+            {parent.cantidad}× {parent.productoVenta.nombre}
+          </p>
+        </div>
+        {parent.observaciones && (
+          <p className="mt-0.5 text-[11px] italic text-amber-700 dark:text-amber-400">
+            ⚠ {parent.observaciones}
+          </p>
+        )}
       </div>
       <ul className="divide-y">
         {tareas.map((t) => (
