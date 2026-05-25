@@ -24,6 +24,7 @@ export interface ProductoInventarioEspejo {
 export interface RecetaConModo {
   id: string;
   rinde: string;
+  unidadRinde: UnidadMedida;
   modoStock: ModoStockReceta;
   productoInventarioId: string | null;
   productoInventarioEspejo: ProductoInventarioEspejo | null;

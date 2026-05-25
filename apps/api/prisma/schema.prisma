@@ -1036,8 +1036,11 @@ model Receta {
   productoVentaId String   @unique @map("producto_venta_id")
   productoVenta   ProductoVenta @relation(fields: [productoVentaId], references: [id], onDelete: Cascade)
 
-  // Rinde: cuántas porciones da la receta (default 1, útil para sub-preparaciones).
-  rinde           Decimal  @default(1) @db.Decimal(10, 3)
+  // Rinde: cuánto produce la receta, expresado en `unidadRinde`. Para un
+  // producto vendible típico es 1 UNIDAD; para sub-preparaciones puede ser
+  // p. ej. 1000 MILILITRO (= 1 L de mayonesa) o 500 GRAMO.
+  rinde           Decimal      @default(1) @db.Decimal(10, 3)
+  unidadRinde     UnidadMedida @default(UNIDAD) @map("unidad_rinde")
   notas           String?
 
   // Modo de gestión de stock — sólo relevante para sub-preparaciones (esPreparacion=true).

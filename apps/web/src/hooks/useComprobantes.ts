@@ -125,6 +125,7 @@ export interface ComprobanteDetalle {
     descuentoTipo: 'PORCENTAJE' | 'MONTO' | 'CORTESIA' | null;
     motivoDescuento: { id: string; nombre: string; codigoSistema: string | null } | null;
     empleadoBeneficiario: { id: string; nombreCompleto: string } | null;
+    recargoDelivery: string;
   } | null;
 }
 

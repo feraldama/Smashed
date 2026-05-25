@@ -126,6 +126,9 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
             )}
           </>
         )}
+        {comp.pedido && BigInt(comp.pedido.recargoDelivery) > 0n && (
+          <Row label="Delivery" value={formatGsCorto(BigInt(comp.pedido.recargoDelivery))} />
+        )}
         <Row
           label="TOTAL"
           value={formatGsCorto(BigInt(comp.total))}

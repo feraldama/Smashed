@@ -164,7 +164,9 @@ function RecetaRow({ receta: r }: { receta: RecetaListItem }) {
             <span>
               {r.cantidadItems} item{r.cantidadItems !== 1 ? 's' : ''}
             </span>
-            <span>Rinde: {Number.parseFloat(r.rinde).toString()}</span>
+            <span>
+              Rinde: {Number.parseFloat(r.rinde).toString()} {r.unidadRinde.toLowerCase()}
+            </span>
             {r.usadaEn > 0 && (
               <span>
                 Usada en <strong className="text-foreground">{r.usadaEn}</strong> receta

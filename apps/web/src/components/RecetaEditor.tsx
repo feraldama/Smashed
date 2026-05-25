@@ -28,7 +28,8 @@ const UNIDADES: UnidadMedida[] = [
 interface RecetaItem {
   /** id local para el form. */
   localId: string;
-  // XOR: insumo o sub-producto
+  tipo: 'INSUMO' | 'SUB';
+  // XOR: insumo o sub-producto (según tipo)
   productoInventarioId: string | null;
   subProductoVentaId: string | null;
   // Snapshot para mostrar
@@ -58,6 +59,7 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
 
   const recetaExistente = producto.receta as {
     rinde: string;
+    unidadRinde: UnidadMedida;
     notas: string | null;
     items: Array<{
       id: string;
@@ -73,6 +75,9 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
   } | null;
 
   const [rinde, setRinde] = useState(recetaExistente?.rinde ?? '1');
+  const [unidadRinde, setUnidadRinde] = useState<UnidadMedida>(
+    recetaExistente?.unidadRinde ?? 'UNIDAD',
+  );
   const [notas, setNotas] = useState(recetaExistente?.notas ?? '');
   const [items, setItems] = useState<RecetaItem[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -83,6 +88,7 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
       setItems(
         recetaExistente.items.map((it, idx) => ({
           localId: `it_${idx}_${Date.now()}`,
+          tipo: it.subProductoVentaId ? 'SUB' : 'INSUMO',
           productoInventarioId: it.productoInventarioId,
           subProductoVentaId: it.subProductoVentaId,
           insumoNombre: it.insumo?.nombre,
@@ -101,6 +107,7 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
       ...prev,
       {
         localId: `it_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        tipo,
         productoInventarioId: null,
         subProductoVentaId: null,
         cantidad: '1',
@@ -109,7 +116,6 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
         notas: '',
       },
     ]);
-    void tipo; // por ahora no diferenciamos; el user elige insumo o sub al hacer click en el select
   }
 
   function actualizarItem(localId: string, patch: Partial<RecetaItem>) {
@@ -144,6 +150,7 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
       await setReceta.mutateAsync({
         productoId: producto.id,
         rinde: rindeNum,
+        unidadRinde,
         notas: notas.trim() || undefined,
         items: items.map((it) => ({
           productoInventarioId: it.productoInventarioId ?? undefined,
@@ -183,6 +190,7 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
       await eliminarReceta.mutateAsync(producto.id);
       setItems([]);
       setRinde('1');
+      setUnidadRinde('UNIDAD');
       setNotas('');
       toast.success('Receta eliminada');
     } catch (err) {
@@ -217,8 +225,8 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
         )}
       </div>
 
-      <div className="mb-3 grid gap-3 sm:grid-cols-[120px_1fr]">
-        <Field label="Rinde" hint="cuántas unidades produce">
+      <div className="mb-3 grid gap-3 sm:grid-cols-[100px_140px_1fr]">
+        <Field label="Rinde" hint="cuánto produce">
           <Input
             type="number"
             step="0.001"
@@ -226,6 +234,18 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
             onChange={(e) => setRinde(e.target.value)}
             className="font-mono"
           />
+        </Field>
+        <Field label="Unidad" hint="del rinde">
+          <Select
+            value={unidadRinde}
+            onChange={(e) => setUnidadRinde(e.target.value as UnidadMedida)}
+          >
+            {UNIDADES.map((u) => (
+              <option key={u} value={u}>
+                {u.toLowerCase()}
+              </option>
+            ))}
+          </Select>
         </Field>
         <Field label="Notas">
           <Input
@@ -303,18 +323,19 @@ interface ItemRowProps {
 }
 
 function ItemRow({ item, insumos, subProductos, onChange, onRemove }: ItemRowProps) {
-  const tipo: 'INSUMO' | 'SUB' = item.subProductoVentaId ? 'SUB' : 'INSUMO';
-
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2 md:flex-nowrap">
       {/* Tipo */}
       <Select
-        value={tipo}
+        value={item.tipo}
         onChange={(e) => {
           const nuevo = e.target.value as 'INSUMO' | 'SUB';
           onChange({
-            productoInventarioId: nuevo === 'INSUMO' ? null : null,
-            subProductoVentaId: nuevo === 'SUB' ? null : null,
+            tipo: nuevo,
+            productoInventarioId: null,
+            subProductoVentaId: null,
+            insumoNombre: undefined,
+            subProductoNombre: undefined,
           });
         }}
         className="w-28 shrink-0 px-2 py-1 text-xs"
@@ -324,7 +345,7 @@ function ItemRow({ item, insumos, subProductos, onChange, onRemove }: ItemRowPro
       </Select>
 
       {/* Selector */}
-      {tipo === 'INSUMO' ? (
+      {item.tipo === 'INSUMO' ? (
         <Select
           value={item.productoInventarioId ?? ''}
           onChange={(e) => {

@@ -109,6 +109,7 @@ export const itemRecetaInput = z
 
 export const setRecetaInput = z.object({
   rinde: decimalCantidad.default(1),
+  unidadRinde: z.nativeEnum(UnidadMedida).default(UnidadMedida.UNIDAD),
   notas: z.string().trim().max(500).optional(),
   items: z.array(itemRecetaInput).min(1).max(50),
 });

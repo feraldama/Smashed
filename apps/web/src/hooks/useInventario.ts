@@ -147,6 +147,7 @@ interface RecetaItemInput {
 
 interface RecetaInput {
   rinde: number;
+  unidadRinde: UnidadMedida;
   notas?: string;
   items: RecetaItemInput[];
 }
@@ -183,6 +184,7 @@ export type FiltroRecetas = 'TODOS' | 'SUB' | 'VENDIBLE';
 export interface RecetaListItem {
   id: string;
   rinde: string;
+  unidadRinde: UnidadMedida;
   notas: string | null;
   updatedAt: string;
   cantidadItems: number;

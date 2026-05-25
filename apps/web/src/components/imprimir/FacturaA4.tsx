@@ -210,6 +210,9 @@ export function FacturaA4({ comp }: { comp: ComprobanteDetalle }) {
           {BigInt(comp.totalIva10) > 0n && (
             <TotalRow label="Liquidación IVA 10%" value={comp.totalIva10} />
           )}
+          {comp.pedido && BigInt(comp.pedido.recargoDelivery) > 0n && (
+            <TotalRow label="Recargo Delivery" value={comp.pedido.recargoDelivery} />
+          )}
           <hr style={{ margin: '2mm 0', border: 'none', borderTop: '1px solid #000' }} />
           <TotalRow
             label="TOTAL"

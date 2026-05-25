@@ -500,6 +500,7 @@ export async function listarRecetas(empresaId: string, q: ListarRecetasQuery) {
     select: {
       id: true,
       rinde: true,
+      unidadRinde: true,
       notas: true,
       updatedAt: true,
       productoVenta: {
@@ -542,6 +543,7 @@ export async function listarRecetas(empresaId: string, q: ListarRecetasQuery) {
   return recetas.map((r) => ({
     id: r.id,
     rinde: r.rinde.toString(),
+    unidadRinde: r.unidadRinde,
     notas: r.notas,
     updatedAt: r.updatedAt,
     cantidadItems: r._count.items,
@@ -612,6 +614,7 @@ export async function setReceta(empresaId: string, productoVentaId: string, inpu
         where: { id: existente.id },
         data: {
           rinde: String(input.rinde),
+          unidadRinde: input.unidadRinde,
           notas: input.notas,
           items: {
             create: input.items.map((it) => ({
@@ -631,6 +634,7 @@ export async function setReceta(empresaId: string, productoVentaId: string, inpu
           empresaId,
           productoVentaId,
           rinde: String(input.rinde),
+          unidadRinde: input.unidadRinde,
           notas: input.notas,
           items: {
             create: input.items.map((it) => ({

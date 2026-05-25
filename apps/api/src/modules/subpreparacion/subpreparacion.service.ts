@@ -1,10 +1,4 @@
-import {
-  ModoStockReceta,
-  Prisma,
-  TipoMovimientoStock,
-  UnidadMedida,
-  type Rol,
-} from '@prisma/client';
+import { ModoStockReceta, Prisma, TipoMovimientoStock, type Rol } from '@prisma/client';
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
@@ -69,6 +63,7 @@ export async function listarSubpreparaciones(user: UserCtx, q: ListarSubpreparac
         select: {
           id: true,
           rinde: true,
+          unidadRinde: true,
           modoStock: true,
           productoInventarioId: true,
           productoInventarioEspejo: {
@@ -157,12 +152,15 @@ export async function cambiarModoStock(
     // Reutilizar el espejo previo si volvió a CALCULADA y ahora vuelve a LOTE.
     productoInventarioId = subprep.receta.productoInventarioId;
   } else {
-    // Crear PI espejo automático.
+    // Crear PI espejo automático. Si no se especifica unidad, usar la
+    // `unidadRinde` de la receta — así el stock del espejo queda en la misma
+    // unidad en la que la receta produce (ej. mayonesa rinde 1000 MILILITRO →
+    // espejo en mililitros).
     const piNuevo = await prisma.productoInventario.create({
       data: {
         empresaId,
         nombre: subprep.nombre,
-        unidadMedida: input.unidadMedidaEspejo ?? UnidadMedida.UNIDAD,
+        unidadMedida: input.unidadMedidaEspejo ?? subprep.receta.unidadRinde,
         descripcion: `Espejo de sub-preparación "${subprep.nombre}" (modo LOTE)`,
       },
       select: { id: true },

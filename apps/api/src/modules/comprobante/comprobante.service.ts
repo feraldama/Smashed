@@ -530,6 +530,10 @@ export async function obtenerComprobante(user: UserCtx, id: string) {
           descuentoTipo: true,
           motivoDescuento: { select: { id: true, nombre: true, codigoSistema: true } },
           empleadoBeneficiario: { select: { id: true, nombreCompleto: true } },
+          // Snapshot del recargo aplicado al pedido (DELIVERY_PROPIO). Se muestra
+          // como línea aparte en el ticket — el subtotal/IVA del comprobante NO
+          // lo incluye, pero sí el total.
+          recargoDelivery: true,
         },
       },
     },
