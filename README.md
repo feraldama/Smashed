@@ -97,10 +97,9 @@ pnpm services:up:db
 # 5. Aplicar migraciones + seed
 pnpm db:migrate
 pnpm db:seed
-#  ↳ Alternativa: pnpm db:seed:snapshot
-#    Restaura el dump versionado en apps/api/prisma/snapshot.sql — útil
-#    cuando querés arrancar con el estado de dev capturado más reciente
-#    en vez del seed minimalista.
+#  ↳ Carga apps/api/prisma/snapshot.sql — el dump versionado de la BD
+#    actual de dev (preserva IDs/cuids/secuencias).
+#    Para actualizarlo cuando modificás la BD local: pnpm db:snapshot.
 
 # 6. Levantar todo en dev
 pnpm dev
@@ -118,15 +117,13 @@ pnpm dev
 
 ### Usuarios del seed (password `Smash123!`)
 
-| Email                      | Rol                  |
-| -------------------------- | -------------------- |
-| `admin@smash.com.py`       | ADMIN_EMPRESA        |
-| `gerente1@smash.com.py`    | GERENTE_SUCURSAL     |
-| `cajero1@smash.com.py`     | CAJERO (Centro)      |
-| `cajero2@smash.com.py`     | CAJERO (San Lorenzo) |
-| `mesero1@smash.com.py`     | MESERO               |
-| `cocina1@smash.com.py`     | COCINA               |
-| `repartidor1@smash.com.py` | REPARTIDOR           |
+Los usuarios disponibles dependen del estado capturado en `snapshot.sql`.
+Por convención están al menos:
+
+| Email                  | Rol           |
+| ---------------------- | ------------- |
+| `admin@smash.com.py`   | ADMIN_EMPRESA |
+| `cajero1@smash.com.py` | CAJERO        |
 
 ### pgAdmin (opcional)
 
@@ -139,36 +136,36 @@ pnpm services:up:tools
 
 ## Scripts
 
-| Script                   | Descripción                                        |
-| ------------------------ | -------------------------------------------------- |
-| `pnpm dev`               | Levanta todas las apps en modo desarrollo          |
-| `pnpm build`             | Build de toda la monorepo                          |
-| `pnpm lint`              | Lint en todas las apps/packages                    |
-| `pnpm typecheck`         | Type-check sin emitir                              |
-| `pnpm test`              | Corre tests con Vitest                             |
-| `pnpm format`            | Formatea código con Prettier                       |
-| `pnpm services:up`       | Levanta Redis (default — Postgres se asume local)  |
-| `pnpm services:up:db`    | Levanta Postgres + Redis en Docker                 |
-| `pnpm services:up:tools` | + pgAdmin                                          |
-| `pnpm services:down`     | Detiene contenedores (mantiene volúmenes)          |
-| `pnpm services:reset`    | Detiene + borra volúmenes (BD desde cero)          |
-| `pnpm db:migrate`        | Aplica migraciones Prisma                          |
-| `pnpm db:seed`           | Carga seed minimalista (catálogo + usuarios demo)  |
-| `pnpm db:seed:snapshot`  | Trunca y carga `prisma/snapshot.sql` (restore 1:1) |
-| `pnpm db:snapshot`       | Regenera `prisma/snapshot.sql` desde la BD actual  |
-| `pnpm db:studio`         | Abre Prisma Studio                                 |
-| `pnpm db:reset`          | Resetea la BD y reaplica migraciones + seed        |
+| Script                   | Descripción                                       |
+| ------------------------ | ------------------------------------------------- |
+| `pnpm dev`               | Levanta todas las apps en modo desarrollo         |
+| `pnpm build`             | Build de toda la monorepo                         |
+| `pnpm lint`              | Lint en todas las apps/packages                   |
+| `pnpm typecheck`         | Type-check sin emitir                             |
+| `pnpm test`              | Corre tests con Vitest                            |
+| `pnpm format`            | Formatea código con Prettier                      |
+| `pnpm services:up`       | Levanta Redis (default — Postgres se asume local) |
+| `pnpm services:up:db`    | Levanta Postgres + Redis en Docker                |
+| `pnpm services:up:tools` | + pgAdmin                                         |
+| `pnpm services:down`     | Detiene contenedores (mantiene volúmenes)         |
+| `pnpm services:reset`    | Detiene + borra volúmenes (BD desde cero)         |
+| `pnpm db:migrate`        | Aplica migraciones Prisma                         |
+| `pnpm db:seed`           | Trunca y carga `prisma/snapshot.sql` en la BD     |
+| `pnpm db:snapshot`       | Regenera `prisma/snapshot.sql` desde la BD actual |
+| `pnpm db:studio`         | Abre Prisma Studio                                |
+| `pnpm db:reset`          | Resetea la BD y reaplica migraciones + seed       |
 
 ### Snapshot: clonar la BD de dev entre máquinas
 
-Hay dos formas de poblar la BD:
+El seed del proyecto **es** un dump pg_dump versionado. Cualquier dev puede
+clonar el estado actual de la BD de dev con:
 
-| Comando                 | Cuándo usar                                                                                                 |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `pnpm db:seed`          | Empezás de cero — cataloga + usuarios + un combo. Útil para devs nuevos o tests.                            |
-| `pnpm db:seed:snapshot` | Querés el estado actual de dev (productos modificados, pedidos de prueba, etc.) tal cual lo dejó el equipo. |
+```bash
+pnpm db:migrate   # asegurate de tener el schema al día
+pnpm db:seed      # trunca y carga apps/api/prisma/snapshot.sql
+```
 
-**Generar un nuevo snapshot** (sólo cuando querés actualizar el archivo versionado):
+**Generar un nuevo snapshot** (cuando modificaste la BD y querés versionar el estado):
 
 ```bash
 pnpm db:snapshot
@@ -179,9 +176,9 @@ pnpm db:snapshot
 
 **Notas**:
 
-- El snapshot preserva los IDs (cuids) y secuencias originales — el ciclo `db:snapshot` → `db:seed:snapshot` es idempotente.
-- `db:seed:snapshot` trunca todas las tablas de `public` (excepto `_prisma_migrations`) antes de cargar.
-- Las migraciones tienen que estar al día (`pnpm db:migrate`) antes de cargar un snapshot, o los `INSERT` van a fallar contra columnas inexistentes.
+- El snapshot preserva los IDs (cuids) y secuencias originales — el ciclo `db:snapshot` → `db:seed` es idempotente.
+- `db:seed` trunca todas las tablas de `public` (excepto `_prisma_migrations`) antes de cargar.
+- Las migraciones tienen que estar al día (`pnpm db:migrate`) antes de seedear, o los `INSERT` van a fallar contra columnas inexistentes.
 
 ---
 
