@@ -62,6 +62,95 @@
   }
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+ *  Teclado virtual QWERTY (react-simple-keyboard) — estilo Smash
+ *  Las clases hg-* las genera la lib; las pintamos con tokens Tailwind.
+ * ───────────────────────────────────────────────────────────────────────── */
+.smash-keyboard .hg-theme-default {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+}
+
+.smash-keyboard .hg-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.smash-keyboard .hg-row {
+  display: flex;
+  gap: 6px;
+}
+
+.smash-keyboard .hg-button {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  border-radius: calc(var(--radius) - 4px);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-size: 1rem;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  transition: background-color 80ms ease, transform 80ms ease;
+}
+
+.smash-keyboard .hg-button:hover {
+  background: hsl(var(--accent));
+}
+
+.smash-keyboard .hg-button:active,
+.smash-keyboard .hg-button.hg-activeButton {
+  background: hsl(var(--muted));
+  transform: scale(0.97);
+}
+
+/* Teclas funcionales (shift, bksp, numbers, abc) — un poco más oscuras */
+.smash-keyboard .hg-button.smash-key-action {
+  background: hsl(var(--muted) / 0.5);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+  flex: 1.4;
+}
+
+.smash-keyboard .hg-button.smash-key-action:hover {
+  background: hsl(var(--muted));
+}
+
+/* Shift activo */
+.smash-keyboard .hg-button.smash-key-active {
+  background: hsl(var(--primary) / 0.15);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.4);
+}
+
+/* Barra espaciadora */
+.smash-keyboard .hg-button.smash-key-space {
+  flex: 5;
+  font-size: 0.75rem;
+  color: hsl(var(--muted-foreground));
+}
+
+/* Enter / Listo */
+.smash-keyboard .hg-button.smash-key-primary {
+  background: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+  flex: 1.6;
+}
+
+.smash-keyboard .hg-button.smash-key-primary:hover {
+  background: hsl(var(--primary) / 0.9);
+}
+
 /* Estilos de impresión — papel térmico 80mm */
 @media print {
   @page {

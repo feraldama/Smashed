@@ -1,15 +1,18 @@
 'use client';
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Eye, EyeOff, Loader2, LogIn } from 'lucide-react';
+import { Eye, EyeOff, Keyboard as KeyboardIcon, Loader2, LogIn } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { useKeyboardContext } from '@/components/Keyboard/KeyboardProvider';
 import { Field, Input } from '@/components/ui/Input';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { ApiError, api } from '@/lib/api';
 import { type SesionUsuario, useAuthStore } from '@/lib/auth-store';
+import { cn } from '@/lib/utils';
 
 const loginSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -79,13 +82,33 @@ function LoginForm() {
     }
   }, [accessToken, bootstrapping, user, router]);
 
+  const { touchMode, setTouchMode } = useKeyboardContext();
+
   const {
-    register,
     handleSubmit,
     formState: { errors, isSubmitting },
+    watch,
+    setValue,
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
+  });
+
+  const email = watch('email') ?? '';
+  const password = watch('password') ?? '';
+
+  const emailKb = useKeyboardInput({
+    value: email,
+    onChange: (v) => setValue('email', v),
+    label: 'Email',
+    maxLength: 80,
+  });
+  const passwordKb = useKeyboardInput({
+    value: password,
+    onChange: (v) => setValue('password', v),
+    label: 'Contraseña',
+    maxLength: 80,
+    secret: true,
   });
 
   const onSubmit = async (data: LoginInput) => {
@@ -116,6 +139,25 @@ function LoginForm() {
           <p className="mt-1 text-sm text-muted-foreground">Iniciá sesión con tu usuario</p>
         </div>
 
+        {/* Toggle de teclado táctil: para terminales sin teclado físico. La
+            preferencia se guarda en sessionStorage. */}
+        <div className="mb-4 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setTouchMode(!touchMode)}
+            className={cn(
+              'inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              touchMode
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-input bg-background text-muted-foreground hover:bg-muted',
+            )}
+            aria-pressed={touchMode}
+          >
+            <KeyboardIcon className="h-3.5 w-3.5" />
+            {touchMode ? 'Modo táctil ACTIVO' : 'Modo táctil'}
+          </button>
+        </div>
+
         <form
           onSubmit={(e) => {
             void handleSubmit(onSubmit)(e);
@@ -124,7 +166,14 @@ function LoginForm() {
           noValidate
         >
           <Field label="Email" required error={errors.email?.message}>
-            <Input type="email" autoComplete="username" autoFocus {...register('email')} />
+            <Input
+              type="email"
+              autoComplete="username"
+              autoFocus
+              value={email}
+              onChange={(e) => setValue('email', e.target.value)}
+              {...emailKb.inputProps}
+            />
           </Field>
 
           <Field label="Contraseña" required error={errors.password?.message}>
@@ -133,7 +182,9 @@ function LoginForm() {
                 type={showPassword ? 'text' : 'password'}
                 autoComplete="current-password"
                 className="pr-10"
-                {...register('password')}
+                value={password}
+                onChange={(e) => setValue('password', e.target.value)}
+                {...passwordKb.inputProps}
               />
               <button
                 type="button"

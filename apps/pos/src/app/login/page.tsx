@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { ApiError, api } from '@/lib/api';
 import { type SesionUsuario, useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
@@ -36,12 +37,32 @@ export default function LoginPage() {
   }, [accessToken, bootstrapping, router]);
 
   const {
-    register,
     handleSubmit,
     formState: { errors, isSubmitting },
+    watch,
+    setValue,
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
     defaultValues: { email: '', password: '' },
+  });
+
+  // En modo táctil controlamos los inputs nosotros (el teclado virtual
+  // edita los valores vía setValue). zodResolver sigue validando al submit.
+  const email = watch('email') ?? '';
+  const password = watch('password') ?? '';
+
+  const emailKb = useKeyboardInput({
+    value: email,
+    onChange: (v) => setValue('email', v),
+    label: 'Email',
+    maxLength: 80,
+  });
+  const passwordKb = useKeyboardInput({
+    value: password,
+    onChange: (v) => setValue('password', v),
+    label: 'Contraseña',
+    maxLength: 80,
+    secret: true,
   });
 
   const onSubmit = async (data: LoginInput) => {
@@ -89,12 +110,14 @@ export default function LoginPage() {
               type="email"
               autoComplete="username"
               autoFocus
-              {...register('email')}
+              value={email}
+              onChange={(e) => setValue('email', e.target.value)}
               className={cn(
                 'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 errors.email && 'border-destructive',
               )}
+              {...emailKb.inputProps}
             />
             {errors.email && (
               <p className="mt-1 text-xs text-destructive">{errors.email.message}</p>
@@ -109,12 +132,14 @@ export default function LoginPage() {
               id="password"
               type="password"
               autoComplete="current-password"
-              {...register('password')}
+              value={password}
+              onChange={(e) => setValue('password', e.target.value)}
               className={cn(
                 'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 errors.password && 'border-destructive',
               )}
+              {...passwordKb.inputProps}
             />
             {errors.password && (
               <p className="mt-1 text-xs text-destructive">{errors.password.message}</p>

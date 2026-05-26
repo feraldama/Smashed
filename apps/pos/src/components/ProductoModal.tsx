@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { toast } from './Toast';
 
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { useProductoDetalle } from '@/hooks/usePedidos';
 import { useCartStore } from '@/lib/cart-store';
 import { cn, formatGs } from '@/lib/utils';
@@ -28,7 +30,44 @@ export function ProductoModal({ productoId, onClose }: ProductoModalProps) {
   const agregar = useCartStore((s) => s.agregar);
 
   const [cantidad, setCantidad] = useState(1);
+  // Buffer mientras el numpad está abierto (permite borrar a vacío sin saltar a 1).
+  const [cantidadDraft, setCantidadDraft] = useState<string | null>(null);
   const [observaciones, setObservaciones] = useState('');
+
+  const cantidadDisplay = cantidadDraft ?? String(cantidad);
+  const cantidadNumpad = useNumpadInput<HTMLButtonElement>({
+    value: cantidadDisplay,
+    onChange: (raw) => {
+      setCantidadDraft(raw);
+      const n = Number.parseInt(raw, 10);
+      if (!Number.isNaN(n) && n >= 1) setCantidad(n);
+    },
+    label: 'Cantidad',
+    maxLength: 3,
+  });
+  // Al cerrar el numpad, clampear y limpiar el draft.
+  useEffect(() => {
+    if (cantidadNumpad.isOpen) return;
+    if (cantidadDraft === null) return;
+    const n = Number.parseInt(cantidadDraft, 10);
+    setCantidad(Number.isNaN(n) || n < 1 ? 1 : n);
+    setCantidadDraft(null);
+  }, [cantidadNumpad.isOpen, cantidadDraft]);
+
+  const observacionesKb = useKeyboardInput<HTMLTextAreaElement>({
+    value: observaciones,
+    onChange: setObservaciones,
+    label: 'Observaciones',
+    maxLength: 200,
+  });
+
+  // +/- mientras el numpad está abierto: cerrar numpad, descartar draft y stepear.
+  function stepCantidad(delta: number) {
+    const base = cantidadDraft !== null ? Number.parseInt(cantidadDraft, 10) || 0 : cantidad;
+    setCantidad(Math.max(1, base + delta));
+    setCantidadDraft(null);
+    cantidadNumpad.close();
+  }
   // modGrupoId → opcionIds[]
   const [modSeleccion, setModSeleccion] = useState<Record<string, string[]>>({});
   // comboGrupoId → opcionId
@@ -328,6 +367,7 @@ export function ProductoModal({ productoId, onClose }: ProductoModalProps) {
                   rows={2}
                   placeholder="Para llevar, sin servilleta, etc."
                   className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  {...observacionesKb.inputProps}
                 />
               </div>
             </div>
@@ -344,20 +384,30 @@ export function ProductoModal({ productoId, onClose }: ProductoModalProps) {
             )}
 
             <div className="flex items-center justify-between gap-3">
-              {/* Selector de cantidad */}
+              {/* Selector de cantidad — tap en el número abre el numpad */}
               <div className="flex items-center gap-1 rounded-md border">
                 <button
                   type="button"
-                  onClick={() => setCantidad(Math.max(1, cantidad - 1))}
+                  onClick={() => stepCantidad(-1)}
                   className="px-2 py-2 hover:bg-muted"
                   aria-label="Disminuir cantidad"
                 >
                   <Minus className="h-4 w-4" />
                 </button>
-                <span className="w-8 text-center text-sm font-mono font-semibold">{cantidad}</span>
                 <button
                   type="button"
-                  onClick={() => setCantidad(cantidad + 1)}
+                  {...cantidadNumpad.inputProps}
+                  className={cn(
+                    'w-10 rounded text-center text-sm font-mono font-semibold tabular-nums hover:bg-muted',
+                    cantidadNumpad.isOpen && 'bg-primary/10 ring-2 ring-primary/30',
+                  )}
+                  aria-label="Editar cantidad con teclado numérico"
+                >
+                  {cantidadDisplay || '0'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => stepCantidad(1)}
                   className="px-2 py-2 hover:bg-muted"
                   aria-label="Aumentar cantidad"
                 >

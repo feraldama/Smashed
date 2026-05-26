@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState, type ReactNode } from 'react';
 
+import { KeyboardProvider } from '@/components/Keyboard/KeyboardProvider';
 import { bootstrapAuth } from '@/lib/api';
 
 export function AppProviders({ children }: { children: ReactNode }) {
@@ -23,5 +24,9 @@ export function AppProviders({ children }: { children: ReactNode }) {
     void bootstrapAuth();
   }, []);
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <KeyboardProvider>{children}</KeyboardProvider>
+    </QueryClientProvider>
+  );
 }

@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { ClienteSearch } from '@/components/ClienteSearch';
 import { MesaSelector } from '@/components/MesaSelector';
 import { TipoPedidoSelector } from '@/components/TipoPedidoSelector';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useCartStore } from '@/lib/cart-store';
 import { cn } from '@/lib/utils';
 
@@ -17,6 +18,13 @@ export function ConfigPedido() {
   const meta = useCartStore((s) => s.meta);
   const setMeta = useCartStore((s) => s.setMeta);
   const [abierto, setAbierto] = useState(false);
+
+  const observacionesKb = useKeyboardInput<HTMLTextAreaElement>({
+    value: meta.observaciones ?? '',
+    onChange: (v) => setMeta({ observaciones: v || null }),
+    label: 'Observaciones del pedido',
+    maxLength: 200,
+  });
 
   const TipoIcon =
     meta.tipo === 'MESA'
@@ -140,6 +148,7 @@ export function ConfigPedido() {
             rows={2}
             placeholder="Observaciones del pedido (opcional)"
             className="w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+            {...observacionesKb.inputProps}
           />
         </div>
       )}

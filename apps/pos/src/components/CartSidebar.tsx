@@ -20,6 +20,7 @@ import { useState } from 'react';
 import { ConfigPedido, isIncompleto } from './ConfigPedido';
 import { toast } from './Toast';
 
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import {
   cartToPedidoInput,
   type MetodoPagoCode,
@@ -318,6 +319,13 @@ function CobroView({
     ? (['BANCARD', 'DINELCO', 'TRANSFERENCIA', 'CHEQUE'] as MetodoPagoCode[]).includes(metodo)
     : false;
 
+  const referenciaKb = useKeyboardInput({
+    value: referencia,
+    onChange: setReferencia,
+    label: 'Referencia / N° autorización',
+    maxLength: 40,
+  });
+
   async function handleEmitir() {
     if (!metodo) {
       setErrorMsg('Seleccioná un método de pago');
@@ -447,6 +455,7 @@ function CobroView({
               onChange={(e) => setReferencia(e.target.value)}
               placeholder="Últimos 4 dígitos / nro. operación"
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              {...referenciaKb.inputProps}
             />
           </div>
         )}

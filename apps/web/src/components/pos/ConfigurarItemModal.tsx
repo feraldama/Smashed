@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { toast } from '@/components/Toast';
 import { productoImagenSrc, useProductoDetalle } from '@/hooks/useCatalogo';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import {
   type ItemCarrito,
   type ItemCarritoCombo,
@@ -216,6 +217,13 @@ function ModalShellWithProducto({
   const [componentesDetail, setComponentesDetail] = useState<
     Record<string, ProductoComponenteDetalle>
   >({});
+
+  const observacionesKb = useKeyboardInput({
+    value: observaciones,
+    onChange: onObservaciones,
+    label: 'Observaciones del item',
+    maxLength: 300,
+  });
 
   const updateComponenteDetail = useCallback(
     (comboGrupoId: string, detail: ProductoComponenteDetalle) => {
@@ -490,6 +498,7 @@ function ModalShellWithProducto({
             maxLength={300}
             placeholder="ej: sin cebolla, bien cocido"
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            {...observacionesKb.inputProps}
           />
         </section>
 

@@ -17,6 +17,8 @@ import {
   useVerificarSupervisor,
 } from '@/hooks/useDescuento';
 import { useEmpresa } from '@/hooks/useEmpresa';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -57,6 +59,20 @@ export function DescuentoModal({
   const [empleadoBeneficiarioId, setEmpleadoBeneficiarioId] = useState<string>('');
   const [observacion, setObservacion] = useState('');
   const [escalado, setEscalado] = useState<EscaladoState | null>(null);
+
+  const valorNp = useNumpadInput({
+    value: valor,
+    onChange: setValor,
+    label: tipo === 'PORCENTAJE' ? 'Porcentaje de descuento' : 'Monto de descuento (Gs.)',
+    maxLength: tipo === 'PORCENTAJE' ? 5 : 12,
+    allowDecimal: tipo === 'PORCENTAJE',
+  });
+  const observacionKb = useKeyboardInput({
+    value: observacion,
+    onChange: setObservacion,
+    label: 'Observación del descuento',
+    maxLength: 500,
+  });
 
   // Auto-seleccionar primer motivo cuando cargan.
   if (!motivoId && motivos.length > 0 && motivos[0]) {
@@ -317,13 +333,11 @@ export function DescuentoModal({
                   }
                 >
                   <Input
-                    type="number"
+                    type="text"
                     value={valor}
                     onChange={(e) => setValor(e.target.value)}
-                    min={0}
-                    max={tipo === 'PORCENTAJE' ? 100 : undefined}
-                    step={tipo === 'PORCENTAJE' ? '0.01' : '500'}
                     placeholder={tipo === 'PORCENTAJE' ? '15' : '5000'}
+                    {...valorNp.inputProps}
                   />
                 </Field>
               )}
@@ -339,6 +353,7 @@ export function DescuentoModal({
                 onChange={(e) => setObservacion(e.target.value)}
                 maxLength={500}
                 placeholder="Ej: Cliente frecuente, error en pedido, etc."
+                {...observacionKb.inputProps}
               />
             </Field>
           )}
@@ -440,6 +455,26 @@ function EscaladoModal({
   const [codigo, setCodigo] = useState('');
   const verificar = useVerificarSupervisor();
 
+  const emailKb = useKeyboardInput({
+    value: email,
+    onChange: setEmail,
+    label: 'Email del supervisor',
+    maxLength: 80,
+  });
+  const passwordKb = useKeyboardInput({
+    value: password,
+    onChange: setPassword,
+    label: 'Contraseña',
+    maxLength: 80,
+    secret: true,
+  });
+  const codigoNp = useNumpadInput({
+    value: codigo,
+    onChange: setCodigo,
+    label: 'Código de autorización',
+    maxLength: 32,
+  });
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (tab === 'SUPERVISOR') {
@@ -521,6 +556,7 @@ function EscaladoModal({
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="gerente@empresa.com.py"
+                  {...emailKb.inputProps}
                 />
               </Field>
               <Field label="Contraseña">
@@ -529,6 +565,7 @@ function EscaladoModal({
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
+                  {...passwordKb.inputProps}
                 />
               </Field>
             </>
@@ -541,6 +578,7 @@ function EscaladoModal({
                 placeholder="12345678"
                 maxLength={32}
                 className="font-mono"
+                {...codigoNp.inputProps}
               />
             </Field>
           )}

@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import { ClienteFormModal } from '@/components/ClienteFormModal';
 import { type Cliente, useClientes } from '@/hooks/useClientes';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { cn } from '@/lib/utils';
 
 interface Props {
@@ -24,6 +25,13 @@ export function ClienteSelector({
   const [busqueda, setBusqueda] = useState('');
   const [showForm, setShowForm] = useState(false);
   const { data: clientes = [], isLoading } = useClientes(busqueda.trim() || undefined);
+
+  const busquedaKb = useKeyboardInput({
+    value: busqueda,
+    onChange: setBusqueda,
+    label: 'Buscar cliente',
+    maxLength: 60,
+  });
 
   const consumidorFinal = clientes.find((c) => c.esConsumidorFinal);
   const otros = clientes.filter((c) => !c.esConsumidorFinal);
@@ -59,6 +67,7 @@ export function ClienteSelector({
                 placeholder="Buscar por razón social, RUC, CI, teléfono…"
                 className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm"
                 autoFocus
+                {...busquedaKb.inputProps}
               />
             </div>
           </div>

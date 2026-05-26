@@ -8,6 +8,8 @@ import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
 import { type Cliente, useActualizarCliente, useCrearCliente } from '@/hooks/useClientes';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -60,6 +62,50 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
     cliente?.sinRecargoDelivery ?? false,
   );
   const [error, setError] = useState<string | null>(null);
+
+  // Hooks de teclado virtual (solo activos para rol CAJERO; admins no los notan)
+  const razonSocialKb = useKeyboardInput({
+    value: razonSocial,
+    onChange: setRazonSocial,
+    label: 'Razón social',
+    maxLength: 100,
+  });
+  const nombreFantasiaKb = useKeyboardInput({
+    value: nombreFantasia,
+    onChange: setNombreFantasia,
+    label: 'Nombre de fantasía',
+    maxLength: 100,
+  });
+  const documentoNp = useNumpadInput({
+    value: documento,
+    onChange: (v) => setDocumento(v.replace(/\D/g, '')),
+    label: tipo === 'PERSONA_FISICA' ? 'Cédula' : 'Documento',
+    maxLength: 10,
+  });
+  const documentoKb = useKeyboardInput({
+    value: documento,
+    onChange: setDocumento,
+    label: 'Documento (pasaporte/DNI)',
+    maxLength: 30,
+  });
+  const rucNp = useNumpadInput({
+    value: ruc,
+    onChange: (v) => setRuc(v.replace(/\D/g, '')),
+    label: 'RUC',
+    maxLength: 8,
+  });
+  const emailKb = useKeyboardInput({
+    value: email,
+    onChange: setEmail,
+    label: 'Email',
+    maxLength: 80,
+  });
+  const telefonoNp = useNumpadInput({
+    value: telefono,
+    onChange: setTelefono,
+    label: 'Teléfono',
+    maxLength: 15,
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -187,6 +233,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
               value={razonSocial}
               onChange={(e) => setRazonSocial(e.target.value)}
               placeholder={tipo === 'PERSONA_FISICA' ? 'Juan Pérez' : 'EMPRESA S.A.'}
+              {...razonSocialKb.inputProps}
             />
           </Field>
 
@@ -196,6 +243,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                 value={nombreFantasia}
                 onChange={(e) => setNombreFantasia(e.target.value)}
                 placeholder="Nombre comercial"
+                {...nombreFantasiaKb.inputProps}
               />
             </Field>
           )}
@@ -209,6 +257,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                     onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
                     className="font-mono"
                     placeholder="1234567"
+                    {...documentoNp.inputProps}
                   />
                 </Field>
                 <Field label="DV" hint="Calculado automático">
@@ -238,6 +287,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                   className="font-mono"
                   placeholder="80012345"
                   maxLength={8}
+                  {...rucNp.inputProps}
                 />
               </Field>
               <Field label="DV" hint="Calculado automático">
@@ -258,6 +308,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                 onChange={(e) => setDocumento(e.target.value)}
                 className="font-mono"
                 placeholder="AB123456"
+                {...documentoKb.inputProps}
               />
             </Field>
           )}
@@ -269,6 +320,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="contacto@cliente.com"
+                {...emailKb.inputProps}
               />
             </Field>
             <Field label="Teléfono">
@@ -276,6 +328,7 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                 value={telefono}
                 onChange={(e) => setTelefono(e.target.value)}
                 placeholder="+595 981 123 456"
+                {...telefonoNp.inputProps}
               />
             </Field>
           </div>

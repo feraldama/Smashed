@@ -5,8 +5,10 @@ import { useState } from 'react';
 
 import { toast } from '@/components/Toast';
 import { type CajaListItem, useAbrirCaja } from '@/hooks/useCaja';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import { cn, formatGs } from '@/lib/utils';
 
 interface Props {
   cajasDisponibles: CajaListItem[];
@@ -23,6 +25,23 @@ export function AbrirCajaModal({ cajasDisponibles, onSuccess, onClose }: Props) 
   const [notas, setNotas] = useState('');
 
   const abrir = useAbrirCaja();
+
+  const montoNp = useNumpadInput({
+    value: montoInicial,
+    onChange: (v) => setMontoInicial(v.replace(/\D/g, '')),
+    label: 'Monto inicial (Gs.)',
+    formatPreview: (raw) => {
+      const n = Number.parseInt(raw.replace(/\D/g, ''), 10);
+      return Number.isNaN(n) ? '0' : formatGs(n);
+    },
+    maxLength: 12,
+  });
+  const notasKb = useKeyboardInput({
+    value: notas,
+    onChange: setNotas,
+    label: 'Notas de apertura',
+    maxLength: 500,
+  });
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -130,11 +149,11 @@ export function AbrirCajaModal({ cajasDisponibles, onSuccess, onClose }: Props) 
             </label>
             <input
               type="text"
-              inputMode="numeric"
               value={montoInicial}
               onChange={(e) => setMontoInicial(e.target.value.replace(/\D/g, ''))}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm tabular-nums"
               placeholder="100000"
+              {...montoNp.inputProps}
             />
             <p className="mt-1 text-[11px] text-muted-foreground">
               Efectivo con el que se inaugura el turno (vuelto inicial).
@@ -151,6 +170,7 @@ export function AbrirCajaModal({ cajasDisponibles, onSuccess, onClose }: Props) 
               onChange={(e) => setNotas(e.target.value)}
               maxLength={500}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              {...notasKb.inputProps}
             />
           </div>
 

@@ -9,6 +9,7 @@ import { CartSidebar } from '@/components/CartSidebar';
 import { ProductCard, type ProductCardData } from '@/components/ProductCard';
 import { ProductoModal } from '@/components/ProductoModal';
 import { toast } from '@/components/Toast';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useCategorias, useProductos, type ProductoListado } from '@/hooks/useProductos';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
@@ -38,6 +39,13 @@ function PosHome() {
   const productosQ = useProductos({
     categoriaId,
     busqueda: busqueda.trim() || undefined,
+  });
+
+  const busquedaKb = useKeyboardInput({
+    value: busqueda,
+    onChange: setBusqueda,
+    label: 'Buscar producto',
+    maxLength: 60,
   });
 
   const sucursalActual = useMemo(() => {
@@ -153,6 +161,7 @@ function PosHome() {
                 onChange={(e) => setBusqueda(e.target.value)}
                 placeholder="Buscar producto, código o código de barras..."
                 className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-9 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                {...busquedaKb.inputProps}
               />
               {busqueda && (
                 <button

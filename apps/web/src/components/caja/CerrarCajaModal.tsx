@@ -10,6 +10,8 @@ import {
   totalConteo,
   useCerrarCaja,
 } from '@/hooks/useCaja';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -31,6 +33,13 @@ export function CerrarCajaModal({ apertura, modoCajero, onCierreExitoso, onClose
   const [notas, setNotas] = useState('');
 
   const cerrar = useCerrarCaja();
+
+  const notasKb = useKeyboardInput<HTMLTextAreaElement>({
+    value: notas,
+    onChange: setNotas,
+    label: 'Notas del cierre',
+    maxLength: 1000,
+  });
 
   const totalContado = useMemo(() => totalConteo(conteo), [conteo]);
   const totalEsperado = Number(apertura.totales.totalEsperadoEfectivo);
@@ -170,31 +179,14 @@ export function CerrarCajaModal({ apertura, modoCajero, onCierreExitoso, onClose
               </p>
             )}
             <div className="grid grid-cols-2 gap-2">
-              {DENOMINACIONES_PYG.map((d) => {
-                const cant = conteo[String(d)] ?? 0;
-                const subtotal = d * cant;
-                return (
-                  <div
-                    key={d}
-                    className="flex items-center justify-between gap-2 rounded-md border p-2"
-                  >
-                    <span className="w-20 text-sm font-semibold tabular-nums">
-                      Gs. {d.toLocaleString('es-PY')}
-                    </span>
-                    <input
-                      type="number"
-                      min={0}
-                      value={cant === 0 ? '' : cant}
-                      onChange={(e) => setDenom(d, parseInt(e.target.value || '0', 10))}
-                      className="w-16 rounded-md border border-input bg-background px-2 py-1 text-center text-sm tabular-nums"
-                      placeholder="0"
-                    />
-                    <span className="flex-1 text-right text-xs tabular-nums text-muted-foreground">
-                      {subtotal > 0 ? `= ${subtotal.toLocaleString('es-PY')}` : ''}
-                    </span>
-                  </div>
-                );
-              })}
+              {DENOMINACIONES_PYG.map((d) => (
+                <DenomRow
+                  key={d}
+                  denom={d}
+                  cantidad={conteo[String(d)] ?? 0}
+                  onCantidad={(n) => setDenom(d, n)}
+                />
+              ))}
             </div>
           </section>
 
@@ -271,6 +263,7 @@ export function CerrarCajaModal({ apertura, modoCajero, onCierreExitoso, onClose
                   diferencia !== 0 ? 'Justificá la diferencia (ej: vuelto al cliente)' : 'Opcional'
                 }
                 className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                {...notasKb.inputProps}
               />
             </div>
           )}
@@ -298,6 +291,44 @@ export function CerrarCajaModal({ apertura, modoCajero, onCierreExitoso, onClose
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function DenomRow({
+  denom,
+  cantidad,
+  onCantidad,
+}: {
+  denom: number;
+  cantidad: number;
+  onCantidad: (n: number) => void;
+}) {
+  const np = useNumpadInput({
+    value: cantidad === 0 ? '' : String(cantidad),
+    onChange: (v) => onCantidad(Number.parseInt(v.replace(/\D/g, ''), 10) || 0),
+    label: `Cant. de Gs. ${denom.toLocaleString('es-PY')}`,
+    maxLength: 4,
+  });
+  const subtotal = denom * cantidad;
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border p-2">
+      <span className="w-20 text-sm font-semibold tabular-nums">
+        Gs. {denom.toLocaleString('es-PY')}
+      </span>
+      <input
+        type="text"
+        value={cantidad === 0 ? '' : cantidad}
+        onChange={(e) =>
+          onCantidad(Number.parseInt(e.target.value.replace(/\D/g, '') || '0', 10) || 0)
+        }
+        className="w-16 rounded-md border border-input bg-background px-2 py-1 text-center text-sm tabular-nums"
+        placeholder="0"
+        {...np.inputProps}
+      />
+      <span className="flex-1 text-right text-xs tabular-nums text-muted-foreground">
+        {subtotal > 0 ? `= ${subtotal.toLocaleString('es-PY')}` : ''}
+      </span>
     </div>
   );
 }

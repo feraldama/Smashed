@@ -28,6 +28,8 @@ import {
   useEmitirComprobante,
 } from '@/hooks/useComprobantes';
 import { type PedidoConDescuento, useRemoverDescuento } from '@/hooks/useDescuento';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { usePedidoDetalle } from '@/hooks/usePedidos';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
@@ -148,6 +150,13 @@ export function CobrarModal({
     // Una vez hidratado, no volvemos a tocar — el usuario controla.
   }, [pedidoDetalle, descuento]);
   const [numeroPager, setNumeroPager] = useState('');
+
+  const pagerNp = useNumpadInput({
+    value: numeroPager,
+    onChange: (v) => setNumeroPager(v.replace(/\D/g, '').slice(0, 2)),
+    label: 'Nº de pager (1–50)',
+    maxLength: 2,
+  });
   const emitir = useEmitirComprobante();
 
   const totalPagado = useMemo(() => pagos.reduce((acc, p) => acc + parseGs(p.monto), 0), [pagos]);
@@ -427,12 +436,12 @@ export function CobrarModal({
               <BellRing className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="text"
-                inputMode="numeric"
                 value={numeroPager}
                 onChange={(e) => setNumeroPager(e.target.value.replace(/\D/g, '').slice(0, 2))}
                 placeholder="Opcional — entre 1 y 50"
                 maxLength={2}
                 className="pl-9"
+                {...pagerNp.inputProps}
               />
             </div>
           </div>
@@ -606,6 +615,23 @@ function PagoRow({
     onChange({ monto: String(parseGs(pago.monto) + monto) });
   }
 
+  const montoNp = useNumpadInput({
+    value: pago.monto,
+    onChange: (v) => onChange({ monto: v.replace(/\D/g, '') }),
+    label: `Monto pago #${index + 1} (Gs.)`,
+    formatPreview: (raw) => {
+      const n = Number.parseInt(raw.replace(/\D/g, ''), 10);
+      return Number.isNaN(n) ? '0' : formatGs(n);
+    },
+    maxLength: 12,
+  });
+  const referenciaKb = useKeyboardInput({
+    value: pago.referencia,
+    onChange: (v) => onChange({ referencia: v }),
+    label: 'Referencia / autorización',
+    maxLength: 100,
+  });
+
   return (
     <div className="rounded-md border p-2.5">
       <div className="flex items-center gap-2">
@@ -625,11 +651,11 @@ function PagoRow({
         </select>
         <input
           type="text"
-          inputMode="numeric"
           value={pago.monto}
           onChange={(e) => onChange({ monto: e.target.value.replace(/\D/g, '') })}
           placeholder="0"
           className="flex-1 rounded-md border border-input bg-background px-2 py-1 text-right text-sm font-bold tabular-nums"
+          {...montoNp.inputProps}
         />
         {canDelete && (
           <button
@@ -675,6 +701,7 @@ function PagoRow({
           placeholder="Referencia / autorización (opcional)"
           maxLength={100}
           className="mt-2 w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
+          {...referenciaKb.inputProps}
         />
       )}
     </div>

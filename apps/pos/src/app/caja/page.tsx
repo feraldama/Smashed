@@ -12,6 +12,8 @@ import {
   useCajas,
   useCerrarCaja,
 } from '@/hooks/useCaja';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -75,6 +77,24 @@ function AbrirCajaPanel() {
   const [montoInicial, setMontoInicial] = useState('');
   const [notas, setNotas] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const montoNumpad = useNumpadInput({
+    value: montoInicial,
+    onChange: setMontoInicial,
+    label: 'Monto inicial (Gs.)',
+    formatPreview: (raw) => {
+      const n = Number.parseInt(raw.replace(/[^\d]/g, ''), 10);
+      return Number.isNaN(n) ? '0' : formatGs(n);
+    },
+    maxLength: 12,
+  });
+
+  const notasKb = useKeyboardInput({
+    value: notas,
+    onChange: setNotas,
+    label: 'Notas',
+    maxLength: 200,
+  });
 
   if (cajasQ.isLoading) return <Loader />;
 
@@ -163,15 +183,15 @@ function AbrirCajaPanel() {
             <input
               id="monto"
               type="text"
-              inputMode="numeric"
               autoFocus
               value={montoInicial}
-              onChange={(e) => setMontoInicial(e.target.value)}
+              onChange={(e) => setMontoInicial(e.target.value.replace(/[^\d]/g, ''))}
               placeholder="100000"
               className={cn(
                 'mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-lg shadow-sm',
                 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               )}
+              {...montoNumpad.inputProps}
             />
             {montoInicial &&
               !Number.isNaN(Number.parseInt(montoInicial.replace(/[^\d]/g, ''), 10)) && (
@@ -191,6 +211,7 @@ function AbrirCajaPanel() {
               onChange={(e) => setNotas(e.target.value)}
               placeholder="Inicio de turno tarde"
               className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              {...notasKb.inputProps}
             />
           </div>
 
@@ -235,6 +256,24 @@ function CerrarCajaPanel({ aperturaId }: { aperturaId: string }) {
     diferencia: string;
     esperado: string;
   } | null>(null);
+
+  const contadoNumpad = useNumpadInput({
+    value: contado,
+    onChange: setContado,
+    label: 'Total contado (Gs.)',
+    formatPreview: (raw) => {
+      const n = Number.parseInt(raw.replace(/[^\d]/g, ''), 10);
+      return Number.isNaN(n) ? '0' : formatGs(n);
+    },
+    maxLength: 12,
+  });
+
+  const notasCierreKb = useKeyboardInput<HTMLTextAreaElement>({
+    value: notas,
+    onChange: setNotas,
+    label: 'Notas del cierre',
+    maxLength: 300,
+  });
 
   if (aperturaQ.isLoading) return <Loader />;
   if (!aperturaQ.data)
@@ -368,12 +407,12 @@ function CerrarCajaPanel({ aperturaId }: { aperturaId: string }) {
           <input
             id="contado"
             type="text"
-            inputMode="numeric"
             autoFocus
             value={contado}
-            onChange={(e) => setContado(e.target.value)}
+            onChange={(e) => setContado(e.target.value.replace(/[^\d]/g, ''))}
             placeholder={String(esperado)}
             className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 font-mono text-lg shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            {...contadoNumpad.inputProps}
           />
           {!Number.isNaN(contadoNum) && contado.length > 0 && (
             <p
@@ -401,6 +440,7 @@ function CerrarCajaPanel({ aperturaId }: { aperturaId: string }) {
             rows={3}
             className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             placeholder="Observaciones del cierre..."
+            {...notasCierreKb.inputProps}
           />
         </div>
 

@@ -38,6 +38,7 @@ import {
   type ProductoListado,
 } from '@/hooks/useCatalogo';
 import { type Cliente } from '@/hooks/useClientes';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { type Mesa } from '@/hooks/useMesas';
 import {
   useAgregarItems,
@@ -85,6 +86,13 @@ function POSScreen() {
   const [categoriaId, setCategoriaId] = useState<string | null>(null);
   const [promocionId, setPromocionId] = useState<string | null>(null);
   const [busqueda, setBusqueda] = useState('');
+
+  const busquedaKb = useKeyboardInput({
+    value: busqueda,
+    onChange: setBusqueda,
+    label: 'Buscar producto',
+    maxLength: 60,
+  });
 
   const { data: productos = [], isLoading: prodLoading } = useProductos({
     categoriaId: categoriaId ?? undefined,
@@ -423,6 +431,7 @@ function POSScreen() {
                 onChange={(e) => setBusqueda(e.target.value)}
                 placeholder="Buscar producto…"
                 className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm"
+                {...busquedaKb.inputProps}
               />
             </div>
             <p className="text-xs text-muted-foreground">{productos.length} productos</p>

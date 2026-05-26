@@ -10,6 +10,8 @@ import {
   useClientesPos,
   useCrearClientePos,
 } from '@/hooks/useClientesPos';
+import { useKeyboardInput } from '@/hooks/useKeyboardInput';
+import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -36,6 +38,13 @@ export function ClienteSearch({
 
   const { data: clientes = [], isFetching } = useClientesPos(busqueda.trim());
   const { data: detalle } = useClienteDetalle(selectedId);
+
+  const busquedaKb = useKeyboardInput({
+    value: busqueda,
+    onChange: setBusqueda,
+    label: 'Buscar cliente',
+    maxLength: 60,
+  });
 
   if (selectedId && detalle) {
     return (
@@ -88,6 +97,7 @@ export function ClienteSearch({
           placeholder="Buscar por nombre, RUC, CI o teléfono..."
           autoFocus
           className="w-full rounded-md border border-input bg-background py-2 pl-9 pr-3 text-sm"
+          {...busquedaKb.inputProps}
         />
       </div>
 
@@ -235,6 +245,37 @@ function CrearClienteRapidoModal({
   const [telefono, setTelefono] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const razonKb = useKeyboardInput({
+    value: razonSocial,
+    onChange: setRazonSocial,
+    label: tipo === 'PERSONA_FISICA' ? 'Nombre completo' : 'Razón social',
+    maxLength: 80,
+  });
+  const rucNp = useNumpadInput({
+    value: ruc,
+    onChange: setRuc,
+    label: 'RUC',
+    maxLength: 8,
+  });
+  const dvNp = useNumpadInput({
+    value: dv,
+    onChange: setDv,
+    label: 'DV',
+    maxLength: 1,
+  });
+  const documentoNp = useNumpadInput({
+    value: documento,
+    onChange: setDocumento,
+    label: 'CI',
+    maxLength: 10,
+  });
+  const telefonoNp = useNumpadInput({
+    value: telefono,
+    onChange: setTelefono,
+    label: 'Teléfono',
+    maxLength: 15,
+  });
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -312,6 +353,7 @@ function CrearClienteRapidoModal({
             onChange={(e) => setRazonSocial(e.target.value)}
             placeholder={tipo === 'PERSONA_FISICA' ? 'Nombre completo' : 'Razón social'}
             className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm"
+            {...razonKb.inputProps}
           />
 
           {tipo === 'PERSONA_JURIDICA' ? (
@@ -322,6 +364,7 @@ function CrearClienteRapidoModal({
                 placeholder="RUC"
                 className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm font-mono"
                 maxLength={8}
+                {...rucNp.inputProps}
               />
               <input
                 value={dv}
@@ -329,22 +372,25 @@ function CrearClienteRapidoModal({
                 placeholder="DV"
                 className="rounded-md border border-input bg-background px-2.5 py-1.5 text-center text-sm font-mono"
                 maxLength={1}
+                {...dvNp.inputProps}
               />
             </div>
           ) : (
             <input
               value={documento}
-              onChange={(e) => setDocumento(e.target.value)}
+              onChange={(e) => setDocumento(e.target.value.replace(/\D/g, ''))}
               placeholder="CI"
               className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm font-mono"
+              {...documentoNp.inputProps}
             />
           )}
 
           <input
             value={telefono}
-            onChange={(e) => setTelefono(e.target.value)}
+            onChange={(e) => setTelefono(e.target.value.replace(/\D/g, ''))}
             placeholder="Teléfono"
-            className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm"
+            className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-sm font-mono"
+            {...telefonoNp.inputProps}
           />
 
           {error && (
