@@ -94,7 +94,11 @@ jobs:
       - name: Test
         env:
           NODE_ENV: test
+          # vitest.config.ts lee DATABASE_URL_TEST y la inyecta como DATABASE_URL
+          # al worker (así los tests nunca pisan la BD de dev). En CI las dos
+          # apuntan a la misma smash_test del service container.
           DATABASE_URL: postgresql://smash:smash@localhost:5432/smash_test?schema=public
+          DATABASE_URL_TEST: postgresql://smash:smash@localhost:5432/smash_test?schema=public
           DB_PASSWORD: smash
           JWT_SECRET: ci-only-jwt-secret-must-be-at-least-32-chars-long
           REDIS_URL: redis://localhost:6379
