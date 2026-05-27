@@ -17,6 +17,7 @@ import {
   useEliminarImagenProducto,
   useSubirImagenProducto,
 } from '@/hooks/useCatalogo';
+import { useInsumos } from '@/hooks/useInventario';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -65,6 +66,19 @@ export function ProductoForm({ producto }: ProductoFormProps) {
   const [esCombo, setEsCombo] = useState(producto?.esCombo ?? false);
   const [esVendible, setEsVendible] = useState(producto?.esVendible ?? true);
   const [esPreparacion, setEsPreparacion] = useState(producto?.esPreparacion ?? false);
+  // Reventa: insumo vinculado para costo + descuento de stock.
+  const [reventaInsumoId, setReventaInsumoId] = useState(producto?.productoInventarioId ?? '');
+  const [cantidadInventario, setCantidadInventario] = useState(
+    producto?.cantidadInventario ? String(producto.cantidadInventario) : '1',
+  );
+
+  const { data: insumosResp } = useInsumos();
+  const insumos = insumosResp?.insumos ?? [];
+  const insumoSel = insumos.find((i) => i.id === reventaInsumoId);
+  // La reventa es XOR con receta, y no aplica a combos ni sub-preparaciones.
+  const tieneReceta = Boolean(producto?.receta);
+  const reventaBloqueada = esCombo || esPreparacion || tieneReceta;
+  const esReventa = !reventaBloqueada && Boolean(reventaInsumoId);
 
   const [error, setError] = useState<string | null>(null);
   const isPending =
@@ -131,6 +145,11 @@ export function ProductoForm({ producto }: ProductoFormProps) {
     if (!nombre.trim()) return setError('Nombre requerido');
     if (Number.isNaN(precioNum) || precioNum < 0) return setError('Precio inválido');
 
+    const cantInv = Number(cantidadInventario.replace(',', '.'));
+    if (esReventa && (!Number.isFinite(cantInv) || cantInv <= 0)) {
+      return setError('Cantidad de insumo de reventa inválida (debe ser > 0)');
+    }
+
     const body = {
       nombre: nombre.trim(),
       codigo: codigo.trim() || undefined,
@@ -145,6 +164,9 @@ export function ProductoForm({ producto }: ProductoFormProps) {
       esCombo,
       esVendible,
       esPreparacion,
+      // `null` desvincula explícitamente la reventa (back-end XOR con receta).
+      productoInventarioId: esReventa ? reventaInsumoId : null,
+      cantidadInventario: esReventa ? cantInv : null,
     };
 
     try {
@@ -297,6 +319,56 @@ export function ProductoForm({ producto }: ProductoFormProps) {
               />
             </Field>
           </div>
+        </Section>
+
+        <Section title="Reventa / costo">
+          {reventaBloqueada ? (
+            <p className="text-xs text-muted-foreground">
+              {tieneReceta
+                ? 'Este producto tiene receta: su costo sale de los insumos de la receta. Para venderlo como reventa, eliminá la receta primero.'
+                : 'No aplica a combos ni sub-preparaciones.'}
+            </p>
+          ) : (
+            <>
+              <Field
+                label="Insumo de reventa"
+                hint="Vincular un insumo da costo y descuenta stock al vender (bebidas envasadas, snacks)."
+              >
+                <Select
+                  value={reventaInsumoId}
+                  onChange={(e) => setReventaInsumoId(e.target.value)}
+                >
+                  <option value="">— No es de reventa —</option>
+                  {insumos.map((i) => (
+                    <option key={i.id} value={i.id}>
+                      {i.nombre}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              {reventaInsumoId && (
+                <Field
+                  label={`Cantidad de insumo por unidad vendida${
+                    insumoSel ? ` (${insumoSel.unidadMedida.toLowerCase()})` : ''
+                  }`}
+                  hint={
+                    insumoSel
+                      ? `Costo del insumo: ${formatGs(Number(insumoSel.costoUnitario))} / ${insumoSel.unidadMedida.toLowerCase()}`
+                      : undefined
+                  }
+                >
+                  <Input
+                    type="text"
+                    inputMode="decimal"
+                    value={cantidadInventario}
+                    onChange={(e) => setCantidadInventario(e.target.value)}
+                    className="font-mono"
+                    placeholder="1"
+                  />
+                </Field>
+              )}
+            </>
+          )}
         </Section>
 
         {producto ? (

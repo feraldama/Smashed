@@ -75,6 +75,15 @@ export interface ProductoDetalle extends ProductoListado {
   receta: unknown;
   combo: ComboConfig | null;
   modificadorGrupos: ProductoModificadorGrupoVinculado[];
+  // Reventa: insumo vinculado para imputar costo y descontar stock al vender.
+  productoInventarioId: string | null;
+  cantidadInventario: string | null;
+  productoInventario: {
+    id: string;
+    nombre: string;
+    unidadMedida: string;
+    costoUnitario: string;
+  } | null;
 }
 
 // ───── Combo (config) ─────
@@ -261,6 +270,9 @@ interface CrearProductoInput {
   esCombo?: boolean;
   esVendible?: boolean;
   esPreparacion?: boolean;
+  // Reventa: `null` desvincula el insumo. `cantidadInventario` > 0 si hay insumo.
+  productoInventarioId?: string | null;
+  cantidadInventario?: number | null;
 }
 
 export function useCrearProducto() {

@@ -56,6 +56,13 @@ function usuarioFragment(usuarioId: string | undefined, alias: string, column: s
     : Prisma.empty;
 }
 
+// Sólo documentos de venta. Las notas de crédito/débito (devoluciones, ajustes)
+// no son ventas: si algún día se emiten, NO deben sumar como ingreso/ganancia
+// acá. Restar las devoluciones es un trabajo aparte, cuando exista ese flujo.
+// (Hoy `emitirComprobante` ya sólo deja emitir TICKET/FACTURA; esto es defensa
+// en profundidad por si entran otros tipos directo a la BD o por flujos futuros.)
+const soloVentas = Prisma.sql`AND c."tipo_documento" IN ('TICKET', 'FACTURA')`;
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  VENTAS
 // ═══════════════════════════════════════════════════════════════════════════
@@ -88,6 +95,7 @@ export async function resumenVentas(user: UserCtx, q: RangoFechasQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -130,6 +138,7 @@ export async function ventasPorDia(user: UserCtx, q: RangoFechasQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -161,6 +170,7 @@ export async function ventasPorHora(user: UserCtx, q: RangoFechasQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -191,6 +201,7 @@ export async function topProductos(user: UserCtx, q: TopQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -255,6 +266,7 @@ export async function productosRentabilidad(user: UserCtx, q: RentabilidadQuery)
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -289,6 +301,7 @@ export async function topClientes(user: UserCtx, q: TopQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND cl."es_consumidor_final" = false
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
@@ -316,6 +329,7 @@ export async function metodosPago(user: UserCtx, q: RangoFechasQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -357,6 +371,7 @@ export async function ventasPorCanal(user: UserCtx, q: RangoFechasQuery) {
       c."empresa_id" = ${user.empresaId}
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
       ${sucursalFragment(sucursalId)}
@@ -794,6 +809,7 @@ export async function comparativaSucursales(user: UserCtx, q: RangoFechasQuery) 
       ON c."sucursal_id" = s.id
       AND c."estado" = 'EMITIDO'
       AND c."deleted_at" IS NULL
+      ${soloVentas}
       AND c."fecha_emision" >= ${q.desde}
       AND c."fecha_emision" <= ${q.hasta}
     WHERE s."empresa_id" = ${user.empresaId} AND s."deleted_at" IS NULL

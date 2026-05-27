@@ -15,7 +15,12 @@ export const emitirComprobanteInput = z
   .object({
     pedidoId: z.string().cuid(),
     clienteId: z.string().cuid().optional(),
-    tipoDocumento: z.nativeEnum(TipoDocumentoFiscal).default(TipoDocumentoFiscal.TICKET),
+    // El flujo de venta sólo emite documentos de venta. Notas de crédito/débito,
+    // autofactura y remisión van por flujos propios (devolución, etc.) y NO se
+    // emiten facturando un pedido — si no, contarían como venta en los reportes.
+    tipoDocumento: z
+      .enum([TipoDocumentoFiscal.TICKET, TipoDocumentoFiscal.FACTURA])
+      .default(TipoDocumentoFiscal.TICKET),
     condicionVenta: z.nativeEnum(CondicionVenta).default(CondicionVenta.CONTADO),
     pagos: z.array(pagoComprobanteInput).min(1).max(5),
     notas: z.string().trim().max(500).optional(),

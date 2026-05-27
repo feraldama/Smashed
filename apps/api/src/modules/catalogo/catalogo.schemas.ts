@@ -53,7 +53,7 @@ export const categoriaIdParam = z.object({ id: z.string().cuid() });
 
 // ───── Productos de venta ─────
 
-export const crearProductoInput = z.object({
+const productoBaseInput = z.object({
   categoriaId: z.string().cuid().optional(),
   codigo: z.string().trim().max(50).optional(),
   codigoBarras: z.string().trim().max(50).optional(),
@@ -67,11 +67,55 @@ export const crearProductoInput = z.object({
   esCombo: z.boolean().default(false),
   esVendible: z.boolean().default(true),
   esPreparacion: z.boolean().default(false),
+  // Reventa: vínculo a un insumo para imputar costo y descontar stock al vender
+  // (bebidas envasadas, snacks). XOR con receta — validado en el service.
+  // `null` explícito desvincula; `undefined` deja como está (en update).
+  // `cantidadInventario` = unidades del insumo por unidad vendida (> 0 si hay
+  // insumo vinculado).
+  productoInventarioId: z.string().cuid().nullable().optional(),
+  cantidadInventario: z.number().positive().max(99_999_999).nullable().optional(),
 });
 
-export const actualizarProductoInput = crearProductoInput.partial().extend({
-  activo: z.boolean().optional(),
-});
+// Reglas de reventa que no dependen de la BD (las que sí, van en el service).
+function checkReventa(
+  d: {
+    productoInventarioId?: string | null;
+    cantidadInventario?: number | null;
+    esCombo?: boolean;
+    esPreparacion?: boolean;
+  },
+  ctx: z.RefinementCtx,
+) {
+  if (!d.productoInventarioId) return;
+  if (d.cantidadInventario == null || d.cantidadInventario <= 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Indicá la cantidad de insumo por unidad vendida (> 0)',
+      path: ['cantidadInventario'],
+    });
+  }
+  if (d.esCombo) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Un combo no puede ser producto de reventa',
+      path: ['productoInventarioId'],
+    });
+  }
+  if (d.esPreparacion) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Una preparación no puede ser producto de reventa',
+      path: ['productoInventarioId'],
+    });
+  }
+}
+
+export const crearProductoInput = productoBaseInput.superRefine(checkReventa);
+
+export const actualizarProductoInput = productoBaseInput
+  .partial()
+  .extend({ activo: z.boolean().optional() })
+  .superRefine(checkReventa);
 
 export const productoIdParam = z.object({ id: z.string().cuid() });
 

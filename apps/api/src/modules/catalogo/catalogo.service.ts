@@ -166,6 +166,11 @@ export async function obtenerProducto(args: {
           },
         },
       },
+      // Insumo vinculado para reventa (costo + stock). Los escalares
+      // productoInventarioId/cantidadInventario ya vienen por defecto.
+      productoInventario: {
+        select: { id: true, nombre: true, unidadMedida: true, costoUnitario: true },
+      },
       combo: {
         include: {
           grupos: {
@@ -306,6 +311,56 @@ export async function eliminarCategoria(empresaId: string, id: string) {
 //  WRITE — Productos de venta
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Valida el vínculo de reventa (`productoInventarioId`) cuando viene en el input:
+ *  - el insumo debe existir y ser de la empresa;
+ *  - XOR con receta: si el producto ya tiene receta activa, no puede ser de
+ *    reventa (se pasa `productoVentaId` sólo en update; al crear no hay receta).
+ */
+async function validarVinculoReventa(
+  empresaId: string,
+  input: { productoInventarioId?: string | null },
+  productoVentaId?: string,
+) {
+  if (!input.productoInventarioId) return;
+
+  const insumo = await prisma.productoInventario.findFirst({
+    where: { id: input.productoInventarioId, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!insumo) {
+    throw Errors.validation({
+      productoInventarioId: 'Insumo no encontrado o no pertenece a tu empresa',
+    });
+  }
+
+  if (productoVentaId) {
+    const receta = await prisma.receta.findFirst({
+      where: { productoVentaId, deletedAt: null },
+      select: { id: true },
+    });
+    if (receta) {
+      throw Errors.validation({
+        productoInventarioId:
+          'El producto tiene receta; no puede ser de reventa a la vez. Eliminá la receta primero.',
+      });
+    }
+  }
+}
+
+/**
+ * Normaliza el data de reventa: desvincular el insumo (`productoInventarioId:
+ * null`) también limpia `cantidadInventario`, para no dejar un valor colgado.
+ */
+function normalizarReventa<T extends { productoInventarioId?: string | null }>(
+  input: T,
+): T & { cantidadInventario?: number | null } {
+  if ('productoInventarioId' in input && !input.productoInventarioId) {
+    return { ...input, cantidadInventario: null };
+  }
+  return input;
+}
+
 export async function crearProducto(empresaId: string, input: CrearProductoInput) {
   // Validar que la categoría (si viene) pertenece a la empresa
   if (input.categoriaId) {
@@ -315,8 +370,10 @@ export async function crearProducto(empresaId: string, input: CrearProductoInput
     if (!cat) throw Errors.validation({ categoriaId: 'no encontrada' });
   }
 
+  await validarVinculoReventa(empresaId, input);
+
   return prisma.productoVenta.create({
-    data: { empresaId, ...input },
+    data: { empresaId, ...normalizarReventa(input) },
     include: { categoria: { select: { id: true, nombre: true } } },
   });
 }
@@ -338,9 +395,11 @@ export async function actualizarProducto(
     if (!cat) throw Errors.validation({ categoriaId: 'no encontrada' });
   }
 
+  await validarVinculoReventa(empresaId, input, id);
+
   return prisma.productoVenta.update({
     where: { id },
-    data: input,
+    data: normalizarReventa(input),
     include: { categoria: { select: { id: true, nombre: true } } },
   });
 }
@@ -585,6 +644,14 @@ export async function setReceta(empresaId: string, productoVentaId: string, inpu
     where: { id: productoVentaId, empresaId, deletedAt: null },
   });
   if (!producto) throw Errors.notFound('Producto no encontrado');
+  // XOR con reventa: un producto vinculado a un insumo de reventa no puede
+  // tener receta a la vez (el costo/stock saldría por dos caminos).
+  if (producto.productoInventarioId) {
+    throw Errors.validation({
+      receta:
+        'El producto está vinculado a un insumo de reventa; quitá ese vínculo antes de cargar una receta.',
+    });
+  }
 
   const insumoIds = [
     ...new Set(input.items.map((i) => i.productoInventarioId).filter(Boolean) as string[]),

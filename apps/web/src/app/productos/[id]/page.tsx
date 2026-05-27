@@ -58,7 +58,11 @@ function Editar({ id }: { id: string }) {
       {producto && (
         <div className="space-y-6">
           <ProductoForm producto={producto} />
-          {!producto.esCombo && <RecetaEditor producto={producto} />}
+          {/* Reventa y receta son excluyentes: si el producto toma su costo de
+              un insumo de reventa, no mostramos el editor de receta. */}
+          {!producto.esCombo && !producto.productoInventarioId && (
+            <RecetaEditor producto={producto} />
+          )}
         </div>
       )}
     </>
