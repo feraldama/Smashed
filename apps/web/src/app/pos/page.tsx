@@ -775,6 +775,12 @@ function POSScreen() {
                     promocionId: promoFields.promocionId,
                     promocionNombre: promoFields.promocionNombre,
                     promocionNxm: promoFields.promocionNxm,
+                    // En NXM aseguramos al menos `lleva` unidades (sin pisar una
+                    // cantidad mayor que el cajero haya elegido a propósito).
+                    cantidad:
+                      promoFields.cantidad != null
+                        ? Math.max(item.cantidad, promoFields.cantidad)
+                        : item.cantidad,
                   };
                 }
               }

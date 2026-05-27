@@ -123,24 +123,62 @@ export async function crear(user: UserCtx, input: CrearPromocionInput) {
 
   await validarReferencias(empresaId, input.productos, input.sucursalIds);
 
+  // Campos escalares comunes al create y al revive de una promo borrada.
+  const scalars = {
+    descripcion: input.descripcion ?? null,
+    tipo: input.tipo,
+    precioFijo: input.precioFijo == null ? null : BigInt(input.precioFijo),
+    porcentaje: input.porcentaje ?? null,
+    nxmLleva: input.nxmLleva ?? null,
+    nxmPaga: input.nxmPaga ?? null,
+    vigenciaDesde: input.vigenciaDesde ? new Date(input.vigenciaDesde) : null,
+    vigenciaHasta: input.vigenciaHasta ? new Date(input.vigenciaHasta) : null,
+    diasSemana: input.diasSemana ?? [],
+    horaInicio: input.horaInicio ?? null,
+    horaFin: input.horaFin ?? null,
+    activo: input.activo,
+    iconoEmoji: input.iconoEmoji ?? null,
+    ordenMenu: input.ordenMenu,
+  };
+
+  // El constraint @@unique([empresaId, nombre]) no contempla deletedAt: una
+  // promo borrada (soft delete) sigue ocupando el nombre y haría fallar el
+  // create con P2002. El chequeo de `dup` de arriba solo mira las activas, así
+  // que si hay una borrada con ese nombre la revivimos en vez de insertar:
+  // restauramos la fila y reemplazamos productos/sucursales en bloque (igual
+  // que en `actualizar`).
+  const borrada = await prisma.promocion.findFirst({
+    where: { empresaId, nombre: input.nombre, deletedAt: { not: null } },
+  });
+  if (borrada) {
+    return prisma.$transaction(async (tx) => {
+      await tx.promocionProducto.deleteMany({ where: { promocionId: borrada.id } });
+      await tx.promocionProducto.createMany({
+        data: input.productos.map((p) => ({
+          promocionId: borrada.id,
+          productoVentaId: p.productoVentaId,
+          cantidadMin: p.cantidadMin,
+        })),
+      });
+      await tx.promocionSucursal.deleteMany({ where: { promocionId: borrada.id } });
+      if (input.sucursalIds.length > 0) {
+        await tx.promocionSucursal.createMany({
+          data: input.sucursalIds.map((sucursalId) => ({ promocionId: borrada.id, sucursalId })),
+        });
+      }
+      return tx.promocion.update({
+        where: { id: borrada.id },
+        data: { ...scalars, deletedAt: null },
+        include: PROMOCION_INCLUDE,
+      });
+    });
+  }
+
   return prisma.promocion.create({
     data: {
       empresaId,
       nombre: input.nombre,
-      descripcion: input.descripcion ?? null,
-      tipo: input.tipo,
-      precioFijo: input.precioFijo == null ? null : BigInt(input.precioFijo),
-      porcentaje: input.porcentaje ?? null,
-      nxmLleva: input.nxmLleva ?? null,
-      nxmPaga: input.nxmPaga ?? null,
-      vigenciaDesde: input.vigenciaDesde ? new Date(input.vigenciaDesde) : null,
-      vigenciaHasta: input.vigenciaHasta ? new Date(input.vigenciaHasta) : null,
-      diasSemana: input.diasSemana ?? [],
-      horaInicio: input.horaInicio ?? null,
-      horaFin: input.horaFin ?? null,
-      activo: input.activo,
-      iconoEmoji: input.iconoEmoji ?? null,
-      ordenMenu: input.ordenMenu,
+      ...scalars,
       productos: {
         create: input.productos.map((p) => ({
           productoVentaId: p.productoVentaId,

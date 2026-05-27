@@ -5,8 +5,10 @@ import type { ModoStockReceta, Prisma, PrismaClient } from '@prisma/client';
  * cantidades de insumos crudos, atravesando sub-preparaciones.
  *
  * Reglas:
- *  - Si el producto no tiene receta → no descuenta nada (ej: bebidas que se cargan
- *    como ProductoInventario directo no usan este path).
+ *  - Si el producto no tiene receta pero está vinculado a un insumo de reventa
+ *    (`ProductoVenta.productoInventarioId`), descuenta `cantidadInventario` de
+ *    ese insumo por unidad vendida (bebidas envasadas, snacks comprados ya
+ *    hechos). Sin receta ni vínculo → no descuenta nada.
  *  - `Receta.rinde` representa cuántas porciones produce esa receta. Para un
  *    producto vendible típico es 1 (cada vez que lo hacés produce 1 unidad).
  *    Para sub-preparaciones (salsas, masas) es el batch (ej: 100ml de salsa).
@@ -61,10 +63,17 @@ export async function expandirReceta(
   opts: { ignorarModoLoteRaiz?: boolean } = {},
 ): Promise<Map<string, number>> {
   const cache = new Map<string, RecetaSlim | null>();
-  return expandirInterno(client, productoVentaId, cantidad, new Set(), cache, {
+  const reventaCache = new Map<string, ReventaSlim | null>();
+  return expandirInterno(client, productoVentaId, cantidad, new Set(), cache, reventaCache, {
     esRaiz: true,
     ignorarModoLoteRaiz: opts.ignorarModoLoteRaiz ?? false,
   });
+}
+
+/** Vínculo de reventa: insumo directo de un ProductoVenta sin receta. */
+interface ReventaSlim {
+  productoInventarioId: string;
+  cantidadInventario: number;
 }
 
 async function expandirInterno(
@@ -73,6 +82,7 @@ async function expandirInterno(
   cantidad: number,
   visitando: Set<string>,
   cache: Map<string, RecetaSlim | null>,
+  reventaCache: Map<string, ReventaSlim | null>,
   ctx: { esRaiz: boolean; ignorarModoLoteRaiz: boolean },
 ): Promise<Map<string, number>> {
   if (visitando.has(productoVentaId)) {
@@ -104,7 +114,14 @@ async function expandirInterno(
     cache.set(productoVentaId, receta);
   }
 
-  if (!receta) return consumo;
+  if (!receta) {
+    // Sin receta: ¿es un producto de reventa vinculado a un insumo directo?
+    const reventa = await resolverReventa(client, productoVentaId, reventaCache);
+    if (reventa) {
+      consumo.set(reventa.productoInventarioId, cantidad * reventa.cantidadInventario);
+    }
+    return consumo;
+  }
 
   // Modo LOTE en el nivel raíz: descontar del espejo en vez de expandir. Se
   // puede forzar la expansión con ignorarModoLoteRaiz (caso: producir el lote).
@@ -144,6 +161,7 @@ async function expandirInterno(
         cantNecesaria,
         nuevoVisitando,
         cache,
+        reventaCache,
         { esRaiz: true, ignorarModoLoteRaiz: false },
       );
       for (const [insumoId, cantSub] of subConsumo) {
@@ -154,4 +172,31 @@ async function expandirInterno(
   }
 
   return consumo;
+}
+
+/**
+ * Resuelve el vínculo de reventa de un ProductoVenta sin receta. Devuelve el
+ * insumo y la cantidad por unidad vendida, o null si no es de reventa. Cachea
+ * el resultado (incluido el null) para no repegarle a la BD.
+ */
+async function resolverReventa(
+  client: Client,
+  productoVentaId: string,
+  reventaCache: Map<string, ReventaSlim | null>,
+): Promise<ReventaSlim | null> {
+  const cached = reventaCache.get(productoVentaId);
+  if (cached !== undefined) return cached;
+
+  const prod = await client.productoVenta.findUnique({
+    where: { id: productoVentaId },
+    select: { productoInventarioId: true, cantidadInventario: true },
+  });
+  const reventa: ReventaSlim | null = prod?.productoInventarioId
+    ? {
+        productoInventarioId: prod.productoInventarioId,
+        cantidadInventario: prod.cantidadInventario ? dec(prod.cantidadInventario) : 1,
+      }
+    : null;
+  reventaCache.set(productoVentaId, reventa);
+  return reventa;
 }

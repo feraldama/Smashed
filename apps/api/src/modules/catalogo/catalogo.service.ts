@@ -246,6 +246,20 @@ export async function obtenerProducto(args: {
 // ═══════════════════════════════════════════════════════════════════════════
 
 export async function crearCategoria(empresaId: string, input: CrearCategoriaInput) {
+  // El constraint @@unique([empresaId, nombre]) no contempla deletedAt: una
+  // categoría borrada (soft delete) sigue ocupando el nombre y haría fallar el
+  // create con P2002 ("Ya existe un registro con ese valor único"), aunque no
+  // aparezca en la lista. Si hay una borrada con ese nombre, la revivimos en
+  // vez de insertar: restaura la fila y reusa sus productos asociados.
+  const borrada = await prisma.categoriaProductoEmpresa.findFirst({
+    where: { empresaId, nombre: input.nombre, deletedAt: { not: null } },
+  });
+  if (borrada) {
+    return prisma.categoriaProductoEmpresa.update({
+      where: { id: borrada.id },
+      data: { ...input, activa: true, deletedAt: null },
+    });
+  }
   return prisma.categoriaProductoEmpresa.create({
     data: { empresaId, ...input },
   });

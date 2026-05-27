@@ -816,6 +816,10 @@ model ProductoInventario {
   itemsCompra        ItemCompra[]
   // Recetas de sub-preparaciones en modo LOTE que usan este insumo como espejo.
   recetasEspejo      Receta[]          @relation("RecetaEspejo")
+  // Opciones de modificador que descuentan este insumo directamente al vender.
+  modificadorOpciones ModificadorOpcion[] @relation("ModificadorInsumo")
+  // Productos de reventa cuyo costo y stock salen directo de este insumo.
+  productosReventa   ProductoVenta[]   @relation("ProductoVentaReventa")
 
   @@unique([empresaId, codigoBarras])
   @@unique([empresaId, codigo])
@@ -873,6 +877,16 @@ model ProductoVenta {
   esPreparacion Boolean  @default(false) @map("es_preparacion")
   activo        Boolean  @default(true)
 
+  // Reventa: producto comprado ya hecho que se revende (bebida envasada, snack).
+  // Vincula a un ProductoInventario para descontar stock al vender e imputar
+  // costo. XOR con `receta`: un producto tiene receta O vínculo de reventa,
+  // nunca ambos (validado a nivel app). `cantidadInventario` = cuántas unidades
+  // del insumo consume cada unidad vendida (default 1; permite vender por unidad
+  // algo comprado en otra unidad de medida).
+  productoInventarioId String?             @map("producto_inventario_id")
+  productoInventario   ProductoInventario? @relation("ProductoVentaReventa", fields: [productoInventarioId], references: [id], onDelete: SetNull)
+  cantidadInventario   Decimal?            @default(1) @map("cantidad_inventario") @db.Decimal(15, 3)
+
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
   deletedAt DateTime? @map("deleted_at")
@@ -894,6 +908,7 @@ model ProductoVenta {
   @@unique([empresaId, codigoBarras])
   @@index([empresaId, categoriaId, activo, deletedAt])
   @@index([empresaId, nombre])
+  @@index([productoInventarioId])
   @@map("producto_venta")
 }
 
@@ -1204,13 +1219,24 @@ model ModificadorOpcion {
   orden       Int     @default(0)
   activo      Boolean @default(true)
 
-  // Vínculo opcional a un ProductoVenta (idealmente esPreparacion=true, ej.
-  // "Cheddar — porción") para descontar stock al confirmar el pedido. Si es
-  // null, la opción no descuenta nada (caso: "sin sal", "extra picante" sin
-  // costo de insumo). Al vender, se expande recursivamente la receta del
-  // producto vinculado, multiplicado por la cantidad del item del pedido.
+  // Vínculo opcional para descontar stock al confirmar el pedido. XOR: o un
+  // ProductoVenta o un ProductoInventario (insumo) — nunca ambos. Validado a
+  // nivel app. Si ambos son null, la opción no descuenta nada (caso: "sin sal",
+  // "extra picante" sin costo de insumo).
+  //
+  // - productoVentaId (idealmente esPreparacion=true, ej. "Cheddar — porción"):
+  //   al vender se expande recursivamente su receta, multiplicada por la
+  //   cantidad del item del pedido.
   productoVentaId String?        @map("producto_venta_id")
   productoVenta   ProductoVenta? @relation("ModificadorProducto", fields: [productoVentaId], references: [id], onDelete: SetNull)
+
+  // - productoInventarioId (insumo con stock propio, ej. "Huevo"): al vender se
+  //   descuenta directo `cantidadInventario` (en la unidad del insumo) por la
+  //   cantidad del item, sin expandir receta. `cantidadInventario` es
+  //   obligatoria cuando hay insumo vinculado.
+  productoInventarioId String?             @map("producto_inventario_id")
+  productoInventario   ProductoInventario? @relation("ModificadorInsumo", fields: [productoInventarioId], references: [id], onDelete: SetNull)
+  cantidadInventario   Decimal?            @map("cantidad_inventario") @db.Decimal(15, 3)
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -1219,6 +1245,7 @@ model ModificadorOpcion {
 
   @@index([modificadorGrupoId])
   @@index([productoVentaId])
+  @@index([productoInventarioId])
   @@map("modificador_opcion")
 }
 

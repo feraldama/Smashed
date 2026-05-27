@@ -19,6 +19,16 @@ export interface ModificadorOpcion {
     esPreparacion: boolean;
     activo: boolean;
   } | null;
+  productoInventarioId: string | null;
+  // Decimal serializado como string. Cantidad del insumo a descontar al vender.
+  cantidadInventario: string | null;
+  productoInventario: {
+    id: string;
+    nombre: string;
+    codigo: string | null;
+    unidadMedida: string;
+    activo: boolean;
+  } | null;
 }
 
 export interface ModificadorGrupo {
@@ -73,7 +83,11 @@ export interface OpcionInput {
   precioExtra?: number;
   orden?: number;
   activo?: boolean;
+  // Vínculo de stock — XOR: producto o insumo. cantidadInventario es la cantidad
+  // del insumo (en su unidad) a descontar; sólo aplica si hay productoInventarioId.
   productoVentaId?: string | null;
+  productoInventarioId?: string | null;
+  cantidadInventario?: number | null;
 }
 
 export interface CrearGrupoInput {

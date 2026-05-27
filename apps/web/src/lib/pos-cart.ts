@@ -233,10 +233,14 @@ export function itemDesdeProductoEnPromo(
     nxmLleva: number | null;
     nxmPaga: number | null;
   },
-): Omit<ItemCarrito, 'lineId' | 'cantidad'> {
+): Omit<ItemCarrito, 'lineId' | 'cantidad'> & { cantidad?: number } {
   const precioBase = Number(p.precio);
   let precio = precioBase;
   let promocionNxm: { lleva: number; paga: number } | undefined;
+  // En NXM arrancamos con la cantidad mínima que dispara la promo (`lleva`), así
+  // el cajero no carga 1 sola unidad: en un 2x1 se cobra 1 y el mostrador recibe
+  // las 2 a entregar. Para los demás tipos la cantidad cae al default (1).
+  let cantidadInicial: number | undefined;
   if (promo.tipo === 'PRECIO_FIJO' && promo.precioFijo != null) {
     precio = Number(promo.precioFijo);
   } else if (promo.tipo === 'PORCENTAJE' && promo.porcentaje != null) {
@@ -246,6 +250,7 @@ export function itemDesdeProductoEnPromo(
     // En NXM `precioUnitario` queda en el precio base; el descuento sale por
     // unidades gratis al recalcular `precioLinea`.
     promocionNxm = { lleva: promo.nxmLleva, paga: promo.nxmPaga };
+    cantidadInicial = promo.nxmLleva;
   }
   return {
     productoVentaId: p.id,
@@ -258,5 +263,6 @@ export function itemDesdeProductoEnPromo(
     promocionId: promo.id,
     promocionNombre: promo.nombre,
     promocionNxm,
+    ...(cantidadInicial != null ? { cantidad: cantidadInicial } : {}),
   };
 }

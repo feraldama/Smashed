@@ -7,6 +7,7 @@ import { toast } from '@/components/Toast';
 import { Field, Input, Select } from '@/components/ui/Input';
 import { Switch, SwitchField } from '@/components/ui/Switch';
 import { useProductos } from '@/hooks/useCatalogo';
+import { useInsumos } from '@/hooks/useInventario';
 import {
   type ModificadorOpcion,
   useActualizarOpcion,
@@ -31,7 +32,18 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
   const [precioExtra, setPrecioExtra] = useState(opcion ? String(opcion.precioExtra) : '0');
   const [orden, setOrden] = useState(String(opcion?.orden ?? 0));
   const [activo, setActivo] = useState(opcion?.activo ?? true);
-  const [productoVentaId, setProductoVentaId] = useState<string>(opcion?.productoVentaId ?? '');
+  // Vínculo de stock codificado: '' (ninguno), `pv:<id>` (producto) o
+  // `pi:<id>` (insumo). Unifica los dos campos backend en un solo Select.
+  const [vinculo, setVinculo] = useState<string>(
+    opcion?.productoVentaId
+      ? `pv:${opcion.productoVentaId}`
+      : opcion?.productoInventarioId
+        ? `pi:${opcion.productoInventarioId}`
+        : '',
+  );
+  const [cantidadInventario, setCantidadInventario] = useState<string>(
+    opcion?.cantidadInventario ?? '',
+  );
   const [soloSubprep, setSoloSubprep] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,6 +51,16 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
   const { data: productos = [], isLoading: loadingProductos } = useProductos({
     incluirNoVendibles: true,
   });
+  const { data: insumosData, isLoading: loadingInsumos } = useInsumos();
+  const insumos = insumosData?.insumos ?? [];
+
+  const tipoVinculo = vinculo.startsWith('pi:')
+    ? 'insumo'
+    : vinculo.startsWith('pv:')
+      ? 'producto'
+      : 'none';
+  const insumoSel =
+    tipoVinculo === 'insumo' ? insumos.find((i) => i.id === vinculo.slice(3)) : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,8 +71,27 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
     const ord = Number.parseInt(orden, 10);
     if (Number.isNaN(ord) || ord < 0) return setError('Orden debe ser ≥ 0');
 
+    // Desarmar el vínculo codificado en los campos del backend (XOR). Siempre
+    // mandamos los tres para que el update limpie el lado no usado.
+    let productoVentaId: string | null = null;
+    let productoInventarioId: string | null = null;
+    let cantidadInv: number | null = null;
+    if (vinculo.startsWith('pv:')) {
+      productoVentaId = vinculo.slice(3);
+    } else if (vinculo.startsWith('pi:')) {
+      productoInventarioId = vinculo.slice(3);
+      cantidadInv = Number(cantidadInventario.replace(',', '.'));
+      if (!Number.isFinite(cantidadInv) || cantidadInv <= 0) {
+        return setError('Indicá la cantidad de insumo a descontar (> 0)');
+      }
+    }
+
     try {
-      const productoVentaIdValue = productoVentaId.trim() === '' ? null : productoVentaId;
+      const vinculoPayload = {
+        productoVentaId,
+        productoInventarioId,
+        cantidadInventario: cantidadInv,
+      };
       if (opcion) {
         await actualizar.mutateAsync({
           opcionId: opcion.id,
@@ -58,7 +99,7 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
           precioExtra: precio,
           orden: ord,
           activo,
-          productoVentaId: productoVentaIdValue,
+          ...vinculoPayload,
         });
         toast.success('Opción actualizada');
       } else {
@@ -67,7 +108,7 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
           precioExtra: precio,
           orden: ord,
           activo,
-          productoVentaId: productoVentaIdValue,
+          ...vinculoPayload,
         });
         toast.success('Opción creada');
       }
@@ -167,30 +208,65 @@ export function OpcionModificadorFormModal({ grupoId, opcion, onClose }: Props) 
                 </div>
               </div>
               <Field
-                label="Producto vinculado"
+                label="Vincular a"
                 hint={
-                  productoVentaId
-                    ? 'Al vender un ítem con esta opción, se descontará el stock según la receta del producto vinculado, multiplicado por la cantidad del ítem.'
-                    : 'Sin vínculo: la opción no descuenta stock (ej: "sin sal", "extra picante").'
+                  tipoVinculo === 'none'
+                    ? 'Sin vínculo: la opción no descuenta stock (ej: "sin sal", "extra picante").'
+                    : tipoVinculo === 'insumo'
+                      ? 'Descuenta el insumo directo: cantidad indicada × cantidad del ítem vendido.'
+                      : 'Descuenta según la receta del producto vinculado, multiplicada por la cantidad del ítem.'
                 }
               >
                 <Select
-                  value={productoVentaId}
-                  onChange={(e) => setProductoVentaId(e.target.value)}
-                  disabled={loadingProductos}
+                  value={vinculo}
+                  onChange={(e) => setVinculo(e.target.value)}
+                  disabled={loadingProductos || loadingInsumos}
                 >
                   <option value="">— Sin descuento de stock —</option>
-                  {productos
-                    .filter((p) => (soloSubprep ? p.esPreparacion : true))
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.esPreparacion ? '🧪 ' : ''}
-                        {p.nombre}
-                        {p.codigo ? ` (${p.codigo})` : ''}
-                      </option>
-                    ))}
+                  {insumos.length > 0 && (
+                    <optgroup label="Insumos">
+                      {insumos.map((i) => (
+                        <option key={i.id} value={`pi:${i.id}`}>
+                          📦 {i.nombre}
+                          {i.codigo ? ` (${i.codigo})` : ''}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  <optgroup label="Sub-preparaciones / Productos">
+                    {productos
+                      .filter((p) => (soloSubprep ? p.esPreparacion : true))
+                      .map((p) => (
+                        <option key={p.id} value={`pv:${p.id}`}>
+                          {p.esPreparacion ? '🧪 ' : ''}
+                          {p.nombre}
+                          {p.codigo ? ` (${p.codigo})` : ''}
+                        </option>
+                      ))}
+                  </optgroup>
                 </Select>
               </Field>
+              {tipoVinculo === 'insumo' && (
+                <div className="mt-3">
+                  <Field
+                    label="Cantidad a descontar"
+                    hint={
+                      insumoSel
+                        ? `En ${insumoSel.unidadMedida.toLowerCase()} (unidad del insumo), por ítem vendido`
+                        : 'Cantidad del insumo por ítem vendido'
+                    }
+                  >
+                    <Input
+                      type="number"
+                      value={cantidadInventario}
+                      onChange={(e) => setCantidadInventario(e.target.value)}
+                      min={0}
+                      step="0.001"
+                      placeholder="1"
+                    />
+                  </Field>
+                </div>
+              )}
             </div>
 
             {error && (

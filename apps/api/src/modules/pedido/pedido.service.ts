@@ -485,7 +485,13 @@ export const PEDIDO_INCLUDE_PARA_CONFIRMAR = {
       modificadores: {
         select: {
           modificadorOpcionId: true,
-          modificadorOpcion: { select: { productoVentaId: true } },
+          modificadorOpcion: {
+            select: {
+              productoVentaId: true,
+              productoInventarioId: true,
+              cantidadInventario: true,
+            },
+          },
         },
       },
     },
@@ -537,16 +543,25 @@ export async function aplicarConfirmacionInline(
       }
     }
 
-    // Modificadores vinculados a un ProductoVenta (típicamente sub-preparaciones
-    // como "Cheddar — porción") descuentan stock de su receta, multiplicado
-    // por la cantidad del item. Opciones sin productoVenta (ej. "sin sal") no
-    // descuentan nada.
+    // Modificadores con vínculo de stock descuentan según su tipo (XOR):
+    //  - productoVentaId (típicamente sub-preparaciones como "Cheddar —
+    //    porción"): se expande su receta, multiplicada por la cantidad del item.
+    //  - productoInventarioId (insumo directo, ej. "Huevo"): se descuenta
+    //    `cantidadInventario × cantidad del item` directo, sin expandir receta.
+    // Opciones sin vínculo (ej. "sin sal") no descuentan nada.
     for (const mod of item.modificadores) {
-      const modProdId = mod.modificadorOpcion.productoVentaId;
-      if (!modProdId) continue;
-      const subConsumo = await expandirReceta(tx, modProdId, item.cantidad);
-      for (const [insumoId, cant] of subConsumo) {
-        consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
+      const opcion = mod.modificadorOpcion;
+      if (opcion.productoVentaId) {
+        const subConsumo = await expandirReceta(tx, opcion.productoVentaId, item.cantidad);
+        for (const [insumoId, cant] of subConsumo) {
+          consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
+        }
+      } else if (opcion.productoInventarioId && opcion.cantidadInventario) {
+        const cant = opcion.cantidadInventario.toNumber() * item.cantidad;
+        consumoTotal.set(
+          opcion.productoInventarioId,
+          (consumoTotal.get(opcion.productoInventarioId) ?? 0) + cant,
+        );
       }
     }
   }

@@ -13,7 +13,7 @@ import {
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { emitPedido } from '../../lib/socketio.js';
-import { calcularCostoUnitario } from '../pedido/calcular-costo.js';
+import { calcularCostoInsumoDirecto, calcularCostoUnitario } from '../pedido/calcular-costo.js';
 import {
   aplicarCancelacionInline,
   aplicarConfirmacionInline,
@@ -85,7 +85,16 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
         include: {
           productoVenta: { select: { id: true, nombre: true, codigo: true, tasaIva: true } },
           modificadores: {
-            include: { modificadorOpcion: { select: { nombre: true } } },
+            include: {
+              modificadorOpcion: {
+                select: {
+                  nombre: true,
+                  productoVentaId: true,
+                  productoInventarioId: true,
+                  cantidadInventario: true,
+                },
+              },
+            },
           },
           combosOpcion: {
             include: {
@@ -604,25 +613,44 @@ function calcularTotalesComprobante(items: ItemPedidoInput[]) {
 }
 
 /**
- * Costo unitario estimado del item al momento de facturar.
+ * Costo unitario estimado del item al momento de facturar. Debe reflejar el
+ * MISMO consumo de insumos que `aplicarConfirmacionInline` descuenta del stock,
+ * para que `ganancia = (precioUnitario - costoUnitarioSnapshot) * cantidad` cierre.
  *
  *  - Producto suelto: se calcula expandiendo su receta.
  *  - Combo: suma de los costos unitarios de cada opción elegida (cada eleccion
- *    descuenta su propia receta, igual que el flujo de stock en `pedido.service`).
- *  - Sin receta → 0 (limitación conocida; bebidas envasadas no quedan modeladas).
+ *    descuenta su propia receta, igual que el flujo de stock).
+ *  - Modificadores con vínculo de stock (XOR, igual que en `pedido.service`):
+ *    - `productoVentaId` (ej. "Cheddar — porción"): suma el costo de su receta.
+ *    - `productoInventarioId` (insumo directo, ej. "Huevo"): suma
+ *      `cantidadInventario × costo del insumo`.
+ *    Los modificadores sin vínculo (ej. "sin sal") no suman costo.
+ *  - Sin receta ni vínculo → 0 (los productos de reventa toman su costo del
+ *    insumo vinculado vía `expandirReceta`).
  *
- * No considera modificadores (no tienen costo modelado hoy).
+ * Es un costo POR UNIDAD del item: los modificadores aplican a toda la línea, y
+ * el reporte de rentabilidad lo multiplica por `cantidad` — igual que el stock,
+ * que descuenta el consumo del modificador multiplicado por la cantidad.
  */
 async function calcularCostoUnitarioItem(
   tx: Prisma.TransactionClient,
   it: {
     productoVentaId: string;
     combosOpcion: { comboGrupoOpcion: { productoVentaId: string } }[];
+    modificadores: {
+      modificadorOpcion: {
+        productoVentaId: string | null;
+        productoInventarioId: string | null;
+        cantidadInventario: Prisma.Decimal | null;
+      };
+    }[];
   },
   sucursalId: string,
 ): Promise<bigint> {
+  let total = 0n;
+
+  // Costo base: el producto suelto, o la suma de las opciones del combo.
   if (it.combosOpcion.length > 0) {
-    let total = 0n;
     for (const eleccion of it.combosOpcion) {
       total += await calcularCostoUnitario(
         tx,
@@ -630,9 +658,27 @@ async function calcularCostoUnitarioItem(
         sucursalId,
       );
     }
-    return total;
+  } else {
+    total += await calcularCostoUnitario(tx, it.productoVentaId, sucursalId);
   }
-  return calcularCostoUnitario(tx, it.productoVentaId, sucursalId);
+
+  // Costo de los modificadores que consumen stock (sirve para producto suelto y
+  // para componentes del combo — todos llegan acá en `it.modificadores`).
+  for (const mod of it.modificadores) {
+    const opcion = mod.modificadorOpcion;
+    if (opcion.productoVentaId) {
+      total += await calcularCostoUnitario(tx, opcion.productoVentaId, sucursalId);
+    } else if (opcion.productoInventarioId && opcion.cantidadInventario) {
+      total += await calcularCostoInsumoDirecto(
+        tx,
+        opcion.productoInventarioId,
+        opcion.cantidadInventario,
+        sucursalId,
+      );
+    }
+  }
+
+  return total;
 }
 
 function armarDescripcionItem(it: ItemPedidoInput & { productoVenta: { nombre: string } }): string {

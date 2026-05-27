@@ -38,9 +38,64 @@ async function assertProductoVentaOwned(empresaId: string, productoVentaId: stri
   if (!prod) throw Errors.notFound('Producto vinculado no encontrado');
 }
 
+async function assertProductoInventarioOwned(empresaId: string, productoInventarioId: string) {
+  const insumo = await prisma.productoInventario.findFirst({
+    where: { id: productoInventarioId, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (!insumo) throw Errors.notFound('Insumo vinculado no encontrado');
+}
+
+/**
+ * Normaliza y valida el vínculo de stock (XOR: producto o insumo). Comprueba
+ * pertenencia a la empresa y que el insumo traiga cantidad > 0. Devuelve los
+ * tres campos listos para persistir (limpiando el lado no usado).
+ */
+async function resolverVinculoStock(
+  empresaId: string,
+  input: {
+    productoVentaId?: string | null;
+    productoInventarioId?: string | null;
+    cantidadInventario?: number | null;
+  },
+): Promise<{
+  productoVentaId: string | null;
+  productoInventarioId: string | null;
+  cantidadInventario: number | null;
+}> {
+  const productoVentaId = input.productoVentaId ?? null;
+  const productoInventarioId = input.productoInventarioId ?? null;
+
+  if (productoVentaId && productoInventarioId) {
+    throw Errors.validation({
+      productoInventarioId: 'No se puede vincular a un producto y a un insumo a la vez',
+    });
+  }
+  if (productoVentaId) {
+    await assertProductoVentaOwned(empresaId, productoVentaId);
+  }
+  if (productoInventarioId) {
+    await assertProductoInventarioOwned(empresaId, productoInventarioId);
+    if (input.cantidadInventario == null || input.cantidadInventario <= 0) {
+      throw Errors.validation({
+        cantidadInventario: 'Indicá la cantidad de insumo a descontar (> 0)',
+      });
+    }
+  }
+
+  return {
+    productoVentaId,
+    productoInventarioId,
+    cantidadInventario: productoInventarioId ? (input.cantidadInventario ?? null) : null,
+  };
+}
+
 const opcionInclude = {
   productoVenta: {
     select: { id: true, nombre: true, codigo: true, esPreparacion: true, activo: true },
+  },
+  productoInventario: {
+    select: { id: true, nombre: true, codigo: true, unidadMedida: true, activo: true },
   },
 } as const;
 
@@ -90,12 +145,11 @@ export async function crearGrupo(user: UserCtx, input: CrearGrupoInput) {
   });
   if (dup) throw Errors.conflict(`Ya existe un grupo "${input.nombre}"`);
 
-  // Validar pertenencia de productos vinculados en las opciones iniciales.
-  const productoIds = (input.opciones ?? [])
-    .map((o) => o.productoVentaId)
-    .filter((id): id is string => !!id);
-  for (const id of new Set(productoIds)) {
-    await assertProductoVentaOwned(empresaId, id);
+  // Validar pertenencia de los vínculos de stock en las opciones iniciales.
+  for (const o of input.opciones ?? []) {
+    if (o.productoVentaId) await assertProductoVentaOwned(empresaId, o.productoVentaId);
+    if (o.productoInventarioId)
+      await assertProductoInventarioOwned(empresaId, o.productoInventarioId);
   }
 
   return prisma.modificadorGrupo.create({
@@ -114,7 +168,10 @@ export async function crearGrupo(user: UserCtx, input: CrearGrupoInput) {
                 precioExtra: BigInt(o.precioExtra ?? 0),
                 orden: o.orden ?? idx + 1,
                 activo: o.activo ?? true,
+                // El XOR ya lo valida el schema zod; acá sólo persistimos.
                 productoVentaId: o.productoVentaId ?? null,
+                productoInventarioId: o.productoInventarioId ?? null,
+                cantidadInventario: o.productoInventarioId ? (o.cantidadInventario ?? null) : null,
               })),
             },
           }
@@ -165,9 +222,7 @@ export async function crearOpcion(user: UserCtx, grupoId: string, input: CrearOp
   const empresaId = requireEmpresa(user);
   await getGrupoOwned(empresaId, grupoId);
 
-  if (input.productoVentaId) {
-    await assertProductoVentaOwned(empresaId, input.productoVentaId);
-  }
+  const vinculo = await resolverVinculoStock(empresaId, input);
 
   return prisma.modificadorOpcion.create({
     data: {
@@ -176,7 +231,7 @@ export async function crearOpcion(user: UserCtx, grupoId: string, input: CrearOp
       precioExtra: BigInt(input.precioExtra ?? 0),
       orden: input.orden ?? 0,
       activo: input.activo ?? true,
-      productoVentaId: input.productoVentaId ?? null,
+      ...vinculo,
     },
     include: opcionInclude,
   });
@@ -196,9 +251,15 @@ export async function actualizarOpcion(
   });
   if (!opcion) throw Errors.notFound('Opción no encontrada');
 
-  if (input.productoVentaId) {
-    await assertProductoVentaOwned(empresaId, input.productoVentaId);
-  }
+  // El vínculo se recalcula sólo si el payload toca alguno de sus campos; así
+  // un update parcial (ej. sólo el nombre) no toca el vínculo existente. Cuando
+  // sí viene, `resolverVinculoStock` reescribe los tres campos limpiando el
+  // lado no usado (XOR), por eso pasar a un insumo desvincula el producto.
+  const tocaVinculo =
+    input.productoVentaId !== undefined ||
+    input.productoInventarioId !== undefined ||
+    input.cantidadInventario !== undefined;
+  const vinculo = tocaVinculo ? await resolverVinculoStock(empresaId, input) : {};
 
   return prisma.modificadorOpcion.update({
     where: { id: opcionId },
@@ -207,9 +268,7 @@ export async function actualizarOpcion(
       ...(input.precioExtra !== undefined ? { precioExtra: BigInt(input.precioExtra) } : {}),
       ...(input.orden !== undefined ? { orden: input.orden } : {}),
       ...(input.activo !== undefined ? { activo: input.activo } : {}),
-      ...(input.productoVentaId !== undefined
-        ? { productoVentaId: input.productoVentaId ?? null }
-        : {}),
+      ...vinculo,
     },
     include: opcionInclude,
   });

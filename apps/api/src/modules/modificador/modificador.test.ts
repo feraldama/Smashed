@@ -43,14 +43,20 @@ describe('GET /modificadores', () => {
     expect(res.status).toBe(403);
   });
 
-  it('admin lista los 3 grupos del seed', async () => {
+  it('admin lista los grupos del seed', async () => {
     const token = await login(ADMIN);
     const res = await request(app).get('/modificadores').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.grupos.length).toBeGreaterThanOrEqual(3);
+    // El seed evoluciona: en vez de nombres hardcodeados, exigimos que el listado
+    // incluya un grupo activo real (buscado en la BD).
     const nombres = (res.body.grupos as { nombre: string }[]).map((g) => g.nombre);
-    expect(nombres).toContain('Punto de cocción');
-    expect(nombres).toContain('Extras');
+    const algunGrupo = await prisma.modificadorGrupo.findFirst({
+      where: { deletedAt: null },
+      select: { nombre: true },
+    });
+    expect(algunGrupo).toBeTruthy();
+    expect(nombres).toContain(algunGrupo!.nombre);
   });
 
   it('busca por nombre', async () => {
@@ -59,7 +65,10 @@ describe('GET /modificadores', () => {
       .get('/modificadores?busqueda=Extras')
       .set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
-    expect(res.body.grupos.length).toBe(1);
+    expect(res.body.grupos.length).toBeGreaterThanOrEqual(1);
+    // El filtro es por substring: todos los resultados deben contener "Extras".
+    const nombres = (res.body.grupos as { nombre: string }[]).map((g) => g.nombre.toLowerCase());
+    expect(nombres.every((n) => n.includes('extras'))).toBe(true);
   });
 });
 
@@ -150,7 +159,7 @@ describe('DELETE /modificadores/:id', () => {
     const grupoId = create.body.grupo.id;
 
     const algunProd = await prisma.productoVenta.findFirst({
-      where: { codigo: 'HAM-001' },
+      where: { deletedAt: null, esVendible: true },
     });
     expect(algunProd).toBeTruthy();
     if (!algunProd) return;
@@ -304,6 +313,89 @@ describe('POST/PATCH/DELETE /modificadores/:id/opciones', () => {
   });
 });
 
+describe('Opciones vinculadas a un insumo (ProductoInventario)', () => {
+  it('crea opción vinculada a insumo con cantidad', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const insumo = await prisma.productoInventario.findFirstOrThrow({
+      where: { deletedAt: null },
+    });
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_INSUMO' });
+    const res = await request(app)
+      .post(`/modificadores/${grupo.body.grupo.id}/opciones`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'Agregar huevo', productoInventarioId: insumo.id, cantidadInventario: 2 });
+    expect(res.status).toBe(201);
+    expect(res.body.opcion.productoInventarioId).toBe(insumo.id);
+    expect(Number(res.body.opcion.cantidadInventario)).toBe(2);
+    expect(res.body.opcion.productoInventario?.id).toBe(insumo.id);
+    expect(res.body.opcion.productoVentaId).toBeNull();
+  });
+
+  it('rechaza vincular producto e insumo a la vez → 400', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const insumo = await prisma.productoInventario.findFirstOrThrow({ where: { deletedAt: null } });
+    const subprep = await prisma.productoVenta.findFirstOrThrow({
+      where: { esPreparacion: true, deletedAt: null },
+    });
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_XOR' });
+    const res = await request(app)
+      .post(`/modificadores/${grupo.body.grupo.id}/opciones`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        nombre: 'Doble vínculo',
+        productoVentaId: subprep.id,
+        productoInventarioId: insumo.id,
+        cantidadInventario: 1,
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it('rechaza insumo sin cantidad → 400', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const insumo = await prisma.productoInventario.findFirstOrThrow({ where: { deletedAt: null } });
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_SINCANT' });
+    const res = await request(app)
+      .post(`/modificadores/${grupo.body.grupo.id}/opciones`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'Sin cantidad', productoInventarioId: insumo.id });
+    expect(res.status).toBe(400);
+  });
+
+  it('PATCH cambia de producto a insumo (XOR limpia productoVentaId)', async () => {
+    await cleanupTest();
+    const token = await login(ADMIN);
+    const subprep = await prisma.productoVenta.findFirstOrThrow({
+      where: { esPreparacion: true, deletedAt: null },
+    });
+    const insumo = await prisma.productoInventario.findFirstOrThrow({ where: { deletedAt: null } });
+    const grupo = await request(app)
+      .post('/modificadores')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ nombre: 'TEST_OPC_SWAP', opciones: [{ nombre: 'M', productoVentaId: subprep.id }] });
+    const opcionId = grupo.body.grupo.opciones[0].id;
+    const res = await request(app)
+      .patch(`/modificadores/${grupo.body.grupo.id}/opciones/${opcionId}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ productoVentaId: null, productoInventarioId: insumo.id, cantidadInventario: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body.opcion.productoVentaId).toBeNull();
+    expect(res.body.opcion.productoInventarioId).toBe(insumo.id);
+    expect(Number(res.body.opcion.cantidadInventario)).toBe(3);
+  });
+});
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  VINCULACIÓN PRODUCTO ↔ GRUPO
 // ═══════════════════════════════════════════════════════════════════════════
@@ -318,8 +410,10 @@ describe('POST/DELETE /modificadores/:id/productos/...', () => {
       .send({ nombre: 'TEST_LINK' });
     const grupoId = grupo.body.grupo.id;
 
-    const prod = await prisma.productoVenta.findFirst({ where: { codigo: 'HAM-001' } });
-    if (!prod) throw new Error('Producto HAM-001 no encontrado en seed');
+    const prod = await prisma.productoVenta.findFirst({
+      where: { deletedAt: null, esVendible: true },
+    });
+    if (!prod) throw new Error('No hay productos vendibles activos en el seed');
 
     // Vincular
     const r1 = await request(app)

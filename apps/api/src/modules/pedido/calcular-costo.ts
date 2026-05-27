@@ -80,3 +80,44 @@ export async function calcularCostoUnitario(
 ): Promise<bigint> {
   return calcularCostoProduccion(client, productoVentaId, 1, sucursalId);
 }
+
+/**
+ * Costo de consumir `cantidad` unidades de un insumo (ProductoInventario)
+ * directo, sin pasar por una receta. Lo usa el snapshot de costo cuando un
+ * modificador (o un producto de reventa) descuenta un insumo de forma directa.
+ *
+ * Resolución del costo unitario, igual que `calcularCostoProduccion`:
+ *  1. `StockSucursal.costoPromedio` de la sucursal (si > 0).
+ *  2. `ProductoInventario.costoUnitario` (fallback global).
+ *
+ * Devuelve BigInt en guaraníes (redondeo HALF_UP).
+ */
+export async function calcularCostoInsumoDirecto(
+  client: Client,
+  insumoId: string,
+  cantidad: Prisma.Decimal | number,
+  sucursalId?: string,
+): Promise<bigint> {
+  let costoUnitario: bigint | undefined;
+
+  if (sucursalId) {
+    const suc = await client.stockSucursal.findUnique({
+      where: { productoInventarioId_sucursalId: { productoInventarioId: insumoId, sucursalId } },
+      select: { costoPromedio: true },
+    });
+    if (suc && suc.costoPromedio > 0n) costoUnitario = suc.costoPromedio;
+  }
+
+  if (costoUnitario === undefined) {
+    const insumo = await client.productoInventario.findUnique({
+      where: { id: insumoId },
+      select: { costoUnitario: true },
+    });
+    costoUnitario = insumo?.costoUnitario;
+  }
+
+  if (!costoUnitario) return 0n;
+
+  const total = new Prisma.Decimal(costoUnitario.toString()).times(cantidad);
+  return BigInt(total.toFixed(0, Prisma.Decimal.ROUND_HALF_UP));
+}
