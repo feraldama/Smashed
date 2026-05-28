@@ -1,98 +1,257 @@
 /**
  * Tests del expansor de recetas (BOM recursivo).
- * Usa el seed real:
- *  - Smash Clásica usa Salsa de la casa (sub-receta)
- *  - Salsa de la casa rinde 100ml = 60ml mayonesa + 25ml mostaza + 15ml ketchup
- *  - Smash Clásica consume 30ml de salsa por unidad
+ *
+ * Crea sus propias fixtures (insumos + recetas + productos) en una empresa
+ * dedicada — no depende del seed. Cubre:
+ *  - Receta plana con insumos en distintas unidades (UNIDAD, GRAMO/KG, ML/L).
+ *  - Conversión automática entre unidades compatibles.
+ *  - Falla con AppError cuando las unidades son incompatibles.
+ *  - Sub-receta con `rinde > 1` y factor sub-unitario.
+ *  - Producto de reventa (sin receta, vinculado a un PI).
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
+import { AppError } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
 import { expandirReceta } from './stock-recursivo.js';
 
-describe('expandirReceta — BOM recursivo', () => {
-  it('Smash Clásica × 1 → expande receta directa + sub-receta de Salsa', async () => {
-    const smash = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
-    const consumo = await expandirReceta(prisma, smash.id, 1);
+const PREFIX = 'TEST_STOCKREC_';
 
-    // Convertimos a un map por código para legibilidad
-    const insumos = await prisma.productoInventario.findMany({
-      where: { id: { in: [...consumo.keys()] } },
-      select: { id: true, codigo: true, nombre: true },
-    });
-    const byCodigo = new Map<string, number>();
-    for (const ins of insumos) byCodigo.set(ins.codigo!, consumo.get(ins.id)!);
+let empresaId: string;
+let insumoPan: string; // UNIDAD
+let insumoLechuga: string; // KILOGRAMO
+let insumoAceite: string; // LITRO
+let insumoCheddar: string; // UNIDAD
+let insumoMostaza: string; // MILILITRO
 
-    // Insumos directos de Smash Clásica
-    expect(byCodigo.get('PAN-001')).toBe(1); // 1 pan
-    expect(byCodigo.get('CAR-001')).toBe(1); // 1 medallón
-    expect(byCodigo.get('LAC-001')).toBe(1); // 1 cheddar
-    expect(byCodigo.get('VEG-001')).toBe(30); // 30g lechuga
-    expect(byCodigo.get('VEG-002')).toBe(0.5); // medio tomate
-    expect(byCodigo.get('VEG-003')).toBe(0.25); // cuarto cebolla
+let prodPlato: string; // producto vendible con receta plana + sub-receta
+let prodReventa: string; // producto sin receta, vinculado a PI
+let prodIncompatible: string; // producto con unidad inválida (PORCION vs UNIDAD)
 
-    // Sub-receta: Salsa de la casa rinde 100ml; usa 30ml en Smash → factor 0.3
-    // → mayonesa 60 * 0.3 = 18, mostaza 25 * 0.3 = 7.5, ketchup 15 * 0.3 = 4.5
-    expect(byCodigo.get('SAL-001')).toBeCloseTo(18, 5); // mayonesa
-    expect(byCodigo.get('SAL-002')).toBeCloseTo(7.5, 5); // mostaza
-    expect(byCodigo.get('SAL-003')).toBeCloseTo(4.5, 5); // ketchup
+async function cleanup() {
+  // Borrar en orden: stock, movimientos, items de receta, recetas, productos, insumos.
+  // Filtramos por nombre/codigo que arranca con PREFIX para no tocar nada del seed.
+  await prisma.movimientoStock.deleteMany({
+    where: { motivo: { contains: PREFIX } },
   });
-
-  it('Smash Clásica × 3 → todas las cantidades multiplicadas por 3', async () => {
-    const smash = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
-    const consumo3 = await expandirReceta(prisma, smash.id, 3);
-
-    const insumos = await prisma.productoInventario.findMany({
-      where: { id: { in: [...consumo3.keys()] } },
-      select: { id: true, codigo: true },
-    });
-    const byCodigo = new Map<string, number>();
-    for (const ins of insumos) byCodigo.set(ins.codigo!, consumo3.get(ins.id)!);
-
-    expect(byCodigo.get('PAN-001')).toBe(3);
-    expect(byCodigo.get('CAR-001')).toBe(3);
-    expect(byCodigo.get('SAL-001')).toBeCloseTo(54, 5); // 18 × 3
-    expect(byCodigo.get('SAL-002')).toBeCloseTo(22.5, 5); // 7.5 × 3
+  await prisma.stockSucursal.deleteMany({
+    where: { producto: { codigo: { startsWith: PREFIX } } },
   });
-
-  it('producto sin receta → consumo vacío', async () => {
-    // Las bebidas en el seed sí tienen receta directa (1 insumo = 1 producto).
-    // Para testear sin receta, usamos una sub-preparación sin items adicionales:
-    // todas las recetas del seed tienen items, así que verificamos un id inventado.
-    const consumo = await expandirReceta(prisma, 'cl000000000000000000000000', 1);
-    expect(consumo.size).toBe(0);
+  await prisma.itemReceta.deleteMany({
+    where: { receta: { productoVenta: { nombre: { startsWith: PREFIX } } } },
   });
-
-  it('Coca-Cola × 5 → 5 unidades del insumo BEB-001 directamente', async () => {
-    const coca = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'BEB-001' } });
-    const consumo = await expandirReceta(prisma, coca.id, 5);
-    expect(consumo.size).toBe(1); // un solo insumo
-    const insumo = await prisma.productoInventario.findFirst({ where: { codigo: 'BEB-001' } });
-    expect(consumo.get(insumo!.id)).toBe(5);
+  await prisma.receta.deleteMany({
+    where: { productoVenta: { nombre: { startsWith: PREFIX } } },
   });
-
-  it('Doble Smash × 2 → consume 4 medallones + 4 fetas + ...', async () => {
-    const doble = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-002' } });
-    const consumo = await expandirReceta(prisma, doble.id, 2);
-
-    const insumos = await prisma.productoInventario.findMany({
-      where: { id: { in: [...consumo.keys()] } },
-      select: { id: true, codigo: true },
-    });
-    const byCodigo = new Map<string, number>();
-    for (const ins of insumos) byCodigo.set(ins.codigo!, consumo.get(ins.id)!);
-
-    // Doble Smash usa 2 medallones por unidad → × 2 unidades = 4
-    expect(byCodigo.get('CAR-001')).toBe(4);
-    expect(byCodigo.get('LAC-001')).toBe(4); // 2 fetas × 2 unidades
-    expect(byCodigo.get('PAN-001')).toBe(2); // 1 pan × 2 unidades
+  await prisma.productoVenta.deleteMany({
+    where: { nombre: { startsWith: PREFIX } },
   });
-});
+  await prisma.productoInventario.deleteMany({
+    where: { codigo: { startsWith: PREFIX } },
+  });
+}
 
 beforeAll(async () => {
   await prisma.$connect();
+  const empresa = await prisma.empresa.findFirstOrThrow({ where: { deletedAt: null } });
+  empresaId = empresa.id;
+  await cleanup();
+
+  const mk = async (codigo: string, nombre: string, unidad: 'UNIDAD' | 'KILOGRAMO' | 'LITRO') => {
+    const pi = await prisma.productoInventario.create({
+      data: {
+        empresaId,
+        codigo: PREFIX + codigo,
+        nombre,
+        unidadMedida: unidad,
+        costoUnitario: 0,
+      },
+      select: { id: true },
+    });
+    return pi.id;
+  };
+
+  insumoPan = await mk('PAN', 'Pan TEST', 'UNIDAD');
+  insumoLechuga = await mk('LCH', 'Lechuga TEST', 'KILOGRAMO');
+  insumoAceite = await mk('ACE', 'Aceite TEST', 'LITRO');
+  insumoCheddar = await mk('CHE', 'Cheddar TEST', 'UNIDAD');
+  insumoMostaza = await mk('MOS', 'Mostaza TEST', 'MILILITRO' as never);
+  // MILILITRO no está en el tipo del helper — lo cargamos vía update directo
+  await prisma.productoInventario.update({
+    where: { id: insumoMostaza },
+    data: { unidadMedida: 'MILILITRO' },
+  });
+
+  // Sub-receta: "Salsa TEST" rinde 100 ML, lleva 60 ML de mostaza y 40 ML de aceite.
+  // (Aceite cargado en LITRO → debe convertir 40 ML a 0.040 L.)
+  const salsa = await prisma.productoVenta.create({
+    data: {
+      empresaId,
+      nombre: PREFIX + 'SALSA',
+      precioBase: 0n,
+      esVendible: false,
+      esPreparacion: true,
+      receta: {
+        create: {
+          empresaId,
+          rinde: 100,
+          unidadRinde: 'MILILITRO',
+          items: {
+            create: [
+              {
+                productoInventarioId: insumoMostaza,
+                cantidad: 60,
+                unidadMedida: 'MILILITRO',
+              },
+              {
+                productoInventarioId: insumoAceite,
+                cantidad: 40,
+                unidadMedida: 'MILILITRO',
+              },
+            ],
+          },
+        },
+      },
+    },
+    select: { id: true },
+  });
+
+  // Producto plato: 1 pan (UNIDAD), 30 g de lechuga (KG en PI), 1 cheddar (UNIDAD),
+  // + 30 ML de salsa (sub-receta rinde 100 ML).
+  const plato = await prisma.productoVenta.create({
+    data: {
+      empresaId,
+      nombre: PREFIX + 'PLATO',
+      precioBase: 0n,
+      esVendible: true,
+      receta: {
+        create: {
+          empresaId,
+          rinde: 1,
+          unidadRinde: 'UNIDAD',
+          items: {
+            create: [
+              {
+                productoInventarioId: insumoPan,
+                cantidad: 1,
+                unidadMedida: 'UNIDAD',
+              },
+              {
+                productoInventarioId: insumoLechuga,
+                cantidad: 30,
+                unidadMedida: 'GRAMO',
+              },
+              {
+                productoInventarioId: insumoCheddar,
+                cantidad: 1,
+                unidadMedida: 'UNIDAD',
+              },
+              {
+                subProductoVentaId: salsa.id,
+                cantidad: 30,
+                unidadMedida: 'MILILITRO',
+              },
+            ],
+          },
+        },
+      },
+    },
+    select: { id: true },
+  });
+  prodPlato = plato.id;
+
+  // Producto reventa: sin receta, vinculado a un PI con cantidadInventario.
+  const reventa = await prisma.productoVenta.create({
+    data: {
+      empresaId,
+      nombre: PREFIX + 'REVENTA',
+      precioBase: 0n,
+      esVendible: true,
+      productoInventarioId: insumoCheddar,
+      cantidadInventario: 1,
+    },
+    select: { id: true },
+  });
+  prodReventa = reventa.id;
+
+  // Producto con receta inválida (item en PORCION, PI en UNIDAD → incompatible).
+  const malo = await prisma.productoVenta.create({
+    data: {
+      empresaId,
+      nombre: PREFIX + 'INCOMPATIBLE',
+      precioBase: 0n,
+      esVendible: true,
+      receta: {
+        create: {
+          empresaId,
+          rinde: 1,
+          unidadRinde: 'UNIDAD',
+          items: {
+            create: {
+              productoInventarioId: insumoPan,
+              cantidad: 1,
+              unidadMedida: 'PORCION',
+            },
+          },
+        },
+      },
+    },
+    select: { id: true },
+  });
+  prodIncompatible = malo.id;
 });
+
 afterAll(async () => {
+  await cleanup();
   await prisma.$disconnect();
+});
+
+describe('expandirReceta — conversión de unidades', () => {
+  it('convierte GRAMO → KILOGRAMO y MILILITRO → LITRO automáticamente', async () => {
+    const consumo = await expandirReceta(prisma, prodPlato, 1);
+
+    expect(consumo.get(insumoPan)).toBe(1); // 1 UNIDAD
+    expect(consumo.get(insumoCheddar)).toBe(1); // 1 UNIDAD
+    // Lechuga: 30 GRAMO → 0.030 KG (unidad del PI)
+    expect(consumo.get(insumoLechuga)).toBeCloseTo(0.03, 6);
+    // Sub-receta salsa: factor = 30/100 = 0.3.
+    //   mostaza: 60 ML × 0.3 = 18 ML (PI también en ML → sin conversión)
+    //   aceite:  40 ML × 0.3 = 12 ML → 0.012 L (PI en LITRO)
+    expect(consumo.get(insumoMostaza)).toBeCloseTo(18, 6);
+    expect(consumo.get(insumoAceite)).toBeCloseTo(0.012, 6);
+  });
+
+  it('× N escala linealmente sin acumular error de unidades', async () => {
+    const c = await expandirReceta(prisma, prodPlato, 3);
+    expect(c.get(insumoPan)).toBe(3);
+    expect(c.get(insumoLechuga)).toBeCloseTo(0.09, 6); // 30g × 3 = 90g = 0.09 kg
+    expect(c.get(insumoAceite)).toBeCloseTo(0.036, 6); // 0.012 × 3
+  });
+
+  it('reventa: usa cantidadInventario del PI directo', async () => {
+    const c = await expandirReceta(prisma, prodReventa, 5);
+    expect(c.size).toBe(1);
+    expect(c.get(insumoCheddar)).toBe(5);
+  });
+
+  it('producto sin receta ni reventa → consumo vacío', async () => {
+    const c = await expandirReceta(prisma, 'cl000000000000000000000000', 1);
+    expect(c.size).toBe(0);
+  });
+
+  it('tira AppError(VALIDATION_ERROR) cuando las unidades del item son incompatibles con el PI', async () => {
+    await expect(expandirReceta(prisma, prodIncompatible, 1)).rejects.toMatchObject({
+      name: 'AppError',
+      code: 'VALIDATION_ERROR',
+    });
+    try {
+      await expandirReceta(prisma, prodIncompatible, 1);
+      expect.fail('debería haber tirado');
+    } catch (e) {
+      expect(e).toBeInstanceOf(AppError);
+      expect((e as AppError).message).toContain('PORCION');
+      expect((e as AppError).message).toContain('UNIDAD');
+    }
+  });
 });

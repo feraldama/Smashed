@@ -100,7 +100,7 @@ describe('PATCH /subpreparaciones/:id/modo-stock', () => {
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: CAJERO.email } }))
       .empresaId as string;
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_FORBIDDEN',
@@ -123,7 +123,7 @@ describe('PATCH /subpreparaciones/:id/modo-stock', () => {
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: ADMIN.email } }))
       .empresaId as string;
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_AUTOMIRROR',
@@ -149,7 +149,7 @@ describe('PATCH /subpreparaciones/:id/modo-stock', () => {
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: ADMIN.email } }))
       .empresaId as string;
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_EXISTING',
@@ -178,7 +178,7 @@ describe('PATCH /subpreparaciones/:id/modo-stock', () => {
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: ADMIN.email } }))
       .empresaId as string;
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_BACKTOCALC',
@@ -220,10 +220,10 @@ describe('POST /subpreparaciones/:id/producir', () => {
       where: { nombre: 'Asunción Centro' },
     });
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
 
-    // Subprep TEST con receta: 1 unidad de cheddar por porción producida.
+    // Subprep TEST con receta: 1 unidad de medallón por porción producida.
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_PRODUCIR',
       insumoId: insumo.id,
@@ -239,7 +239,7 @@ describe('POST /subpreparaciones/:id/producir', () => {
       .send({ modoStock: 'LOTE' });
     const espejoId = lote.body.receta.productoInventarioId as string;
 
-    // Resetear stock del cheddar a un valor conocido
+    // Resetear stock del medallón a un valor conocido
     await prisma.stockSucursal.updateMany({
       where: { productoInventarioId: insumo.id, sucursalId: sucursal.id },
       data: { stockActual: 100 },
@@ -288,7 +288,7 @@ describe('POST /subpreparaciones/:id/producir', () => {
       where: { nombre: 'Asunción Centro' },
     });
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_NOLOTE',
@@ -316,7 +316,7 @@ describe('GET /subpreparaciones', () => {
       where: { nombre: 'Asunción Centro' },
     });
     const insumo = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+      where: { codigo: 'CAR-001' },
     });
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_LIST',
@@ -349,14 +349,14 @@ describe('expandirReceta con modo LOTE', () => {
     await cleanup();
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: ADMIN.email } }))
       .empresaId as string;
-    const cheddar = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+    const insumo = await prisma.productoInventario.findFirstOrThrow({
+      where: { codigo: 'CAR-001' },
     });
 
     // 1) Subprep "TEST_SUBPREP_LOTE_INNER" en modo LOTE con espejo
     const inner = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_LOTE_INNER',
-      insumoId: cheddar.id,
+      insumoId: insumo.id,
       cantidad: 1,
       empresaId,
       unidadMedida: 'UNIDAD',
@@ -392,23 +392,23 @@ describe('expandirReceta con modo LOTE', () => {
       },
     });
 
-    // 3) Expandir: debe devolver { espejoId: 2 } y NO el cheddar crudo
+    // 3) Expandir: debe devolver { espejoId: 2 } y NO el insumo crudo
     const consumo = await expandirReceta(prisma, parent.id, 1);
     expect(consumo.get(espejoId)).toBe(2);
-    expect(consumo.get(cheddar.id)).toBeUndefined();
+    expect(consumo.get(insumo.id)).toBeUndefined();
   });
 
   it('ignorarModoLoteRaiz expande aunque la raíz esté en LOTE (caso producción)', async () => {
     await cleanup();
     const empresaId = (await prisma.usuario.findFirstOrThrow({ where: { email: ADMIN.email } }))
       .empresaId as string;
-    const cheddar = await prisma.productoInventario.findFirstOrThrow({
-      where: { codigo: 'LAC-001' },
+    const insumo = await prisma.productoInventario.findFirstOrThrow({
+      where: { codigo: 'CAR-001' },
     });
 
     const sub = await crearSubprepConReceta({
       nombre: 'TEST_SUBPREP_LOTE_ROOT',
-      insumoId: cheddar.id,
+      insumoId: insumo.id,
       cantidad: 3,
       empresaId,
       unidadMedida: 'UNIDAD',
@@ -421,12 +421,12 @@ describe('expandirReceta con modo LOTE', () => {
 
     // Sin ignorarModoLoteRaiz: descarta hasta el espejo
     const consumoVenta = await expandirReceta(prisma, sub.id, 5);
-    expect(consumoVenta.has(cheddar.id)).toBe(false);
+    expect(consumoVenta.has(insumo.id)).toBe(false);
 
-    // Con ignorarModoLoteRaiz: expande a insumos crudos (5 porciones × 3 = 15 cheddar)
+    // Con ignorarModoLoteRaiz: expande a insumos crudos (5 porciones × 3 = 15 medallones)
     const consumoProduccion = await expandirReceta(prisma, sub.id, 5, {
       ignorarModoLoteRaiz: true,
     });
-    expect(consumoProduccion.get(cheddar.id)).toBe(15);
+    expect(consumoProduccion.get(insumo.id)).toBe(15);
   });
 });
