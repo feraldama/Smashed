@@ -1,8 +1,17 @@
 'use client';
 
-import { ChefHat, ChevronLeft, Filter, Loader2, RefreshCcw, Store } from 'lucide-react';
+import {
+  ChefHat,
+  ChevronLeft,
+  Filter,
+  Loader2,
+  RefreshCcw,
+  Store,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 import Link from 'next/link';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AuthGate } from '@/components/AuthGate';
 import { PedidoCard } from '@/components/kds/PedidoCard';
@@ -36,10 +45,102 @@ function KdsScreen() {
   const user = useAuthStore((s) => s.user);
   const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
   const [sectorFiltro, setSectorFiltro] = useState<SectorComanda | null>(null);
+  const [sonidoOn, setSonidoOn] = useState(true);
+  // El navegador bloquea el audio hasta el primer gesto del usuario (autoplay
+  // policy). Mientras no haya gesto, mostramos un aviso para activarlo.
+  const [audioBloqueado, setAudioBloqueado] = useState(false);
   const { data: pedidos = [], isLoading, isFetching, refetch } = useKds(sectorFiltro);
 
   const totalActivos = pedidos.length;
   const enPrep = pedidos.filter((p) => p.estado === 'EN_PREPARACION').length;
+
+  // Reutilizamos un único AudioContext via ref — crear uno nuevo por beep agota
+  // el límite del navegador (~6 contextos) y termina fallando en silencio.
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const getCtx = useCallback((): AudioContext | null => {
+    if (typeof window === 'undefined') return null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const Ctx = window.AudioContext ?? (window as any).webkitAudioContext;
+    if (!Ctx) return null;
+    audioCtxRef.current ??= new Ctx();
+    return audioCtxRef.current;
+  }, []);
+
+  // Beep generado en runtime con WebAudio (sin asset externo).
+  const playBeep = useCallback(() => {
+    if (!sonidoOn) return;
+    const ctx = getCtx();
+    if (!ctx) return;
+    // Si el contexto sigue suspendido es porque todavía no hubo un gesto del
+    // usuario: el sonido no puede sonar. Avisamos y salimos sin programar nada.
+    if (ctx.state === 'suspended') {
+      void ctx.resume();
+      setAudioBloqueado(true);
+      return;
+    }
+    setAudioBloqueado(false);
+    try {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(880, ctx.currentTime);
+      o.frequency.setValueAtTime(1320, ctx.currentTime + 0.1);
+      g.gain.setValueAtTime(0.18, ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      o.connect(g);
+      g.connect(ctx.destination);
+      o.start();
+      o.stop(ctx.currentTime + 0.4);
+    } catch {
+      /* silencio si el navegador bloquea el audio */
+    }
+  }, [sonidoOn, getCtx]);
+
+  // Desbloqueo del audio: el AudioContext sólo se puede arrancar dentro de un
+  // gesto del usuario. Enganchamos el primer click/tecla/touch de la página
+  // para crearlo y resumirlo; a partir de ahí los beeps suenan solos.
+  useEffect(() => {
+    const unlock = () => {
+      const ctx = getCtx();
+      if (!ctx) return;
+      if (ctx.state === 'suspended') {
+        void ctx.resume().then(() => setAudioBloqueado(false));
+      } else {
+        setAudioBloqueado(false);
+      }
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    return () => {
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+  }, [getCtx]);
+
+  // Detección de pedidos nuevos: el KDS hace polling, así que comparamos los
+  // IDs de cada refetch contra los ya vistos. Si aparece uno nuevo, suena.
+  // El baseline se resetea al cambiar de sector para no sonar por los pedidos
+  // que ya existían en la tab a la que recién entramos.
+  const idsVistosRef = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    idsVistosRef.current = null;
+  }, [sectorFiltro]);
+  useEffect(() => {
+    const ids = new Set(pedidos.map((p) => p.id));
+    if (idsVistosRef.current === null) {
+      idsVistosRef.current = ids;
+      return;
+    }
+    let hayNuevo = false;
+    for (const id of ids) {
+      if (!idsVistosRef.current.has(id)) {
+        hayNuevo = true;
+        break;
+      }
+    }
+    idsVistosRef.current = ids;
+    if (hayNuevo) playBeep();
+  }, [pedidos, playBeep]);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -66,6 +167,51 @@ function KdsScreen() {
           <span>
             <strong className="text-amber-600 dark:text-amber-400">{enPrep}</strong> en prep.
           </span>
+          <button
+            type="button"
+            onClick={() => {
+              if (audioBloqueado || !sonidoOn) {
+                // Activar: desbloquea el audio (este click es el gesto) y suena
+                // un beep de confirmación para que el operador lo verifique.
+                setSonidoOn(true);
+                const ctx = getCtx();
+                if (ctx?.state === 'suspended') {
+                  void ctx.resume().then(() => {
+                    setAudioBloqueado(false);
+                    playBeep();
+                  });
+                } else {
+                  setAudioBloqueado(false);
+                  playBeep();
+                }
+              } else {
+                setSonidoOn(false);
+              }
+            }}
+            className={cn(
+              'flex items-center gap-1 rounded-md border px-2 py-1',
+              audioBloqueado
+                ? 'animate-pulse border-amber-500 bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300'
+                : 'border-input hover:bg-accent',
+            )}
+            aria-label={sonidoOn ? 'Silenciar' : 'Activar sonido'}
+            title={
+              audioBloqueado
+                ? 'El navegador bloqueó el sonido — tocá para activarlo'
+                : sonidoOn
+                  ? 'Silenciar avisos de pedidos nuevos'
+                  : 'Activar avisos de pedidos nuevos'
+            }
+          >
+            {sonidoOn && !audioBloqueado ? (
+              <Volume2 className="h-3 w-3" />
+            ) : (
+              <VolumeX className="h-3 w-3" />
+            )}
+            <span className="hidden sm:inline">
+              {audioBloqueado ? 'Activar sonido' : sonidoOn ? 'Sonido' : 'Silencio'}
+            </span>
+          </button>
           <button
             type="button"
             onClick={() => {
