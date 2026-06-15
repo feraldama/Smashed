@@ -1,20 +1,18 @@
 /* eslint-disable no-console */
 /**
- * Seed de Smash — carga `snapshot.sql` en la BD actual.
+ * Seed de Smash — carga un dump SQL en la BD actual.
  *
- * Reemplaza al viejo seed hand-coded de 1800+ líneas. Ahora el flujo es:
- *
- *   1. El dev (o quien capture el estado) corre `pnpm db:snapshot` para
- *      pg_dump-ear los datos actuales a `prisma/snapshot.sql`.
- *   2. Cualquier otro entorno (otros devs, CI, BD de test) hace `pnpm db:seed`
- *      y queda con los mismos datos.
+ * Dos datasets, elegidos con la env `SEED_FILE`:
+ *   - `snapshot.sql` (default): datos reales para bootstrapear producción.
+ *   - `fixture.sql`: dataset estable de PRUEBAS (sucursal CEN, usuarios
+ *     cajero1/2, etc.) contra el que están escritos los tests. Lo usan
+ *     `test:db:setup` y el CI — NO depende de los datos reales del snapshot.
  *
  * Flujo del loader:
  *   1. Trunca todas las tablas de `public` excepto `_prisma_migrations`.
- *   2. Aplica el contenido de `snapshot.sql` (los `INSERT` + `setval` de pg_dump).
+ *   2. Aplica el contenido del archivo (los `INSERT` + `setval` de pg_dump).
  *
- * El snapshot preserva los IDs originales (cuids) y secuencias — el ciclo
- * `pnpm db:snapshot` → `pnpm db:seed` es idempotente.
+ * El dump preserva los IDs originales (cuids) y secuencias — idempotente.
  */
 import 'dotenv/config';
 import { readFileSync } from 'node:fs';
@@ -22,7 +20,9 @@ import { resolve } from 'node:path';
 
 import pg from 'pg';
 
-const SNAPSHOT_PATH = resolve(import.meta.dirname, 'snapshot.sql');
+// `SEED_FILE` permite elegir el dataset (default: snapshot.sql de producción).
+const SEED_FILE = process.env.SEED_FILE ?? 'snapshot.sql';
+const SNAPSHOT_PATH = resolve(import.meta.dirname, SEED_FILE);
 
 async function main() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -61,7 +61,7 @@ async function main() {
       END $$;
     `);
 
-    console.log('📥 Aplicando snapshot.sql...');
+    console.log(`📥 Aplicando ${SEED_FILE}...`);
     await client.query(sql);
 
     console.log('✅ Seed aplicado correctamente.');

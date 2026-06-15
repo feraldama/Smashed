@@ -98,11 +98,11 @@ async function ensureDatabase() {
   }
 }
 
-function run(cmd: string) {
+function run(cmd: string, extraEnv: Record<string, string> = {}) {
   console.log(`\n$ ${cmd}`);
   execSync(cmd, {
     stdio: 'inherit',
-    env: { ...process.env, DATABASE_URL: testUrl },
+    env: { ...process.env, DATABASE_URL: testUrl, ...extraEnv },
   });
 }
 
@@ -113,8 +113,9 @@ async function main() {
   // Migraciones: deploy (no dev — no abre prompts interactivos).
   run('pnpm exec prisma migrate deploy');
 
-  // Seed: usa el comando declarado en prisma.config.ts.
-  run('pnpm exec tsx prisma/seed.ts');
+  // Seed: dataset de PRUEBAS (fixture.sql), contra el que están escritos los
+  // tests — independiente del snapshot.sql de producción.
+  run('pnpm exec tsx prisma/seed.ts', { SEED_FILE: 'fixture.sql' });
 
   console.log(`\n✓ ${dbName} lista para correr tests`);
 }
