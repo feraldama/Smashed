@@ -140,6 +140,7 @@ pnpm services:up:tools
 | ------------------------ | ------------------------------------------------- |
 | `pnpm dev`               | Levanta todas las apps en modo desarrollo         |
 | `pnpm build`             | Build de toda la monorepo                         |
+| `pnpm start`             | Build + levanta todas las apps en modo producción |
 | `pnpm lint`              | Lint en todas las apps/packages                   |
 | `pnpm typecheck`         | Type-check sin emitir                             |
 | `pnpm test`              | Corre tests con Vitest                            |
