@@ -4,7 +4,8 @@ services:
   # Postgres es OPCIONAL — sólo se levanta si no tenés Postgres nativo en tu máquina.
   # Profile: db. Levantar con `pnpm services:up:db` o `docker compose --profile db up -d`.
   postgres:
-    image: postgres:16-alpine
+    # Alineado con producción (PostgreSQL 18) y con .github/workflows/ci.yml.
+    image: postgres:18-alpine
     container_name: smash-postgres
     restart: unless-stopped
     profiles: ['db']
