@@ -31,11 +31,16 @@ async function main() {
   }
 
   const sqlRaw = readFileSync(SNAPSHOT_PATH, 'utf8');
-  // pg_dump 18 emite directivas psql `\restrict` / `\unrestrict` que el
-  // protocolo de Postgres no entiende — las eliminamos antes de ejecutar.
+  // Saneamos artefactos del pg_dump local (PG17/18) que un Postgres más viejo
+  // (p.ej. el del CI) no entiende:
+  //  - directivas psql `\restrict` / `\unrestrict` (pg_dump 18).
+  //  - `SET transaction_timeout` (GUC nuevo en PostgreSQL 17). En servidores
+  //    anteriores lanza «unrecognized configuration parameter». Quitarlo es
+  //    inocuo (equivale a sin límite, que es el valor dumpeado).
   const sql = sqlRaw
     .replace(/^\\restrict\s+\S+\s*$/gm, '')
-    .replace(/^\\unrestrict\s+\S+\s*$/gm, '');
+    .replace(/^\\unrestrict\s+\S+\s*$/gm, '')
+    .replace(/^SET\s+transaction_timeout\s*=.*$/gim, '');
 
   const client = new pg.Client({ connectionString: databaseUrl });
   await client.connect();

@@ -24,7 +24,9 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16-alpine
+        # Alineado con producción (PostgreSQL 18). Mantener en sync con la BD
+        # del servidor de producción y con docker-compose.yml.
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: smash
           POSTGRES_PASSWORD: smash
