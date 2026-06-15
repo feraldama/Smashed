@@ -13,6 +13,7 @@ import {
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { emitPedido } from '../../lib/socketio.js';
+import { dispararEmision } from '../facturacion/facturacion-runner.js';
 import { calcularCostoInsumoDirecto, calcularCostoUnitario } from '../pedido/calcular-costo.js';
 import {
   aplicarCancelacionInline,
@@ -244,6 +245,10 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
             subtotalIva10: totales.subtotalIva10,
             totalIva5: totales.totalIva5,
             totalIva10: totales.totalIva10,
+            // Snapshot del descuento global y recargo del pedido — el mapper SIFEN
+            // los prorratea/agrega para que el DE reconcilie con `total`.
+            totalDescuento: pedido.totalDescuento,
+            recargoDelivery: pedido.recargoDelivery,
             total: pedido.total,
             // Items snapshot
             items: {
@@ -353,6 +358,13 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
       if (estadoOriginal === EstadoPedido.PENDIENTE) {
         const completo = await obtenerPedidoParaKds(pedido.id);
         if (completo) emitPedido('pedido.confirmado', completo.sucursalId, completo);
+      }
+
+      // Post-tx: disparar emisión a SIFEN en segundo plano si es un documento
+      // fiscal (no TICKET). Fire-and-forget: no bloquea la respuesta y, si algo
+      // falla, el barrido de reconciliación lo recupera.
+      if (comprobanteCreado.tipoDocumento !== TipoDocumentoFiscal.TICKET) {
+        dispararEmision(comprobanteCreado.id);
       }
 
       return comprobanteCreado;

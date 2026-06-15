@@ -1,7 +1,7 @@
 import { type NextFunction, type Request, type Response, Router } from 'express';
 
 import { authRequired, requireRol } from '../../middleware/auth.js';
-import sifenRoutes from '../sifen/sifen.routes.js';
+import { documentoRoutes } from '../facturacion/facturacion.routes.js';
 
 import * as ctrl from './comprobante.controller.js';
 
@@ -15,8 +15,8 @@ router.get('/:id', asyncH(ctrl.detalle));
 router.post('/', requireOperativo, asyncH(ctrl.emitir));
 router.post('/:id/anular', requireOperativo, asyncH(ctrl.anular));
 
-// Sub-rutas SIFEN: /comprobantes/:id/sifen/{enviar,cancelar,estado}
-router.use('/:id/sifen', sifenRoutes);
+// Documento electrónico (CODE100): /comprobantes/:id/fe/{kude,xml,estado,reenviar,cancelar}
+router.use('/:id/fe', documentoRoutes);
 
 export default router;
 

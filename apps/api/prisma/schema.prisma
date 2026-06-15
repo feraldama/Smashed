@@ -218,6 +218,17 @@ enum MetodoPago {
   CHEQUE
 }
 
+/// Proveedor de facturación electrónica configurado por empresa.
+enum ProveedorFacturacion {
+  CODE100
+}
+
+/// Ambiente de facturación electrónica (SIFEN test vs producción).
+enum AmbienteFacturacion {
+  TEST
+  PROD
+}
+
 enum EstadoCaja {
   ABIERTA
   CERRADA
@@ -304,6 +315,7 @@ model Empresa {
   comprobantes     Comprobante[]
   auditLogs        AuditLog[]
   configuracion    ConfiguracionEmpresa?
+  configuracionFacturacion ConfiguracionFacturacion?
   menusPorRol      MenuRol[]
   motivosDescuento MotivoDescuento[]
   limitesDescuento LimiteDescuentoRol[]
@@ -443,6 +455,45 @@ model ConfiguracionEmpresa {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("configuracion_empresa")
+}
+
+/// Credenciales y parámetros de facturación electrónica por empresa.
+/// Multi-tenant: cada empresa autentica contra el proveedor con su propio RUC.
+///
+/// Guarda los dos ambientes (TEST y PROD) a la vez — cada uno con su dominio,
+/// RUC y password — y `ambienteActivo` actúa de switch sobre cuál se usa al
+/// emitir. Los passwords quedan encriptados at-rest (AES-256-GCM, lib/crypto.ts).
+model ConfiguracionFacturacion {
+  id        String  @id @default(cuid())
+  empresaId String  @unique @map("empresa_id")
+  empresa   Empresa @relation(fields: [empresaId], references: [id], onDelete: Cascade)
+
+  proveedor      ProveedorFacturacion @default(CODE100)
+  /// Switch: contra qué ambiente se emite (TEST o PROD).
+  ambienteActivo AmbienteFacturacion  @default(TEST) @map("ambiente_activo")
+
+  // ── Credenciales de PRUEBAS (TEST) ──
+  testDominio  String? @map("test_dominio")
+  testRuc      String? @map("test_ruc")
+  /// Password encriptado (iv:authTag:ciphertext en base64). Nunca en claro.
+  testPassword String? @map("test_password")
+
+  // ── Credenciales de PRODUCCIÓN (PROD) ──
+  prodDominio  String? @map("prod_dominio")
+  prodRuc      String? @map("prod_ruc")
+  /// Password encriptado (iv:authTag:ciphertext en base64). Nunca en claro.
+  prodPassword String? @map("prod_password")
+
+  /// Tipo de contribuyente del emisor: 1=Persona física, 2=Persona jurídica.
+  emisorTipoContribuyente Int @default(2) @map("emisor_tipo_contribuyente")
+
+  /// Si false, la empresa sigue emitiendo pero no se envía a SIFEN.
+  activo    Boolean  @default(false)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("configuracion_facturacion")
 }
 
 model Sucursal {
@@ -1770,7 +1821,10 @@ model Comprobante {
   subtotalIva10  BigInt @default(0) @map("subtotal_iva_10")
   totalIva5      BigInt @default(0) @map("total_iva_5")
   totalIva10     BigInt @default(0) @map("total_iva_10")
+  // Descuento global (a nivel pedido) y recargo de delivery, snapshot del pedido.
+  // Necesarios para reconstruir un DE que reconcilie con el total al facturar.
   totalDescuento BigInt @default(0) @map("total_descuento")
+  recargoDelivery BigInt @default(0) @map("recargo_delivery")
   total          BigInt
 
   // Si es nota de crédito/débito, referencia al original

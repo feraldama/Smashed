@@ -324,14 +324,10 @@ function SifenAcciones({
 
   async function handleEnviar() {
     try {
-      const res = await enviar.mutateAsync(comp.id);
-      if (res.estadoSifen === 'APROBADO') {
-        toast.success(`SIFEN aprobó · CDC ${res.cdc.slice(0, 8)}…`);
-      } else if (res.estadoSifen === 'PENDIENTE') {
-        toast.success('Comprobante encolado en SIFEN — pendiente de aprobación');
-      } else {
-        toast.error(`SIFEN rechazó: ${res.mensaje}`);
-      }
+      await enviar.mutateAsync(comp.id);
+      // La emisión a SIFEN es asíncrona (cola → proveedor). Acá sólo se encola;
+      // el estado final se refleja al refrescar o consultar.
+      toast.success('Comprobante encolado para envío a SIFEN');
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Error al enviar');
     }

@@ -5,6 +5,10 @@ import { env } from './config/env.js';
 import { logger } from './config/logger.js';
 import { disconnectPrisma } from './lib/prisma.js';
 import { initSocketIo } from './lib/socketio.js';
+import {
+  detenerReconciliacionPeriodica,
+  iniciarReconciliacionPeriodica,
+} from './modules/facturacion/facturacion-runner.js';
 
 const app = createApp();
 const httpServer = http.createServer(app);
@@ -16,8 +20,13 @@ const server = httpServer.listen(env.PORT, () => {
   logger.info(`🚀 Smash API + WS escuchando en http://localhost:${env.PORT}`);
 });
 
+// Facturación electrónica: procesamiento in-process (sin Redis). El barrido
+// periódico recupera comprobantes varados (NO_ENVIADO/PENDIENTE).
+iniciarReconciliacionPeriodica();
+
 async function shutdown(signal: string) {
   logger.info(`Recibido ${signal}, cerrando...`);
+  detenerReconciliacionPeriodica();
   server.close(() => {
     logger.info('HTTP server cerrado');
   });

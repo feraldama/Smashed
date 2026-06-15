@@ -58,13 +58,9 @@ const envSchema = z.object({
   // Logger
   API_LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('debug'),
 
-  // SIFEN / DNIT (facturación electrónica Paraguay) — todos opcionales hasta que haya cert real.
-  SIFEN_AMBIENTE: z.enum(['TEST', 'PROD']).default('TEST'),
-  SIFEN_MODO: z.enum(['mock', 'real']).default('mock'),
-  SIFEN_CERT_PATH: z.string().optional(),
-  SIFEN_CERT_PASSWORD: z.string().optional(),
-  SIFEN_CSC_ID: z.string().optional(),
-  SIFEN_CSC_VALOR: z.string().optional(),
+  // Clave maestra para cifrar credenciales de facturación (AES-256-GCM).
+  // 32 bytes en base64 o hex. Requerida sólo cuando se configuran credenciales.
+  FACTURACION_ENC_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);

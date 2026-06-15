@@ -144,6 +144,23 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     activeLinkRef.current?.scrollIntoView({ block: 'nearest', behavior: 'auto' });
   }, [pathname]);
 
+  // Título de la pestaña del navegador = nombre de la pantalla actual.
+  // Usa el NAV completo (no el filtrado por permisos) con la misma lógica de
+  // prefijo más largo, así las sub-rutas (ej. `/comprobantes/123`) heredan el
+  // label de su sección ("Comprobantes — Smash").
+  useEffect(() => {
+    const item = NAV.reduce<NavItem | null>((best, it) => {
+      const matches =
+        it.href === '/'
+          ? pathname === '/'
+          : pathname === it.href || pathname?.startsWith(`${it.href}/`);
+      if (!matches) return best;
+      if (best === null || it.href.length > best.href.length) return it;
+      return best;
+    }, null);
+    document.title = item ? `${item.label} — Smash` : 'Smash — Admin';
+  }, [pathname]);
+
   async function logout() {
     await api('/auth/logout', { method: 'POST', skipAuth: true }).catch(() => {});
     clear();

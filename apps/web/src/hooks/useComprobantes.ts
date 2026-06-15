@@ -213,22 +213,23 @@ export function useAnularComprobante(id: string | null) {
   });
 }
 
-// ───── Acciones SIFEN ─────
+// ───── Acciones de facturación electrónica (CODE100) ─────
 
 export interface EnviarSifenResponse {
   comprobanteId: string;
-  cdc: string;
-  estadoSifen: EstadoSifen;
-  protocolo: string | null;
-  mensaje: string;
-  qrUrl: string | null;
+  encolado: boolean;
 }
 
+/**
+ * "Reenviar": en el modelo CODE100 la emisión se encola automáticamente al
+ * emitir el comprobante; esta acción reencola los que quedaron NO_ENVIADO,
+ * RECHAZADO o PENDIENTE.
+ */
 export function useEnviarSifen() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) =>
-      api<EnviarSifenResponse>(`/comprobantes/${id}/sifen/enviar`, { method: 'POST' }),
+      api<EnviarSifenResponse>(`/comprobantes/${id}/fe/reenviar`, { method: 'POST' }),
     onSuccess: (_d, id) => {
       void qc.invalidateQueries({ queryKey: ['admin', 'comprobante', id] });
       void qc.invalidateQueries({ queryKey: ['admin', 'comprobantes'] });
@@ -247,7 +248,7 @@ export function useCancelarSifen() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, motivo }: { id: string; motivo: string }) =>
-      api<CancelarSifenResponse>(`/comprobantes/${id}/sifen/cancelar`, {
+      api<CancelarSifenResponse>(`/comprobantes/${id}/fe/cancelar`, {
         method: 'POST',
         body: { motivo },
       }),
@@ -260,18 +261,17 @@ export function useCancelarSifen() {
 
 export interface EstadoSifenResponse {
   comprobanteId: string;
-  cdc: string;
   estadoLocal: EstadoSifen;
   estadoSifen: string;
-  protocolo: string | null;
-  mensaje: string;
-  procesado: boolean;
+  cdc: string | null;
+  protocolo?: string;
+  mensaje?: string;
 }
 
 export function useConsultarEstadoSifen(id: string | null) {
   return useQuery({
     queryKey: ['admin', 'comprobante', id, 'sifen-estado'],
-    queryFn: () => api<EstadoSifenResponse>(`/comprobantes/${id ?? ''}/sifen/estado`),
+    queryFn: () => api<EstadoSifenResponse>(`/comprobantes/${id ?? ''}/fe/estado`),
     enabled: false, // sólo se dispara con refetch() manual
     retry: false,
   });

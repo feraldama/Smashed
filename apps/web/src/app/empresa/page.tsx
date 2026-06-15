@@ -1,9 +1,11 @@
 'use client';
 
+import { calcularDvRuc } from '@smash/shared-utils';
 import {
   Building2,
   Image as ImageIcon,
   Loader2,
+  Receipt,
   Save,
   Settings as SettingsIcon,
 } from 'lucide-react';
@@ -13,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { toast } from '@/components/Toast';
-import { Field, Input } from '@/components/ui/Input';
+import { Field, Input, Select } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
 import {
   type Empresa,
@@ -21,6 +23,7 @@ import {
   useActualizarEmpresa,
   useEmpresa,
 } from '@/hooks/useEmpresa';
+import { useFacturacionConfig, useGuardarFacturacionConfig } from '@/hooks/useFacturacionConfig';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
@@ -98,7 +101,243 @@ function EmpresaScreen() {
         <DatosFiscalesCard empresa={empresa} />
         <ConfiguracionCard empresa={empresa} />
       </div>
+
+      <div className="mt-6">
+        <FacturacionElectronicaCard />
+      </div>
     </div>
+  );
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  Facturación electrónica (CODE100)
+// ───────────────────────────────────────────────────────────────────────────
+
+function FacturacionElectronicaCard() {
+  const { data: config, isLoading } = useFacturacionConfig();
+  const guardar = useGuardarFacturacionConfig();
+
+  const [ambienteActivo, setAmbienteActivo] = useState<'TEST' | 'PROD'>('TEST');
+  const [tipoContribuyente, setTipoContribuyente] = useState<'1' | '2'>('2');
+  const [activo, setActivo] = useState(false);
+  // Credenciales por ambiente.
+  const [test, setTest] = useState({ dominio: '', ruc: '', password: '' });
+  const [prod, setProd] = useState({ dominio: '', ruc: '', password: '' });
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!config?.configurado) return;
+    setAmbienteActivo(config.ambienteActivo ?? 'TEST');
+    setTipoContribuyente(config.emisorTipoContribuyente === 1 ? '1' : '2');
+    setActivo(config.activo ?? false);
+    setTest({ dominio: config.test?.dominio ?? '', ruc: config.test?.ruc ?? '', password: '' });
+    setProd({ dominio: config.prod?.dominio ?? '', ruc: config.prod?.ruc ?? '', password: '' });
+  }, [config]);
+
+  const testTienePass = config?.test?.tienePassword ?? false;
+  const prodTienePass = config?.prod?.tienePassword ?? false;
+
+  /** Arma el bloque de credenciales para el body sólo si el ambiente tiene datos. */
+  function bloque(amb: { dominio: string; ruc: string; password: string }) {
+    if (!amb.dominio.trim() && !amb.ruc.trim() && !amb.password.trim()) return undefined;
+    return {
+      dominio: amb.dominio.trim(),
+      ruc: amb.ruc.trim(),
+      ...(amb.password.trim() ? { password: amb.password.trim() } : {}),
+    };
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const activoCred = ambienteActivo === 'TEST' ? test : prod;
+    const activoTienePass = ambienteActivo === 'TEST' ? testTienePass : prodTienePass;
+    if (!/^https?:\/\//.test(activoCred.dominio)) {
+      return setError(`Cargá el dominio del ambiente activo (${ambienteActivo})`);
+    }
+    if (!/^\d{3,8}$/.test(activoCred.ruc)) {
+      return setError(`RUC del ambiente activo (${ambienteActivo}) debe tener 3-8 dígitos`);
+    }
+    if (!activoTienePass && !activoCred.password.trim()) {
+      return setError(`Cargá el password del ambiente activo (${ambienteActivo})`);
+    }
+
+    try {
+      await guardar.mutateAsync({
+        ambienteActivo,
+        emisorTipoContribuyente: tipoContribuyente === '1' ? 1 : 2,
+        activo,
+        test: bloque(test),
+        prod: bloque(prod),
+      });
+      setTest((s) => ({ ...s, password: '' }));
+      setProd((s) => ({ ...s, password: '' }));
+      toast.success('Configuración de facturación guardada');
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Error al guardar');
+    }
+  }
+
+  if (isLoading) {
+    return (
+      <div className="flex h-32 items-center justify-center rounded-lg border bg-card">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <form
+      onSubmit={(e) => {
+        void handleSubmit(e);
+      }}
+      className="rounded-lg border bg-card p-5"
+    >
+      <h2 className="mb-1 flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide text-muted-foreground">
+        <Receipt className="h-4 w-4" /> Facturación electrónica (CODE100)
+      </h2>
+      <p className="mb-4 text-xs text-muted-foreground">
+        Credenciales del middleware FUTURA100. Se guardan los dos ambientes; el switch elige contra
+        cuál se emite. Los passwords se guardan cifrados y nunca se muestran.
+        {config?.configurado &&
+          ` Última actualización: ${new Date(config.updatedAt ?? '').toLocaleDateString('es-PY')}.`}
+      </p>
+
+      <div className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field
+            label="Ambiente activo"
+            required
+            hint="Contra cuál se emite ahora. Empezá en TEST hasta que te habiliten producción."
+          >
+            <Select
+              value={ambienteActivo}
+              onChange={(e) => setAmbienteActivo(e.target.value as 'TEST' | 'PROD')}
+            >
+              <option value="TEST">Pruebas (TEST)</option>
+              <option value="PROD">Producción (PROD)</option>
+            </Select>
+          </Field>
+          <Field label="Tipo de contribuyente del emisor" required>
+            <Select
+              value={tipoContribuyente}
+              onChange={(e) => setTipoContribuyente(e.target.value as '1' | '2')}
+            >
+              <option value="2">Persona Jurídica</option>
+              <option value="1">Persona Física</option>
+            </Select>
+          </Field>
+        </div>
+
+        <AmbienteCredsBlock
+          titulo="Pruebas (TEST)"
+          activo={ambienteActivo === 'TEST'}
+          creds={test}
+          tienePassword={testTienePass}
+          onChange={setTest}
+          disabled={guardar.isPending}
+        />
+        <AmbienteCredsBlock
+          titulo="Producción (PROD)"
+          activo={ambienteActivo === 'PROD'}
+          creds={prod}
+          tienePassword={prodTienePass}
+          onChange={setProd}
+          disabled={guardar.isPending}
+        />
+
+        <SwitchField
+          label="Activar envío a SIFEN"
+          description="Si está activo, los comprobantes fiscales se envían automáticamente al emitirse. Desactivado: se emiten pero no se envían."
+          checked={activo}
+          onCheckedChange={setActivo}
+          disabled={guardar.isPending}
+        />
+
+        {error && <p className="text-xs text-destructive">{error}</p>}
+
+        <div className="flex justify-end pt-1">
+          <button
+            type="submit"
+            disabled={guardar.isPending}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+          >
+            {guardar.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Save className="h-4 w-4" />
+            )}
+            Guardar
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+function AmbienteCredsBlock({
+  titulo,
+  activo,
+  creds,
+  tienePassword,
+  onChange,
+  disabled,
+}: {
+  titulo: string;
+  activo: boolean;
+  creds: { dominio: string; ruc: string; password: string };
+  tienePassword: boolean;
+  onChange: (v: { dominio: string; ruc: string; password: string }) => void;
+  disabled: boolean;
+}) {
+  return (
+    <fieldset
+      className={cn(
+        'rounded-md border p-4',
+        activo ? 'border-primary/40 bg-primary/5' : 'border-input',
+      )}
+    >
+      <legend className="px-1 text-xs font-semibold">
+        {titulo}
+        {activo && (
+          <span className="ml-2 text-[10px] font-bold uppercase text-primary">activo</span>
+        )}
+      </legend>
+      <div className="space-y-3">
+        <Field label="Dominio del webservice" hint="Ej: https://webservice.futura100.com.py">
+          <Input
+            value={creds.dominio}
+            onChange={(e) => onChange({ ...creds, dominio: e.target.value })}
+            placeholder="https://webservice.futura100.com.py"
+            disabled={disabled}
+          />
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="RUC (sin dígito verificador)">
+            <Input
+              value={creds.ruc}
+              onChange={(e) => onChange({ ...creds, ruc: e.target.value })}
+              placeholder="80012345"
+              disabled={disabled}
+            />
+          </Field>
+          <Field
+            label="Password del proveedor"
+            hint={tienePassword ? 'Dejá vacío para conservar el actual' : undefined}
+          >
+            <Input
+              type="password"
+              value={creds.password}
+              onChange={(e) => onChange({ ...creds, password: e.target.value })}
+              placeholder={tienePassword ? '•••••••• (sin cambios)' : 'Password CODE100'}
+              autoComplete="new-password"
+              disabled={disabled}
+            />
+          </Field>
+        </div>
+      </div>
+    </fieldset>
   );
 }
 
@@ -112,7 +351,6 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
   const [nombreFantasia, setNombreFantasia] = useState(empresa.nombreFantasia);
   const [razonSocial, setRazonSocial] = useState(empresa.razonSocial);
   const [ruc, setRuc] = useState(empresa.ruc);
-  const [dv, setDv] = useState(empresa.dv);
   const [direccion, setDireccion] = useState(empresa.direccion ?? '');
   const [telefono, setTelefono] = useState(empresa.telefono ?? '');
   const [email, setEmail] = useState(empresa.email ?? '');
@@ -122,12 +360,14 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
   const [zonaHoraria, setZonaHoraria] = useState(empresa.zonaHoraria);
   const [error, setError] = useState<string | null>(null);
 
+  // DV derivado del RUC (módulo 11 SET) — se autocompleta, no se edita a mano.
+  const dv = /^\d+$/.test(ruc) ? String(calcularDvRuc(ruc)) : '';
+
   // Refrescar valores cuando cambia el dato externo
   useEffect(() => {
     setNombreFantasia(empresa.nombreFantasia);
     setRazonSocial(empresa.razonSocial);
     setRuc(empresa.ruc);
-    setDv(empresa.dv);
     setDireccion(empresa.direccion ?? '');
     setTelefono(empresa.telefono ?? '');
     setEmail(empresa.email ?? '');
@@ -213,12 +453,13 @@ function DatosFiscalesCard({ empresa }: { empresa: Empresa }) {
               maxLength={8}
             />
           </Field>
-          <Field label="DV" required>
+          <Field label="DV" hint="Automático">
             <Input
               value={dv}
-              onChange={(e) => setDv(e.target.value.replace(/\D/g, '').slice(0, 1))}
-              className="text-center font-mono"
-              maxLength={1}
+              readOnly
+              tabIndex={-1}
+              className="text-center font-mono bg-muted/40 cursor-not-allowed"
+              placeholder="—"
             />
           </Field>
         </div>
