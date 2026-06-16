@@ -220,29 +220,6 @@ function LoginForm() {
             )}
           </button>
         </form>
-
-        <div className="mt-6 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-          <p className="mb-1 font-semibold">
-            Cuentas de prueba <span className="font-mono">(password Smash123!)</span>:
-          </p>
-          <ul className="space-y-0.5 font-mono">
-            <li>
-              <span className="font-bold">admin@smash.com.py</span> · admin
-            </li>
-            <li>
-              <span className="font-bold">gerente.centro@smash.com.py</span> · gerente
-            </li>
-            <li>
-              <span className="font-bold">cajero1@smash.com.py</span> · cajero → POS
-            </li>
-            <li>
-              <span className="font-bold">cocina1@smash.com.py</span> · cocina → KDS
-            </li>
-            <li>
-              <span className="font-bold">mesero1@smash.com.py</span> · mesero → POS
-            </li>
-          </ul>
-        </div>
       </div>
     </main>
   );

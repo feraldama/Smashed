@@ -142,16 +142,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <div className="mt-6 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-          <p className="font-semibold">
-            Cuentas de cocina (password <span className="font-mono">Smash123!</span>):
-          </p>
-          <ul className="mt-1 space-y-0.5 font-mono">
-            <li>cocina1@smash.com.py — Centro</li>
-            <li>cocina2@smash.com.py — San Lorenzo</li>
-          </ul>
-        </div>
       </div>
     </main>
   );

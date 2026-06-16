@@ -172,17 +172,6 @@ export default function LoginPage() {
             )}
           </button>
         </form>
-
-        <div className="mt-6 rounded-md bg-muted/50 p-3 text-xs text-muted-foreground">
-          <p className="font-semibold">
-            Cuentas de prueba (password <span className="font-mono">Smash123!</span>):
-          </p>
-          <ul className="mt-1 space-y-0.5 font-mono">
-            <li>admin@smash.com.py</li>
-            <li>cajero1@smash.com.py</li>
-            <li>cajero2@smash.com.py</li>
-          </ul>
-        </div>
       </div>
     </main>
   );
