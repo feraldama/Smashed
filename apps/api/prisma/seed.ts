@@ -30,6 +30,21 @@ async function main() {
     throw new Error('DATABASE_URL no está definido. Verificá tu .env raíz.');
   }
 
+  // ⚠️ GUARD anti-borrado: este seed TRUNCA todas las tablas. Sólo se permite
+  // contra bases de tests (nombre terminado en `_test`). Para sembrar cualquier
+  // otra base (ej. producción) hay que pasar SEED_CONFIRM=1 a propósito.
+  const dbName = new URL(databaseUrl).pathname.replace(/^\//, '').split('?')[0] ?? '';
+  const esBaseDeTest = dbName.endsWith('_test');
+  if (!esBaseDeTest && process.env.SEED_CONFIRM !== '1') {
+    console.error(
+      `❌ Seed BLOQUEADO contra "${dbName}": este script TRUNCA todas las tablas y\n` +
+        '   recarga el dump (se perderían los datos actuales).\n' +
+        '   - Si de verdad querés re-sembrar esta base, corré con SEED_CONFIRM=1.\n' +
+        '   - En producción NUNCA uses `migrate dev` ni `db:seed`: usá `prisma:migrate:deploy`.',
+    );
+    process.exit(1);
+  }
+
   const sqlRaw = readFileSync(SNAPSHOT_PATH, 'utf8');
   // Saneamos artefactos del pg_dump local (PG17/18) que un Postgres más viejo
   // (p.ej. el del CI) no entiende:
