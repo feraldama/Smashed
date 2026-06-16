@@ -6,6 +6,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -170,18 +171,25 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
     };
   }, [sessionId, session?.inputRef]);
 
+  // Memoizado y deliberadamente con dep `session?.id` (no `session`): cuando el
+  // usuario tipea, `session` cambia de objeto pero el `id` activo no, así los
+  // consumidores del contexto NO se re-renderizan por cada tecla. Solo los
+  // overlays de abajo (que reciben `session` directo) reaccionan al valor.
+  const ctxValue = useMemo<KeyboardContextValue>(
+    () => ({
+      enabled,
+      touchMode,
+      setTouchMode,
+      activeId: session?.id ?? null,
+      open,
+      close,
+      update,
+    }),
+    [enabled, touchMode, setTouchMode, session?.id, open, close, update],
+  );
+
   return (
-    <KeyboardCtx.Provider
-      value={{
-        enabled,
-        touchMode,
-        setTouchMode,
-        activeId: session?.id ?? null,
-        open,
-        close,
-        update,
-      }}
-    >
+    <KeyboardCtx.Provider value={ctxValue}>
       {children}
       {session?.layout === 'numeric' && <NumericOverlay session={session} onClose={close} />}
       {session?.layout === 'qwerty' && <QwertyOverlay session={session} onClose={close} />}

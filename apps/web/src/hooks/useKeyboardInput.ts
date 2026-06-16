@@ -29,10 +29,22 @@ export function useKeyboardInput<
   const isActive = activeId === id;
   const canOpen = enabled && kbEnabled;
 
+  // `onChange` suele venir inline desde el consumidor (nueva identidad por
+  // render). Lo guardamos en un ref y exponemos un wrapper estable para evitar
+  // un loop de re-render entre el efecto `update` y `setSession` que clava la
+  // CPU mientras el teclado está abierto. Ver nota en useNumpadInput.
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  });
+  const stableOnChange = useCallback((next: string) => onChangeRef.current(next), []);
+
+  // Solo sincronizamos primitivos que cambian; el callback ya es estable y se
+  // fija en `open()`, así que NO va como dep del efecto.
   useEffect(() => {
     if (!isActive) return;
-    update(id, { value, onChange, label, maxLength, secret });
-  }, [isActive, id, value, onChange, label, maxLength, secret, update]);
+    update(id, { value, label, maxLength, secret });
+  }, [isActive, id, value, label, maxLength, secret, update]);
 
   const triggerOpen = useCallback(() => {
     if (!canOpen) return;
@@ -41,12 +53,12 @@ export function useKeyboardInput<
       layout: 'qwerty',
       label,
       value,
-      onChange,
+      onChange: stableOnChange,
       inputRef: ref,
       maxLength,
       secret,
     });
-  }, [canOpen, id, label, value, onChange, maxLength, secret, open]);
+  }, [canOpen, id, label, value, stableOnChange, maxLength, secret, open]);
 
   const inputProps: {
     ref: React.RefObject<T>;

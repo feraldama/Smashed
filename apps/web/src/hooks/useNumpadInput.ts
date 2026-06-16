@@ -36,10 +36,33 @@ export function useNumpadInput<T extends HTMLElement = HTMLInputElement>({
   const isActive = activeId === id;
   const canOpen = enabled && kbEnabled;
 
+  // `onChange`/`formatPreview` suelen venir inline desde el consumidor, así que
+  // cambian de identidad en cada render. Si los metiéramos como deps del efecto
+  // `update` (o los empujáramos al session en cada cambio), tendríamos un loop
+  // de re-render: update → setSession → re-render → nuevo onChange → update...
+  // que clava la CPU mientras el teclado está abierto. Los guardamos en refs y
+  // exponemos wrappers de identidad estable que leen siempre el último valor.
+  const onChangeRef = useRef(onChange);
+  const formatPreviewRef = useRef(formatPreview);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+    formatPreviewRef.current = formatPreview;
+  });
+  const hasFormatPreview = formatPreview != null;
+
+  const stableOnChange = useCallback((next: string) => onChangeRef.current(next), []);
+  const stableFormatPreview = useCallback(
+    (raw: string) => (formatPreviewRef.current ? formatPreviewRef.current(raw) : raw),
+    [],
+  );
+
+  // Solo sincronizamos al session los campos que de verdad cambian y que el
+  // overlay lee directo (primitivos). Los callbacks ya son estables y se fijan
+  // en `open()`, así que NO van como deps acá.
   useEffect(() => {
     if (!isActive) return;
-    update(id, { value, onChange, label, formatPreview, maxLength, allowDecimal });
-  }, [isActive, id, value, onChange, label, formatPreview, maxLength, allowDecimal, update]);
+    update(id, { value, label, maxLength, allowDecimal });
+  }, [isActive, id, value, label, maxLength, allowDecimal, update]);
 
   const triggerOpen = useCallback(() => {
     if (!canOpen) return;
@@ -48,13 +71,24 @@ export function useNumpadInput<T extends HTMLElement = HTMLInputElement>({
       layout: 'numeric',
       label,
       value,
-      onChange,
+      onChange: stableOnChange,
       inputRef: ref,
-      formatPreview,
+      formatPreview: hasFormatPreview ? stableFormatPreview : undefined,
       maxLength,
       allowDecimal,
     });
-  }, [canOpen, id, label, value, onChange, formatPreview, maxLength, allowDecimal, open]);
+  }, [
+    canOpen,
+    id,
+    label,
+    value,
+    stableOnChange,
+    hasFormatPreview,
+    stableFormatPreview,
+    maxLength,
+    allowDecimal,
+    open,
+  ]);
 
   const inputProps: {
     ref: React.RefObject<T>;
