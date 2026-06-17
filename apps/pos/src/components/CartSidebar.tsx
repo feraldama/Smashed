@@ -15,11 +15,12 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ConfigPedido, isIncompleto } from './ConfigPedido';
 import { toast } from './Toast';
 
+import { useEmpresa } from '@/hooks/useEmpresa';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import {
   cartToPedidoInput,
@@ -308,11 +309,26 @@ function CobroView({
   const confirmarPedido = useConfirmarPedido();
   const emitir = useEmitirComprobante();
   const meta = useCartStore((s) => s.meta);
+  const { data: empresa } = useEmpresa();
 
   const [metodo, setMetodo] = useState<MetodoPagoCode | null>(null);
-  const [tipoDoc, setTipoDoc] = useState<'TICKET' | 'FACTURA'>('TICKET');
+  // Default según config de empresa: si `emitirTicketPorDefecto` está apagado,
+  // el mostrador arranca en FACTURA. Mientras la config no cargó, default
+  // seguro = TICKET (comportamiento histórico).
+  const [tipoDoc, setTipoDoc] = useState<'TICKET' | 'FACTURA'>(() =>
+    (empresa?.configuracion.emitirTicketPorDefecto ?? true) ? 'TICKET' : 'FACTURA',
+  );
+  // Si el cajero ya eligió el tipo a mano, no lo pisamos al llegar la config.
+  const [tipoDocTouched, setTipoDocTouched] = useState(false);
   const [referencia, setReferencia] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // La config puede llegar después del mount (query async): aplicamos el
+  // default recién cuando carga, salvo que el cajero ya haya tocado el selector.
+  useEffect(() => {
+    if (tipoDocTouched || !empresa) return;
+    setTipoDoc(empresa.configuracion.emitirTicketPorDefecto ? 'TICKET' : 'FACTURA');
+  }, [empresa, tipoDocTouched]);
 
   const trabajando = crearPedido.isPending || confirmarPedido.isPending || emitir.isPending;
   const requiereReferencia = metodo
@@ -401,12 +417,18 @@ function CobroView({
             <DocPill
               label="Ticket"
               active={tipoDoc === 'TICKET'}
-              onClick={() => setTipoDoc('TICKET')}
+              onClick={() => {
+                setTipoDoc('TICKET');
+                setTipoDocTouched(true);
+              }}
             />
             <DocPill
               label="Factura"
               active={tipoDoc === 'FACTURA'}
-              onClick={() => setTipoDoc('FACTURA')}
+              onClick={() => {
+                setTipoDoc('FACTURA');
+                setTipoDocTouched(true);
+              }}
             />
           </div>
         </div>

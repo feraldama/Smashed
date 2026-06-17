@@ -28,6 +28,7 @@ import {
   useEmitirComprobante,
 } from '@/hooks/useComprobantes';
 import { type PedidoConDescuento, useRemoverDescuento } from '@/hooks/useDescuento';
+import { useEmpresa } from '@/hooks/useEmpresa';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { usePedidoDetalle } from '@/hooks/usePedidos';
@@ -88,6 +89,21 @@ function nuevoPago(monto: number, metodo: MetodoPago = 'EFECTIVO'): Pago {
   };
 }
 
+/**
+ * Resuelve el tipo de comprobante inicial:
+ *  - Cliente con RUC → siempre FACTURA (no se discute).
+ *  - Sin RUC / consumidor final → decide la config de empresa
+ *    (`emitirTicketPorDefecto`). Si la config todavía no cargó, default
+ *    seguro = TICKET (comportamiento histórico).
+ */
+function tipoDocInicial(
+  cliente: Cliente | null,
+  emitirTicketPorDefecto: boolean | undefined,
+): TipoDocumentoFiscal {
+  if (cliente?.ruc) return 'FACTURA';
+  return (emitirTicketPorDefecto ?? true) ? 'TICKET' : 'FACTURA';
+}
+
 export function CobrarModal({
   pedidoId,
   total: totalInicial,
@@ -95,10 +111,22 @@ export function CobrarModal({
   onCancel,
   onSuccess,
 }: Props) {
-  const [tipoDoc, setTipoDoc] = useState<TipoDocumentoFiscal>(
-    clienteInicial?.ruc ? 'FACTURA' : 'TICKET',
+  const { data: empresa } = useEmpresa();
+  const [tipoDoc, setTipoDoc] = useState<TipoDocumentoFiscal>(() =>
+    tipoDocInicial(clienteInicial, empresa?.configuracion.emitirTicketPorDefecto),
   );
+  // Marca si el cajero ya eligió el tipo a mano: si lo hizo, no lo pisamos
+  // cuando llega (tarde) la config de empresa.
+  const [tipoDocTouched, setTipoDocTouched] = useState(false);
   const [cliente, setCliente] = useState<Cliente | null>(clienteInicial);
+
+  // La config de empresa puede llegar después del mount (query async). Aplicamos
+  // el default de `emitirTicketPorDefecto` recién cuando carga, salvo que el
+  // cliente tenga RUC (FACTURA manda) o el cajero ya haya tocado el selector.
+  useEffect(() => {
+    if (tipoDocTouched || clienteInicial?.ruc || !empresa) return;
+    setTipoDoc(empresa.configuracion.emitirTicketPorDefecto ? 'TICKET' : 'FACTURA');
+  }, [empresa, tipoDocTouched, clienteInicial]);
   const [showClienteSelector, setShowClienteSelector] = useState(false);
   const [showDescuento, setShowDescuento] = useState(false);
   // Descuento del pedido — se hidrata del backend al montar (vital para
@@ -375,14 +403,20 @@ export function CobrarModal({
                 icon={<Receipt className="h-4 w-4" />}
                 label="Ticket"
                 hint="Sin RUC, no fiscal"
-                onClick={() => setTipoDoc('TICKET')}
+                onClick={() => {
+                  setTipoDoc('TICKET');
+                  setTipoDocTouched(true);
+                }}
               />
               <DocBtn
                 active={tipoDoc === 'FACTURA'}
                 icon={<Receipt className="h-4 w-4" />}
                 label="Factura"
                 hint="Con RUC, fiscal"
-                onClick={() => setTipoDoc('FACTURA')}
+                onClick={() => {
+                  setTipoDoc('FACTURA');
+                  setTipoDocTouched(true);
+                }}
               />
             </div>
           </div>
