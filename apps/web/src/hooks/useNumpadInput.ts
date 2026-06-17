@@ -90,11 +90,19 @@ export function useNumpadInput<T extends HTMLElement = HTMLInputElement>({
     open,
   ]);
 
+  // `onFocus` abre el teclado, pero NO alcanza: al cerrar con "Listo"/X/Enter
+  // el overlay hace preventBlur, así que el input se queda con foco. Un segundo
+  // toque entonces no re-dispara `onFocus` y el teclado no reabre (input
+  // "congelado"). `onPointerDown` garantiza reabrir en cada toque, esté o no
+  // ya enfocado.
   const inputProps: {
     ref: React.RefObject<T>;
     onFocus?: () => void;
+    onPointerDown?: () => void;
     inputMode?: 'none';
-  } = canOpen ? { ref, onFocus: triggerOpen, inputMode: 'none' } : { ref };
+  } = canOpen
+    ? { ref, onFocus: triggerOpen, onPointerDown: triggerOpen, inputMode: 'none' }
+    : { ref };
 
   return {
     inputProps,

@@ -60,11 +60,17 @@ export function useKeyboardInput<
     });
   }, [canOpen, id, label, value, stableOnChange, maxLength, secret, open]);
 
+  // Ver nota en useNumpadInput: `onPointerDown` reabre el teclado aunque el
+  // input ya tenga el foco (caso típico tras cerrar con "Listo"/X/Enter, que
+  // por el preventBlur del overlay deja el foco pegado y dejaba el input inerte).
   const inputProps: {
     ref: React.RefObject<T>;
     onFocus?: () => void;
+    onPointerDown?: () => void;
     inputMode?: 'none';
-  } = canOpen ? { ref, onFocus: triggerOpen, inputMode: 'none' } : { ref };
+  } = canOpen
+    ? { ref, onFocus: triggerOpen, onPointerDown: triggerOpen, inputMode: 'none' }
+    : { ref };
 
   return {
     inputProps,

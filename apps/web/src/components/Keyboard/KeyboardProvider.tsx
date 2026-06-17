@@ -102,6 +102,13 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
 
   const [session, setSession] = useState<KeyboardSession | null>(null);
 
+  // Espejo del session para leer el input activo desde callbacks sin meterlo
+  // como dependencia (evita recrear `close`).
+  const sessionRef = useRef<KeyboardSession | null>(null);
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+
   const open = useCallback(
     (s: KeyboardSession) => {
       if (!enabled) return;
@@ -111,6 +118,9 @@ export function KeyboardProvider({ children }: { children: ReactNode }) {
   );
 
   const close = useCallback(() => {
+    // Soltar el foco del input al cerrar. Sin esto el input queda enfocado
+    // (por el preventBlur del overlay) e inerte con inputMode='none'.
+    sessionRef.current?.inputRef.current?.blur();
     setSession(null);
   }, []);
 
