@@ -83,8 +83,8 @@ export async function cambiarEstadoComboOpcion(req: Request, res: Response) {
 
 export async function listarKds(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
-  const { sector } = kdsQuery.parse(req.query);
-  const result = await service.listarPedidosParaKds(ctx, sector);
+  const { sector, vista } = kdsQuery.parse(req.query);
+  const result = await service.listarPedidosParaKds(ctx, sector, vista);
   res.json(result);
 }
 
@@ -100,5 +100,12 @@ export async function entregar(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
   const { id } = pedidoIdParam.parse(req.params);
   const pedido = await service.entregarPedido(ctx, id);
+  res.json({ pedido });
+}
+
+export async function reabrir(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = pedidoIdParam.parse(req.params);
+  const pedido = await service.reabrirPedido(ctx, id);
   res.json({ pedido });
 }

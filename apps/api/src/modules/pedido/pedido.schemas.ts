@@ -109,6 +109,9 @@ export const comboOpcionIdParam = z.object({
 
 export const kdsQuery = z.object({
   sector: z.nativeEnum(SectorComanda).optional(),
+  // `entregados`: vista de recall — pedidos ya entregados al cliente (de hoy).
+  // Cuando viene esta vista, `sector` se ignora.
+  vista: z.enum(['entregados']).optional(),
 });
 
 export const listarPedidosQuery = z.object({

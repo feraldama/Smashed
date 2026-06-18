@@ -966,13 +966,28 @@ async function recalcularEstadoPedido(
 //  KDS — pedidos relevantes para cocina
 // ───────────────────────────────────────────────────────────────────────────
 
-export async function listarPedidosParaKds(user: UserCtx, sector?: SectorComanda) {
+/** Inicio del día actual en la hora local del servidor (Paraguay). Lo usamos
+ *  para acotar la vista de entregados a "los de hoy". Mismo criterio que el
+ *  resto del backend (ver descuento.service.ts). */
+function inicioDelDiaActual(): Date {
+  const ahora = new Date();
+  ahora.setHours(0, 0, 0, 0);
+  return ahora;
+}
+
+export async function listarPedidosParaKds(
+  user: UserCtx,
+  sector?: SectorComanda,
+  vista?: 'entregados',
+) {
   if (!user.empresaId || !user.sucursalActivaId) {
     if (!user.isSuperAdmin) throw Errors.forbidden('Seleccioná una sucursal');
     return { pedidos: [] };
   }
 
   // Reglas del KDS:
+  //  - `vista=entregados`: recall — pedidos ya entregados al cliente hoy, para
+  //    consultar o reabrir uno entregado por error. Ordenados por más reciente.
   //  - Con `sector`: sólo pedidos con al menos una sub-tarea de ese sector aún no lista.
   //    Apenas cocina/bar/etc. terminan lo suyo, el pedido cae de su tab.
   //  - Sin sector (Mostrador): cualquier pedido aún no entregado al cliente. Mostrador
@@ -984,45 +999,50 @@ export async function listarPedidosParaKds(user: UserCtx, sector?: SectorComanda
     estado: { notIn: [EstadoPedido.PENDIENTE, EstadoPedido.CANCELADO] },
   };
 
-  const filtroVista: Prisma.PedidoWhereInput = sector
-    ? {
-        OR: [
-          {
-            // Items no-combo del sector aún no listos. Excluimos combos (combosOpcion.none)
-            // porque el item-combo hereda un sectorComanda del producto padre que NO refleja
-            // la realidad — lo que importa para el sector es el sector de cada opción elegida.
-            items: {
-              some: {
-                combosOpcion: { none: {} },
-                sectorComanda: sector,
-                estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] },
-              },
-            },
-          },
-          {
-            // Combo opciones del sector aún no listas
-            items: {
-              some: {
-                combosOpcion: {
+  const filtroVista: Prisma.PedidoWhereInput =
+    vista === 'entregados'
+      ? { entregadoEn: { gte: inicioDelDiaActual() } }
+      : sector
+        ? {
+            OR: [
+              {
+                // Items no-combo del sector aún no listos. Excluimos combos (combosOpcion.none)
+                // porque el item-combo hereda un sectorComanda del producto padre que NO refleja
+                // la realidad — lo que importa para el sector es el sector de cada opción elegida.
+                items: {
                   some: {
+                    combosOpcion: { none: {} },
                     sectorComanda: sector,
                     estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] },
                   },
                 },
               },
-            },
-          },
-        ],
-      }
-    : {
-        entregadoEn: null,
-        items: { some: { estado: { not: EstadoPedido.CANCELADO } } },
-      };
+              {
+                // Combo opciones del sector aún no listas
+                items: {
+                  some: {
+                    combosOpcion: {
+                      some: {
+                        sectorComanda: sector,
+                        estado: { notIn: [EstadoPedido.LISTO, EstadoPedido.CANCELADO] },
+                      },
+                    },
+                  },
+                },
+              },
+            ],
+          }
+        : {
+            entregadoEn: null,
+            items: { some: { estado: { not: EstadoPedido.CANCELADO } } },
+          };
 
   const pedidos = await prisma.pedido.findMany({
     where: { ...filtroBase, ...filtroVista },
-    orderBy: { confirmadoEn: 'asc' },
-    take: 100,
+    // Entregados: el más recién entregado arriba. Activos: el más viejo primero
+    // (FIFO de cocina).
+    orderBy: vista === 'entregados' ? { entregadoEn: 'desc' } : { confirmadoEn: 'asc' },
+    take: vista === 'entregados' ? 50 : 100,
     include: kdsInclude,
   });
 
@@ -1095,6 +1115,60 @@ export async function entregarPedido(user: UserCtx, pedidoId: string) {
         entidad: 'Pedido',
         entidadId: pedido.id,
         metadata: { operacion: 'ENTREGAR_KDS', estadoPrev: pedido.estado },
+      },
+    });
+
+    emitPedido('pedido.actualizado', actualizado.sucursalId, {
+      id: actualizado.id,
+      numero: actualizado.numero,
+      estado: actualizado.estado,
+    });
+
+    return actualizado;
+  });
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  REABRIR — deshacer una entrega hecha por error (recall del KDS)
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Deshace la entrega de un pedido: limpia `entregadoEn` y lo devuelve a LISTO,
+ * para que vuelva a aparecer en Mostrador.
+ *
+ * Sólo aplica a pedidos en estado ENTREGADO (mesa con cuenta abierta que aún no
+ * se cobró). Un pedido FACTURADO ya tiene comprobante emitido y la mesa liberada
+ * — reabrirlo sería un agujero contable, así que se rechaza.
+ */
+export async function reabrirPedido(user: UserCtx, pedidoId: string) {
+  return prisma.$transaction(async (tx) => {
+    const pedido = await tx.pedido.findUnique({ where: { id: pedidoId } });
+    if (!pedido) throw Errors.notFound('Pedido no encontrado');
+    assertTenant(user, pedido);
+    if (!pedido.entregadoEn) {
+      throw Errors.conflict('El pedido no está entregado');
+    }
+    if (pedido.estado === EstadoPedido.FACTURADO) {
+      throw Errors.conflict('Pedido facturado, no se puede reabrir');
+    }
+    if (pedido.estado !== EstadoPedido.ENTREGADO) {
+      throw Errors.conflict('Sólo se puede reabrir un pedido entregado');
+    }
+
+    const actualizado = await tx.pedido.update({
+      where: { id: pedidoId },
+      data: { entregadoEn: null, estado: EstadoPedido.LISTO },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        empresaId: pedido.empresaId,
+        sucursalId: pedido.sucursalId,
+        usuarioId: user.userId,
+        accion: 'ACTUALIZAR',
+        entidad: 'Pedido',
+        entidadId: pedido.id,
+        metadata: { operacion: 'REABRIR_KDS', estadoPrev: pedido.estado },
       },
     });
 

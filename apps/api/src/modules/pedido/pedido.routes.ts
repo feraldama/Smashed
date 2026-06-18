@@ -31,6 +31,7 @@ router.patch(
 );
 router.post('/:id/cancelar', requireOperativo, asyncH(ctrl.cancelar));
 router.post('/:id/entregar', requireKitchen, asyncH(ctrl.entregar));
+router.post('/:id/reabrir', requireKitchen, asyncH(ctrl.reabrir));
 
 export default router;
 

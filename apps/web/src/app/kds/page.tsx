@@ -1,6 +1,7 @@
 'use client';
 
 import {
+  CheckCircle2,
   ChefHat,
   ChevronLeft,
   Filter,
@@ -15,8 +16,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { AuthGate } from '@/components/AuthGate';
 import { PedidoCard } from '@/components/kds/PedidoCard';
+import { PedidoEntregadoCard } from '@/components/kds/PedidoEntregadoCard';
 import { LogoutButton } from '@/components/ui/LogoutButton';
-import { type SectorComanda, useKds } from '@/hooks/useKds';
+import { type SectorComanda, type VistaKds, useKds } from '@/hooks/useKds';
 import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
 
@@ -44,12 +46,17 @@ const SECTORES: { value: SectorComanda; label: string }[] = [
 function KdsScreen() {
   const user = useAuthStore((s) => s.user);
   const esAdmin = user ? ROLES_ADMIN_FE.has(user.rol) : false;
-  const [sectorFiltro, setSectorFiltro] = useState<SectorComanda | null>(null);
+  const [vista, setVista] = useState<VistaKds>('mostrador');
   const [sonidoOn, setSonidoOn] = useState(true);
   // El navegador bloquea el audio hasta el primer gesto del usuario (autoplay
   // policy). Mientras no haya gesto, mostramos un aviso para activarlo.
   const [audioBloqueado, setAudioBloqueado] = useState(false);
-  const { data: pedidos = [], isLoading, isFetching, refetch } = useKds(sectorFiltro);
+  const { data: pedidos = [], isLoading, isFetching, refetch } = useKds(vista);
+
+  const esEntregados = vista === 'entregados';
+  // El sector concreto (cocina, bar...) o null para Mostrador/Entregados.
+  const sectorActual: SectorComanda | null =
+    vista === 'mostrador' || vista === 'entregados' ? null : vista;
 
   const totalActivos = pedidos.length;
   const enPrep = pedidos.filter((p) => p.estado === 'EN_PREPARACION').length;
@@ -124,7 +131,7 @@ function KdsScreen() {
   const idsVistosRef = useRef<Set<string> | null>(null);
   useEffect(() => {
     idsVistosRef.current = null;
-  }, [sectorFiltro]);
+  }, [vista]);
   useEffect(() => {
     const ids = new Set(pedidos.map((p) => p.id));
     if (idsVistosRef.current === null) {
@@ -139,8 +146,10 @@ function KdsScreen() {
       }
     }
     idsVistosRef.current = ids;
-    if (hayNuevo) playBeep();
-  }, [pedidos, playBeep]);
+    // En "entregados" no suena: un pedido que aparece ahí no es trabajo nuevo
+    // para cocina, ya se entregó.
+    if (hayNuevo && !esEntregados) playBeep();
+  }, [pedidos, playBeep, esEntregados]);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -161,12 +170,20 @@ function KdsScreen() {
           <ChefHat className="h-4 w-4" /> Cocina · KDS
         </h1>
         <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
-          <span>
-            <strong className="text-foreground">{totalActivos}</strong> activos
-          </span>
-          <span>
-            <strong className="text-amber-600 dark:text-amber-400">{enPrep}</strong> en prep.
-          </span>
+          {esEntregados ? (
+            <span>
+              <strong className="text-foreground">{totalActivos}</strong> entregados hoy
+            </span>
+          ) : (
+            <>
+              <span>
+                <strong className="text-foreground">{totalActivos}</strong> activos
+              </span>
+              <span>
+                <strong className="text-amber-600 dark:text-amber-400">{enPrep}</strong> en prep.
+              </span>
+            </>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -234,10 +251,10 @@ function KdsScreen() {
         <Filter className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <button
           type="button"
-          onClick={() => setSectorFiltro(null)}
+          onClick={() => setVista('mostrador')}
           className={cn(
             'flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide',
-            sectorFiltro === null
+            vista === 'mostrador'
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-accent',
           )}
@@ -248,10 +265,10 @@ function KdsScreen() {
           <button
             key={s.value}
             type="button"
-            onClick={() => setSectorFiltro(s.value)}
+            onClick={() => setVista(s.value)}
             className={cn(
               'shrink-0 rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide',
-              sectorFiltro === s.value
+              vista === s.value
                 ? 'bg-primary text-primary-foreground'
                 : 'text-muted-foreground hover:bg-accent',
             )}
@@ -259,6 +276,20 @@ function KdsScreen() {
             {s.label}
           </button>
         ))}
+        {/* Separador + recall de entregados (al final, no es flujo operativo) */}
+        <div className="mx-1 h-5 w-px shrink-0 bg-border" />
+        <button
+          type="button"
+          onClick={() => setVista('entregados')}
+          className={cn(
+            'flex shrink-0 items-center gap-1 rounded-md px-2.5 py-1 text-xs font-medium uppercase tracking-wide',
+            esEntregados
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-accent',
+          )}
+        >
+          <CheckCircle2 className="h-3 w-3" /> Entregados
+        </button>
       </div>
 
       {/* Tablero */}
@@ -269,19 +300,35 @@ function KdsScreen() {
           </div>
         ) : pedidos.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-muted-foreground">
-            <ChefHat className="h-16 w-16 opacity-20" />
+            {esEntregados ? (
+              <CheckCircle2 className="h-16 w-16 opacity-20" />
+            ) : (
+              <ChefHat className="h-16 w-16 opacity-20" />
+            )}
             <div>
               <p className="text-lg font-semibold">
-                {sectorFiltro ? 'No hay pedidos en este sector' : 'Sin pedidos pendientes'}
+                {esEntregados
+                  ? 'Todavía no entregaste pedidos hoy'
+                  : sectorActual
+                    ? 'No hay pedidos en este sector'
+                    : 'Sin pedidos pendientes'}
               </p>
-              <p className="text-xs">Los pedidos confirmados aparecen acá automáticamente.</p>
+              <p className="text-xs">
+                {esEntregados
+                  ? 'Acá aparecen los pedidos que entregaste al cliente durante el día.'
+                  : 'Los pedidos confirmados aparecen acá automáticamente.'}
+              </p>
             </div>
           </div>
         ) : (
           <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-            {pedidos.map((p) => (
-              <PedidoCard key={p.id} pedido={p} sector={sectorFiltro} />
-            ))}
+            {pedidos.map((p) =>
+              esEntregados ? (
+                <PedidoEntregadoCard key={p.id} pedido={p} />
+              ) : (
+                <PedidoCard key={p.id} pedido={p} sector={sectorActual} />
+              ),
+            )}
           </div>
         )}
       </main>

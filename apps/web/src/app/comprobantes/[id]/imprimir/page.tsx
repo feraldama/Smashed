@@ -1,16 +1,13 @@
 'use client';
 
-import { ArrowLeft, Loader2, Printer, ReceiptText } from 'lucide-react';
+import { ArrowLeft, Loader2, Printer } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { AuthGate, ROLES_OPERATIVOS } from '@/components/AuthGate';
-import { FacturaA4 } from '@/components/imprimir/FacturaA4';
 import { TicketTermico } from '@/components/imprimir/TicketTermico';
-import { type ComprobanteDetalle, useComprobante } from '@/hooks/useComprobantes';
-
-type Formato = 'ticket' | 'factura';
+import { useComprobante } from '@/hooks/useComprobantes';
 
 export default function ImprimirComprobantePage() {
   // La impresión la usa cualquier rol operativo (CAJERO/MESERO emiten desde POS,
@@ -26,21 +23,11 @@ export default function ImprimirComprobantePage() {
 function ImprimirScreen() {
   const { id } = useParams<{ id: string }>();
   const search = useSearchParams();
-  const formatoQuery = search.get('formato') as Formato | null;
 
   const { data: comp, isLoading, isError } = useComprobante(id);
 
-  // Default: ticket para TICKET, factura para FACTURA y notas. Override con ?formato=...
-  const [formato, setFormato] = useState<Formato>('ticket');
-  useEffect(() => {
-    if (formatoQuery === 'ticket' || formatoQuery === 'factura') {
-      setFormato(formatoQuery);
-    } else if (comp) {
-      setFormato(comp.tipoDocumento === 'TICKET' ? 'ticket' : 'factura');
-    }
-  }, [comp, formatoQuery]);
-
-  // Auto-print al cargar (con un pequeño delay para que termine el render del QR)
+  // Todo comprobante (ticket, factura y notas) se imprime en 80mm térmico.
+  // El TicketTermico ya distingue el tipo de documento en la cabecera.
   const [autoPrintDone, setAutoPrintDone] = useState(false);
   useEffect(() => {
     if (!comp || autoPrintDone || search.has('preview')) return undefined;
@@ -81,25 +68,22 @@ function ImprimirScreen() {
           >
             <ArrowLeft className="h-4 w-4" /> Volver al detalle
           </Link>
-          <div className="flex items-center gap-2">
-            <FormatoSelector formato={formato} onChange={setFormato} />
-            <button
-              type="button"
-              onClick={() => window.print()}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
-            >
-              <Printer className="h-4 w-4" /> Imprimir
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+          >
+            <Printer className="h-4 w-4" /> Imprimir
+          </button>
         </div>
       </div>
 
       {/* Contenido imprimible */}
       <main className="print-area py-6 print:py-0">
-        <Layout comp={comp} formato={formato} />
+        <TicketTermico comp={comp} />
       </main>
 
-      {/* CSS de impresión: ajusta @page según formato seleccionado */}
+      {/* CSS de impresión: siempre 80mm × auto */}
       <style jsx global>{`
         @media print {
           .no-print {
@@ -113,51 +97,17 @@ function ImprimirScreen() {
             margin: 0 !important;
             padding: 0 !important;
           }
-        }
-        @media print {
-          ${formato === 'ticket'
-            ? `@page { size: 80mm auto; margin: 0; }
-               .ticket-print { width: 80mm; padding: 2mm; margin: 0; }`
-            : `@page { size: A4; margin: 0; }
-               .factura-print { width: 210mm; min-height: 297mm; margin: 0; padding: 15mm; }`}
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+          .ticket-print {
+            width: 80mm;
+            padding: 2mm;
+            margin: 0;
+          }
         }
       `}</style>
-    </div>
-  );
-}
-
-function Layout({ comp, formato }: { comp: ComprobanteDetalle; formato: Formato }) {
-  if (formato === 'ticket') return <TicketTermico comp={comp} />;
-  return <FacturaA4 comp={comp} />;
-}
-
-function FormatoSelector({
-  formato,
-  onChange,
-}: {
-  formato: Formato;
-  onChange: (f: Formato) => void;
-}) {
-  return (
-    <div className="inline-flex rounded-md border border-input bg-background p-0.5">
-      <button
-        type="button"
-        onClick={() => onChange('ticket')}
-        className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium ${
-          formato === 'ticket' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
-        }`}
-      >
-        <ReceiptText className="h-3.5 w-3.5" /> Ticket 80mm
-      </button>
-      <button
-        type="button"
-        onClick={() => onChange('factura')}
-        className={`flex items-center gap-1.5 rounded px-3 py-1.5 text-xs font-medium ${
-          formato === 'factura' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'
-        }`}
-      >
-        <Printer className="h-3.5 w-3.5" /> Factura A4
-      </button>
     </div>
   );
 }
