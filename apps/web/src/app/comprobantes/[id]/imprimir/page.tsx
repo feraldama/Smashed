@@ -26,7 +26,7 @@ function ImprimirScreen() {
 
   const { data: comp, isLoading, isError } = useComprobante(id);
 
-  // Todo comprobante (ticket, factura y notas) se imprime en 80mm térmico.
+  // Todo comprobante (ticket, factura y notas) se imprime en 75mm térmico.
   // El TicketTermico ya distingue el tipo de documento en la cabecera.
   const [autoPrintDone, setAutoPrintDone] = useState(false);
   useEffect(() => {
@@ -83,7 +83,7 @@ function ImprimirScreen() {
         <TicketTermico comp={comp} />
       </main>
 
-      {/* CSS de impresión: siempre 80mm × auto */}
+      {/* CSS de impresión: siempre 75mm × auto */}
       <style jsx global>{`
         @media print {
           .no-print {
@@ -98,12 +98,12 @@ function ImprimirScreen() {
             padding: 0 !important;
           }
           @page {
-            size: 80mm auto;
+            size: 75mm auto;
             margin: 0;
           }
           .ticket-print {
-            width: 80mm;
-            padding: 2mm;
+            width: 72mm;
+            padding: 1.5mm;
             margin: 0;
           }
         }

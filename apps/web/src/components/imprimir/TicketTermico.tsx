@@ -3,10 +3,10 @@ import { QRCodeSVG } from 'qrcode.react';
 import type { ComprobanteDetalle } from '@/hooks/useComprobantes';
 
 /**
- * Layout de ticket térmico 80mm.
+ * Layout de ticket térmico 75mm.
  *
  * El CSS @page se setea en el layout de la página /imprimir para que la
- * impresión salga en formato 80mm × auto (ancho fijo, alto dinámico).
+ * impresión salga en formato 75mm × auto (ancho fijo, alto dinámico).
  *
  * Decisiones tipográficas:
  *  - Font monospace para alinear precios columnados
@@ -20,9 +20,9 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '76mm', // 80mm - 4mm de márgenes laterales
+        width: '72mm', // 75mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
-        padding: '2mm',
+        padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',
         fontSize: '11px',
         lineHeight: 1.3,
@@ -32,6 +32,16 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
     >
       {/* Cabecera */}
       <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+        <p
+          style={{
+            fontWeight: 'bold',
+            fontSize: '18px',
+            margin: '0 0 2px 0',
+            letterSpacing: '1px',
+          }}
+        >
+          Smashed
+        </p>
         <p style={{ fontWeight: 'bold', fontSize: '13px', margin: 0 }}>
           {comp.empresa.razonSocial}
         </p>

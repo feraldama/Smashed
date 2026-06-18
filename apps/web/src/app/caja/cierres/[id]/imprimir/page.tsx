@@ -98,12 +98,12 @@ function ImprimirScreen() {
             padding: 0 !important;
           }
           @page {
-            size: 80mm auto;
+            size: 75mm auto;
             margin: 0;
           }
           .ticket-print {
-            width: 80mm;
-            padding: 2mm;
+            width: 72mm;
+            padding: 1.5mm;
             margin: 0;
           }
         }
@@ -131,9 +131,9 @@ function TicketCierreZ({ cierre }: { cierre: CierreDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '76mm',
+        width: '72mm', // 75mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
-        padding: '2mm',
+        padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',
         fontSize: '11px',
         lineHeight: 1.3,
@@ -143,6 +143,16 @@ function TicketCierreZ({ cierre }: { cierre: CierreDetalle }) {
     >
       {/* Cabecera empresa */}
       <div style={{ textAlign: 'center', marginBottom: '4px' }}>
+        <p
+          style={{
+            fontWeight: 'bold',
+            fontSize: '18px',
+            margin: '0 0 2px 0',
+            letterSpacing: '1px',
+          }}
+        >
+          Smashed
+        </p>
         <p style={{ fontWeight: 'bold', fontSize: '13px', margin: 0 }}>
           {cierre.caja.sucursal.empresa.razonSocial}
         </p>
