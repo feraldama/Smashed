@@ -1,28 +1,23 @@
 import { EstadoComprobante, EstadoSifen, type Prisma, TipoDocumentoFiscal } from '@prisma/client';
-import {
-  type Code100Client,
-  type Code100ConsultaPayload,
-  type Code100Credentials,
-  type EstadoNormalizado,
-  errorDeAlta,
-  normalizarEstado,
-  tipoDocAbrev,
-} from '@smash/code100-client';
 
 import { logger } from '../../config/logger.js';
-import { createCode100Client } from '../../lib/code100.js';
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
-import { mapearComprobanteACode100 } from './code100.mapper.js';
 import { cargarCredenciales } from './facturacion-config.service.js';
+import { getFacturadorProvider } from './provider/factory.js';
+import { type DocumentoIdent, MapeoError } from './provider/types.js';
+
+import type { ComprobanteCode100Input } from './code100.mapper.js';
+import type { Code100Client, Code100Credentials, EstadoNormalizado } from '@smash/code100-client';
 
 /**
- * Orquestación de la emisión de un documento electrónico vía CODE100.
+ * Orquestación de la emisión de un documento electrónico.
  *
- * Flujo (lo ejecuta el worker):
- *   1. Alta del documento (tipOpe=1) — asíncrono, no devuelve CDC.
- *   2. Polling de consulta de estado (tipOpe=2) hasta que SIFEN lo procese.
+ * Flujo (lo ejecuta el worker), independiente del proveedor (CODE100 o
+ * middleware propio — ver `provider/`):
+ *   1. Alta del documento — el proveedor devuelve error de rechazo o null.
+ *   2. Polling/consulta de estado hasta que SIFEN lo procese.
  *   3. Persistencia del resultado (cdc/qr/estado) + EventoSifen de auditoría.
  *
  * Idempotencia: tras un alta exitosa el comprobante queda PENDIENTE. Si el
@@ -30,60 +25,10 @@ import { cargarCredenciales } from './facturacion-config.service.js';
  * consulta (no re-da de alta) para no duplicar el documento en SIFEN.
  */
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Máquina de estados (pura respecto a Prisma — testeable con mock client)
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface PollDeps {
-  client: Pick<Code100Client, 'consultarEstado'>;
-  creds: Code100Credentials;
-  consulta: Code100ConsultaPayload;
-  /** Máximo de consultas antes de rendirse y dejar PENDIENTE. Default 8. */
-  maxIntentos?: number;
-  /** Delay entre consultas según el intento (0-based). Default backoff escalonado. */
-  delayMs?: (intento: number) => number;
-  /** Inyectable para tests. */
-  sleep?: (ms: number) => Promise<void>;
-}
-
-const DELAY_ESCALONADO = [1_000, 2_000, 3_000, 5_000, 8_000, 10_000, 15_000, 15_000];
-
-function delayPorDefecto(intento: number): number {
-  return DELAY_ESCALONADO[Math.min(intento, DELAY_ESCALONADO.length - 1)] ?? 15_000;
-}
-
-function sleepReal(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-/**
- * Consulta el estado del documento hasta que SIFEN lo procese (aprobado/
- * rechazado/cancelado) o se agoten los intentos (queda PENDIENTE).
- */
-export async function pollEstado(deps: PollDeps): Promise<EstadoNormalizado> {
-  const maxIntentos = deps.maxIntentos ?? 8;
-  const delayMs = deps.delayMs ?? delayPorDefecto;
-  const sleep = deps.sleep ?? sleepReal;
-
-  let ultimo: EstadoNormalizado = { estado: 'PENDIENTE', procesado: false };
-  for (let intento = 0; intento < maxIntentos; intento++) {
-    const res = await deps.client.consultarEstado(deps.creds, deps.consulta);
-    ultimo = normalizarEstado(res);
-    if (ultimo.procesado || ultimo.estado === 'CANCELADO') return ultimo;
-    if (intento < maxIntentos - 1) await sleep(delayMs(intento));
-  }
-  return ultimo;
-}
-
-/** Intenta el alta. Devuelve el mensaje de error si fue rechazada, o null si OK. */
-export async function intentarAlta(
-  client: Pick<Code100Client, 'altaDocumento'>,
-  creds: Code100Credentials,
-  payload: Parameters<Code100Client['altaDocumento']>[1],
-): Promise<string | null> {
-  const res = await client.altaDocumento(creds, payload);
-  return errorDeAlta(res);
-}
+// Re-export de las funciones puras (su hogar es emision.core; se mantienen acá
+// para compatibilidad de imports/tests).
+export { intentarAlta, pollEstado } from './emision.core.js';
+export type { PollDeps } from './emision.core.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Procesador (wiring con Prisma) — lo invoca el worker
@@ -109,9 +54,9 @@ export interface ProcesarEmisionResultado {
 }
 
 /**
- * Procesa la emisión de un comprobante. Pensado para ejecutarse como job de
- * la cola `facturacion`. El `clientFactory` permite inyectar un cliente en
- * tests; por defecto crea uno real contra el dominio de la empresa.
+ * Procesa la emisión de un comprobante. Pensado para ejecutarse como job de la
+ * cola `facturacion`. El `clientFactory` permite inyectar un cliente CODE100 en
+ * tests; por defecto el proveedor se resuelve por config (`FACTURADOR_PROVIDER`).
  */
 export async function procesarEmision(
   comprobanteId: string,
@@ -141,30 +86,32 @@ export async function procesarEmision(
     return { comprobanteId, estadoSifen: comp.estadoSifen };
   }
 
-  const client = clientFactory ? clientFactory(cfg.credentials) : createCode100Client();
+  const provider = getFacturadorProvider(cfg.credentials, clientFactory);
 
-  const consulta: Code100ConsultaPayload = {
-    dEst: comp.establecimiento,
-    dPunExp: comp.puntoExpedicionCodigo,
-    dNumDoc: String(comp.numero).padStart(7, '0'),
-    tipoDoc: tipoDocAbrev(mapTipoDE(comp.tipoDocumento)),
+  const ident: DocumentoIdent = {
+    establecimiento: comp.establecimiento,
+    puntoExpedicion: comp.puntoExpedicionCodigo,
+    numero: comp.numero,
+    tipoDocumento: comp.tipoDocumento,
+    referenciaExterna: comp.id,
   };
 
   // Si ya fue dado de alta (PENDIENTE), sólo reconciliamos por consulta.
   const yaEnviado = comp.estadoSifen === EstadoSifen.PENDIENTE;
 
   if (!yaEnviado) {
-    // Errores de mapeo (tipo no soportado, totales que no reconcilian) son
-    // permanentes: marcar RECHAZADO sin reintentar (no relanzar al worker).
-    let payload;
+    let errorAlta: string | null;
     try {
-      payload = mapearComprobanteACode100(toMapperInput(comp));
+      errorAlta = await provider.darDeAlta(toMapperInput(comp), comp.id);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await persistirRechazo(comp.id, `No se pudo construir el documento: ${msg}`);
-      return { comprobanteId, estadoSifen: EstadoSifen.RECHAZADO, mensaje: msg };
+      // MapeoError = permanente (documento mal construido) → rechazar sin reintentar.
+      // Cualquier otro error (red/5xx) se propaga para que el worker reintente.
+      if (err instanceof MapeoError) {
+        await persistirRechazo(comp.id, `No se pudo construir el documento: ${err.message}`);
+        return { comprobanteId, estadoSifen: EstadoSifen.RECHAZADO, mensaje: err.message };
+      }
+      throw err;
     }
-    const errorAlta = await intentarAlta(client, cfg.credentials, payload);
     if (errorAlta) {
       await persistirRechazo(comp.id, errorAlta);
       return { comprobanteId, estadoSifen: EstadoSifen.RECHAZADO, mensaje: errorAlta };
@@ -185,7 +132,7 @@ export async function procesarEmision(
     ]);
   }
 
-  const resultado = await pollEstado({ client, creds: cfg.credentials, consulta });
+  const resultado = await provider.consultar(ident);
   return persistirResultado(comp.id, resultado);
 }
 
@@ -268,10 +215,10 @@ export class EmisionPendienteError extends Error {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Helpers de mapeo del modelo Prisma al input del mapper
+//  Helpers de mapeo del modelo Prisma al input del mapper/proveedor
 // ─────────────────────────────────────────────────────────────────────────────
 
-function toMapperInput(comp: ComprobanteEmision) {
+function toMapperInput(comp: ComprobanteEmision): ComprobanteCode100Input {
   return {
     tipoDocumento: comp.tipoDocumento,
     establecimiento: comp.establecimiento,
@@ -301,21 +248,4 @@ function toMapperInput(comp: ComprobanteEmision) {
     total: comp.total,
     comprobanteOriginal: comp.comprobanteOriginal,
   };
-}
-
-function mapTipoDE(t: TipoDocumentoFiscal) {
-  switch (t) {
-    case TipoDocumentoFiscal.FACTURA:
-      return '1' as const;
-    case TipoDocumentoFiscal.AUTOFACTURA:
-      return '4' as const;
-    case TipoDocumentoFiscal.NOTA_CREDITO:
-      return '5' as const;
-    case TipoDocumentoFiscal.NOTA_DEBITO:
-      return '6' as const;
-    case TipoDocumentoFiscal.NOTA_REMISION:
-      return '7' as const;
-    default:
-      return '1' as const;
-  }
 }
