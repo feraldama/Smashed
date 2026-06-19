@@ -20,7 +20,7 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '67mm', // 70mm - 3mm de márgenes laterales (área imprimible real)
+        width: '66mm', // 69mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
         padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',
