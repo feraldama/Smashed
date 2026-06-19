@@ -321,14 +321,16 @@ function KdsScreen() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(280px,1fr))]">
-            {pedidos.map((p) =>
-              esEntregados ? (
-                <PedidoEntregadoCard key={p.id} pedido={p} />
-              ) : (
-                <PedidoCard key={p.id} pedido={p} sector={sectorActual} />
-              ),
-            )}
+          <div className="gap-3 [columns:280px]">
+            {pedidos.map((p) => (
+              <div key={p.id} className="mb-3 break-inside-avoid">
+                {esEntregados ? (
+                  <PedidoEntregadoCard pedido={p} />
+                ) : (
+                  <PedidoCard pedido={p} sector={sectorActual} />
+                )}
+              </div>
+            ))}
           </div>
         )}
       </main>
