@@ -98,11 +98,11 @@ function ImprimirScreen() {
             padding: 0 !important;
           }
           @page {
-            size: 71mm auto;
+            size: 70mm auto;
             margin: 0;
           }
           .ticket-print {
-            width: 68mm;
+            width: 67mm;
             padding: 1.5mm;
             margin: 0;
           }
