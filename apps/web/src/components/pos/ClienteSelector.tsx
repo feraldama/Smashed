@@ -26,6 +26,11 @@ export function ClienteSelector({
   const [showForm, setShowForm] = useState(false);
   // CI con la que abrimos el form al crear desde una sugerencia del padrón.
   const [documentoFormInicial, setDocumentoFormInicial] = useState<string | undefined>(undefined);
+  // Nombre del padrón para precargar la razón social (en RUC no corre el
+  // autocompletado por CI, así que lo pasamos explícito).
+  const [razonSocialFormInicial, setRazonSocialFormInicial] = useState<string | undefined>(
+    undefined,
+  );
   const { data: clientes = [], isLoading } = useClientes(busqueda.trim() || undefined);
 
   const busquedaKb = useKeyboardInput({
@@ -73,8 +78,9 @@ export function ClienteSelector({
     };
   }, [buscarEnPadron, ciBuscada]);
 
-  function abrirNuevo(documento?: string) {
+  function abrirNuevo(documento?: string, razonSocial?: string) {
     setDocumentoFormInicial(documento);
+    setRazonSocialFormInicial(razonSocial);
     setShowForm(true);
   }
 
@@ -134,7 +140,9 @@ export function ClienteSelector({
                 {!buscandoPadron && padronHit && (
                   <button
                     type="button"
-                    onClick={() => abrirNuevo(padronHit.ci)}
+                    onClick={() =>
+                      abrirNuevo(padronHit.ci, `${padronHit.nombre} ${padronHit.apellido}`)
+                    }
                     className="mx-auto mb-3 flex w-full max-w-xs items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-primary/10"
                   >
                     <IdCard className="h-5 w-5 shrink-0 text-primary" />
@@ -187,9 +195,15 @@ export function ClienteSelector({
       {showForm && (
         <ClienteFormModal
           documentoInicial={documentoFormInicial}
+          // Para FACTURA arrancamos siempre en RUC (persona jurídica), incluso
+          // si el alta viene de una sugerencia del padrón. En ese caso el
+          // autocompletado por CI no corre, así que pasamos el nombre directo.
+          tipoInicial={requireRuc ? 'PERSONA_JURIDICA' : undefined}
+          razonSocialInicial={razonSocialFormInicial}
           onCreado={(c) => {
             setShowForm(false);
             setDocumentoFormInicial(undefined);
+            setRazonSocialFormInicial(undefined);
             // Seleccionamos el cliente recién creado y cerramos el selector,
             // así el cajero vuelve al modal de cobro con el cliente cargado.
             onSeleccionar(c);
@@ -197,6 +211,7 @@ export function ClienteSelector({
           onClose={() => {
             setShowForm(false);
             setDocumentoFormInicial(undefined);
+            setRazonSocialFormInicial(undefined);
           }}
         />
       )}

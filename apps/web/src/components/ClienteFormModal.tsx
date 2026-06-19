@@ -18,6 +18,8 @@ import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
+export type TipoContribuyente = 'PERSONA_FISICA' | 'PERSONA_JURIDICA' | 'EXTRANJERO';
+
 interface ClienteFormModalProps {
   cliente?: Cliente;
   /** CI con la que arranca el form en un alta (persona física). Se usa cuando
@@ -25,6 +27,15 @@ interface ClienteFormModalProps {
    * además dispara el autocompletado de nombre contra el padrón. Ignorado en
    * edición (cuando se pasa `cliente`). */
   documentoInicial?: string;
+  /** Tipo de contribuyente con el que arranca el form en un alta. Lo usa el
+   * flujo de cobro con FACTURA, donde conviene arrancar directamente en RUC
+   * (persona jurídica). Ignorado en edición (manda el tipo del cliente). */
+  tipoInicial?: TipoContribuyente;
+  /** Razón social precargada en un alta. Se usa cuando venimos de una
+   * sugerencia del padrón y arrancamos en RUC (persona jurídica): ahí el
+   * autocompletado por CI no corre, así que pasamos el nombre directo para no
+   * perderlo. Ignorado en edición. */
+  razonSocialInicial?: string;
   /** Si lo pasás, se llama tras un alta exitosa con el cliente creado.
    * Útil para flujos como POS → "Elegí un cliente" → "+ Nuevo" donde querés
    * preseleccionar el cliente recién creado en el selector. */
@@ -41,6 +52,8 @@ const TIPOS = [
 export function ClienteFormModal({
   cliente,
   documentoInicial,
+  tipoInicial,
+  razonSocialInicial,
   onCreado,
   onClose,
 }: ClienteFormModalProps) {
@@ -49,18 +62,26 @@ export function ClienteFormModal({
   const isPending = crear.isPending || actualizar.isPending;
   const isEdit = Boolean(cliente);
 
-  const tipoInicial =
-    (cliente?.tipoContribuyente as (typeof TIPOS)[number]['value']) ?? 'PERSONA_FISICA';
-  const [tipo, setTipo] = useState<(typeof TIPOS)[number]['value']>(tipoInicial);
-  const [razonSocial, setRazonSocial] = useState(cliente?.razonSocial ?? '');
+  // En edición manda el tipo del cliente; en alta usamos el `tipoInicial`
+  // sugerido (ej: RUC desde el cobro con FACTURA) y, si no hay, persona física.
+  const tipoPorDefecto =
+    (cliente?.tipoContribuyente as TipoContribuyente | undefined) ??
+    tipoInicial ??
+    'PERSONA_FISICA';
+  const [tipo, setTipo] = useState<(typeof TIPOS)[number]['value']>(tipoPorDefecto);
+  const [razonSocial, setRazonSocial] = useState(cliente?.razonSocial ?? razonSocialInicial ?? '');
   const [nombreFantasia, setNombreFantasia] = useState(cliente?.nombreFantasia ?? '');
-  const [ruc, setRuc] = useState(cliente?.ruc ?? '');
+  // En alta arrancada en RUC desde una CI buscada (sugerencia del padrón),
+  // precargamos el RUC con ese número: el DV se calcula solo a partir de él.
+  const [ruc, setRuc] = useState(
+    cliente?.ruc ?? (tipoPorDefecto === 'PERSONA_JURIDICA' ? (documentoInicial ?? '') : ''),
+  );
   // Para persona física, el "documento" del form es la CI: si en BD no hay
   // `documento` pero sí `ruc` (porque el RUC PF en Paraguay es la misma CI),
   // mostramos el RUC como CI para que el cajero pueda editarlo.
   const [documento, setDocumento] = useState(
     cliente?.documento ??
-      (tipoInicial === 'PERSONA_FISICA' ? (cliente?.ruc ?? documentoInicial ?? '') : ''),
+      (tipoPorDefecto === 'PERSONA_FISICA' ? (cliente?.ruc ?? documentoInicial ?? '') : ''),
   );
   // En PF activamos esto si el cliente quiere RUC para que le emitan factura.
   // En PJ siempre se manda RUC (tiene sentido por definición).
@@ -86,7 +107,7 @@ export function ClienteFormModal({
   const [padronStatus, setPadronStatus] = useState<
     'idle' | 'buscando' | 'encontrado' | 'no-encontrado'
   >('idle');
-  const valorAutollenadoRef = useRef<string>(cliente?.razonSocial ?? '');
+  const valorAutollenadoRef = useRef<string>(cliente?.razonSocial ?? razonSocialInicial ?? '');
 
   useEffect(() => {
     // En edición no autocompletamos: respetamos lo que ya está cargado.
