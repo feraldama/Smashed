@@ -23,6 +23,7 @@ import { CobrarModal } from '@/components/pos/CobrarModal';
 import { toast } from '@/components/Toast';
 import { LogoutButton } from '@/components/ui/LogoutButton';
 import { useMiAperturaActiva } from '@/hooks/useCaja';
+import { type ComprobanteDetalle } from '@/hooks/useComprobantes';
 import {
   type PedidoListItem,
   usePedidosPorEstado,
@@ -80,9 +81,9 @@ function EntregasScreen() {
     setCobrarPedido({ id: p.id, total: Number(p.total) });
   }
 
-  function handleCobrarSuccess(comprobanteId: string) {
+  function handleCobrarSuccess(comprobante: ComprobanteDetalle) {
     setCobrarPedido(null);
-    imprimirComprobante(comprobanteId);
+    imprimirComprobante(comprobante);
     router.refresh();
   }
 

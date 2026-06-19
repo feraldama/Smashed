@@ -38,6 +38,7 @@ import {
   type ProductoListado,
 } from '@/hooks/useCatalogo';
 import { type Cliente } from '@/hooks/useClientes';
+import { type ComprobanteDetalle } from '@/hooks/useComprobantes';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { type Mesa } from '@/hooks/useMesas';
 import {
@@ -365,7 +366,7 @@ function POSScreen() {
     }
   }
 
-  function handleCobrarSuccess(comprobanteId: string) {
+  function handleCobrarSuccess(comprobante: ComprobanteDetalle) {
     dispatch({ type: 'CLEAR' });
     setPedidoConfirmado(null);
     setShowCobrar(false);
@@ -374,7 +375,7 @@ function POSScreen() {
     setTipo('MOSTRADOR');
     // Imprimir directo en un iframe oculto: no saca al cajero del POS ni abre
     // otra pestaña con el diálogo de impresión.
-    imprimirComprobante(comprobanteId);
+    imprimirComprobante(comprobante);
     router.refresh();
   }
 

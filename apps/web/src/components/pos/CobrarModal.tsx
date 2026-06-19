@@ -21,6 +21,7 @@ import { confirmar, toast } from '@/components/Toast';
 import { Input } from '@/components/ui/Input';
 import { type Cliente } from '@/hooks/useClientes';
 import {
+  type ComprobanteDetalle,
   type MetodoPago,
   type TipoDocumentoFiscal,
   useEmitirComprobante,
@@ -46,7 +47,7 @@ interface Props {
   /** Cliente preseleccionado (ej: el del pedido). null = consumidor final. */
   clienteInicial: Cliente | null;
   onCancel: () => void;
-  onSuccess: (comprobanteId: string) => void;
+  onSuccess: (comprobante: ComprobanteDetalle) => void;
 }
 
 interface DescuentoAplicado {
@@ -312,7 +313,7 @@ export function CobrarModal({
         numeroPager: pagerPayload,
       });
       toast.success(`${tipoDoc} ${res.comprobante.numeroDocumento} emitido`);
-      onSuccess(res.comprobante.id);
+      onSuccess(res.comprobante);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Error al emitir');
     }
