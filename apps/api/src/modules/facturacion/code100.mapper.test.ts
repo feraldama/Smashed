@@ -214,7 +214,7 @@ describe('subtotales', () => {
 describe('forma de pago', () => {
   it('mapea métodos y omite FormaPago en crédito', () => {
     const contado = mapearComprobanteACode100(
-      comprobante({ pagos: [{ metodo: 'BANCARD', monto: 110_000n }] }),
+      comprobante({ pagos: [{ metodo: 'TARJETA_CREDITO', monto: 110_000n }] }),
     );
     expect(contado.FormaPago).toHaveLength(1);
     expect(contado.FormaPago![0]!.iTiPago).toBe('21'); // pago electrónico

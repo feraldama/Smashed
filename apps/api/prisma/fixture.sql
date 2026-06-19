@@ -3192,7 +3192,7 @@ ALTER TABLE public.menu_rol ENABLE TRIGGER ALL;
 ALTER TABLE public.movimiento_caja DISABLE TRIGGER ALL;
 
 INSERT INTO public.movimiento_caja (id, caja_id, apertura_caja_id, tipo, metodo_pago, monto, concepto, comprobante_id, created_at) VALUES ('cmops4sl100053kn61rruq7yv', 'cmop1arj2002accn6sy0jebyu', 'cmops4skv00043kn6cwfsmzx6', 'APERTURA', 'EFECTIVO', 100000, 'Apertura de caja', NULL, '2026-05-03 13:01:33.493');
-INSERT INTO public.movimiento_caja (id, caja_id, apertura_caja_id, tipo, metodo_pago, monto, concepto, comprobante_id, created_at) VALUES ('cmops5n9i000h3kn6e2uabglg', 'cmop1arj2002accn6sy0jebyu', 'cmops4skv00043kn6cwfsmzx6', 'VENTA', 'BANCARD', 75000, 'Venta 001-001-0000001', 'cmops5n8z000c3kn6qmygacl7', '2026-05-03 13:02:13.254');
+INSERT INTO public.movimiento_caja (id, caja_id, apertura_caja_id, tipo, metodo_pago, monto, concepto, comprobante_id, created_at) VALUES ('cmops5n9i000h3kn6e2uabglg', 'cmop1arj2002accn6sy0jebyu', 'cmops4skv00043kn6cwfsmzx6', 'VENTA', 'TARJETA_CREDITO', 75000, 'Venta 001-001-0000001', 'cmops5n8z000c3kn6qmygacl7', '2026-05-03 13:02:13.254');
 
 
 ALTER TABLE public.movimiento_caja ENABLE TRIGGER ALL;
@@ -3218,7 +3218,7 @@ ALTER TABLE public.movimiento_stock ENABLE TRIGGER ALL;
 
 ALTER TABLE public.pago_comprobante DISABLE TRIGGER ALL;
 
-INSERT INTO public.pago_comprobante (id, comprobante_id, metodo, monto, referencia, notas, created_at) VALUES ('cmops5n99000g3kn6b3kp3z2l', 'cmops5n8z000c3kn6qmygacl7', 'BANCARD', 75000, NULL, NULL, '2026-05-03 13:02:13.235');
+INSERT INTO public.pago_comprobante (id, comprobante_id, metodo, monto, referencia, notas, created_at) VALUES ('cmops5n99000g3kn6b3kp3z2l', 'cmops5n8z000c3kn6qmygacl7', 'TARJETA_CREDITO', 75000, NULL, NULL, '2026-05-03 13:02:13.235');
 
 
 ALTER TABLE public.pago_comprobante ENABLE TRIGGER ALL;

@@ -10,7 +10,6 @@ import {
   Plus,
   Printer,
   Receipt,
-  Send,
   ShoppingBag,
   Trash2,
   X,
@@ -284,10 +283,8 @@ const METODOS_PAGO: Array<{
   group?: string;
 }> = [
   { codigo: 'EFECTIVO', label: 'Efectivo', icon: Banknote },
-  { codigo: 'BANCARD', label: 'Bancard', icon: CreditCard },
-  { codigo: 'DINELCO', label: 'Dinelco', icon: CreditCard },
-  { codigo: 'TRANSFERENCIA', label: 'Transferencia', icon: Send },
-  { codigo: 'CHEQUE', label: 'Cheque', icon: Receipt },
+  { codigo: 'TARJETA_CREDITO', label: 'Tarjeta de Crédito', icon: CreditCard },
+  { codigo: 'TARJETA_DEBITO', label: 'Tarjeta de Débito', icon: CreditCard },
 ];
 
 interface CobroViewProps {
@@ -332,7 +329,7 @@ function CobroView({
 
   const trabajando = crearPedido.isPending || confirmarPedido.isPending || emitir.isPending;
   const requiereReferencia = metodo
-    ? (['BANCARD', 'DINELCO', 'TRANSFERENCIA', 'CHEQUE'] as MetodoPagoCode[]).includes(metodo)
+    ? (['TARJETA_CREDITO', 'TARJETA_DEBITO'] as MetodoPagoCode[]).includes(metodo)
     : false;
 
   const referenciaKb = useKeyboardInput({

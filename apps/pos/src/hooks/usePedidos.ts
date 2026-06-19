@@ -108,7 +108,7 @@ export function useConfirmarPedido() {
   });
 }
 
-export type MetodoPagoCode = 'EFECTIVO' | 'BANCARD' | 'DINELCO' | 'TRANSFERENCIA' | 'CHEQUE';
+export type MetodoPagoCode = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO';
 
 interface EmitirComprobanteInput {
   pedidoId: string;

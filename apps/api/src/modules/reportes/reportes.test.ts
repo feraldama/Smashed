@@ -122,11 +122,11 @@ async function emitirVentas(token: string) {
       tipoDocumento: 'TICKET',
       pagos: [
         { metodo: 'EFECTIVO', monto: 30000 },
-        { metodo: 'BANCARD', monto: 25000 },
+        { metodo: 'TARJETA_CREDITO', monto: 25000 },
       ],
     });
 
-  return { totalVentas: 80000 + 55000, totalEfectivo: 80000 + 30000, totalBancard: 25000 };
+  return { totalVentas: 80000 + 55000, totalEfectivo: 80000 + 30000, totalTarjeta: 25000 };
 }
 
 describe('GET /reportes/ventas/resumen', () => {
@@ -295,7 +295,7 @@ describe('GET /reportes/ventas/metodos-pago', () => {
   it('agrupa por método', async () => {
     await reset();
     const tokenCajero = await login(CAJERO);
-    const { totalEfectivo, totalBancard } = await emitirVentas(tokenCajero);
+    const { totalEfectivo, totalTarjeta } = await emitirVentas(tokenCajero);
 
     const tokenAdmin = await login(ADMIN);
     const res = await request(app)
@@ -303,9 +303,11 @@ describe('GET /reportes/ventas/metodos-pago', () => {
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(res.status).toBe(200);
     const efectivo = res.body.metodos.find((m: { metodo: string }) => m.metodo === 'EFECTIVO');
-    const bancard = res.body.metodos.find((m: { metodo: string }) => m.metodo === 'BANCARD');
+    const tarjeta = res.body.metodos.find(
+      (m: { metodo: string }) => m.metodo === 'TARJETA_CREDITO',
+    );
     expect(Number(efectivo.total)).toBe(totalEfectivo);
-    expect(Number(bancard.total)).toBe(totalBancard);
+    expect(Number(tarjeta.total)).toBe(totalTarjeta);
   });
 });
 

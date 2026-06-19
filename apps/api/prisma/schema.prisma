@@ -212,10 +212,8 @@ enum EstadoSifen {
 
 enum MetodoPago {
   EFECTIVO
-  BANCARD
-  DINELCO
-  TRANSFERENCIA
-  CHEQUE
+  TARJETA_CREDITO
+  TARJETA_DEBITO
 }
 
 /// Proveedor de facturación electrónica configurado por empresa.
@@ -1737,7 +1735,7 @@ model CierreCaja {
   totalContadoEfectivo   BigInt  @map("total_contado_efectivo")
   diferenciaEfectivo     BigInt  @map("diferencia_efectivo") // signed
   totalVentas            BigInt  @map("total_ventas")
-  // Detalle por método de pago (jsonb con estructura: { EFECTIVO: 1234, BANCARD: 5678, ... })
+  // Detalle por método de pago (jsonb con estructura: { EFECTIVO: 1234, TARJETA_CREDITO: 5678, ... })
   totalesPorMetodo       Json    @map("totales_por_metodo") @db.JsonB
   // Conteo por denominación (jsonb: { "100000": 5, "50000": 10, ... })
   conteoEfectivo         Json?   @map("conteo_efectivo") @db.JsonB

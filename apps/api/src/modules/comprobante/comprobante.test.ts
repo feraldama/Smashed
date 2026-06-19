@@ -231,7 +231,7 @@ describe('POST /comprobantes — emitir', () => {
         tipoDocumento: 'TICKET',
         pagos: [
           { metodo: 'EFECTIVO', monto: Math.floor(t / 2) },
-          { metodo: 'BANCARD', monto: t - Math.floor(t / 2), referencia: 'auth-12345' },
+          { metodo: 'TARJETA_CREDITO', monto: t - Math.floor(t / 2), referencia: 'auth-12345' },
         ],
       });
     expect(res.status).toBe(201);
@@ -390,7 +390,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         clienteId: cliente.id,
         tipoDocumento: 'FACTURA',
-        pagos: [{ metodo: 'TRANSFERENCIA', monto: Number(total) }],
+        pagos: [{ metodo: 'TARJETA_DEBITO', monto: Number(total) }],
       });
     expect(res.status).toBe(201);
     expect(res.body.comprobante.receptorRazonSocial).toBe('CONSULTORA DEL ESTE S.A.');

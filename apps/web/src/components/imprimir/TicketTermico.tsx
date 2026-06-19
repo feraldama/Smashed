@@ -20,7 +20,7 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '72mm', // 75mm - 3mm de márgenes laterales (área imprimible real)
+        width: '68mm', // 71mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
         padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',
@@ -256,10 +256,18 @@ function labelTipo(t: string): string {
 }
 
 function labelMetodo(m: string): string {
-  return m
-    .replace(/_/g, ' ')
-    .toLowerCase()
-    .replace(/\b\w/g, (c) => c.toUpperCase());
+  const labels: Record<string, string> = {
+    EFECTIVO: 'Efectivo',
+    TARJETA_CREDITO: 'Tarjeta de Crédito',
+    TARJETA_DEBITO: 'Tarjeta de Débito',
+  };
+  return (
+    labels[m] ??
+    m
+      .replace(/_/g, ' ')
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }
 
 function formatGsCorto(n: bigint): string {

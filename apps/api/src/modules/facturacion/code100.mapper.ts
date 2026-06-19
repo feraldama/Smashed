@@ -450,14 +450,11 @@ function mapMetodoPago(metodo: MetodoPago): string {
   switch (metodo) {
     case 'EFECTIVO':
       return '1';
-    case 'CHEQUE':
-      return '2';
-    case 'TRANSFERENCIA':
-      return '5';
-    case 'BANCARD':
-    case 'DINELCO':
-      // Procesadoras electrónicas. Usamos "Pago Electrónico" (21) para no tener
-      // que informar los campos obligatorios de tarjeta (iDenTarj, etc.).
+    case 'TARJETA_CREDITO':
+    case 'TARJETA_DEBITO':
+      // Tarjetas. Las informamos como "Pago Electrónico" (21) para no tener que
+      // completar los campos obligatorios de tarjeta (iDenTarj, procesadora,
+      // etc.) que exigen los códigos específicos 3 (crédito) y 4 (débito).
       return '21';
     default:
       return '99';

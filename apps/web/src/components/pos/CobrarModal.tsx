@@ -8,8 +8,6 @@ import {
   Percent,
   Plus,
   Receipt,
-  ScrollText,
-  Send,
   Trash2,
   User,
   Wallet,
@@ -70,10 +68,18 @@ const METODOS: {
   requiereReferencia: boolean;
 }[] = [
   { value: 'EFECTIVO', label: 'Efectivo', icon: Banknote, requiereReferencia: false },
-  { value: 'BANCARD', label: 'Bancard', icon: CreditCard, requiereReferencia: true },
-  { value: 'DINELCO', label: 'Dinelco', icon: CreditCard, requiereReferencia: true },
-  { value: 'TRANSFERENCIA', label: 'Transferencia', icon: Send, requiereReferencia: true },
-  { value: 'CHEQUE', label: 'Cheque', icon: ScrollText, requiereReferencia: true },
+  {
+    value: 'TARJETA_CREDITO',
+    label: 'Tarjeta de Crédito',
+    icon: CreditCard,
+    requiereReferencia: true,
+  },
+  {
+    value: 'TARJETA_DEBITO',
+    label: 'Tarjeta de Débito',
+    icon: CreditCard,
+    requiereReferencia: true,
+  },
 ];
 
 function parseGs(s: string): number {

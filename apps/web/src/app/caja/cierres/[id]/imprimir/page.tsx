@@ -98,11 +98,11 @@ function ImprimirScreen() {
             padding: 0 !important;
           }
           @page {
-            size: 75mm auto;
+            size: 71mm auto;
             margin: 0;
           }
           .ticket-print {
-            width: 72mm;
+            width: 68mm;
             padding: 1.5mm;
             margin: 0;
           }
@@ -131,7 +131,7 @@ function TicketCierreZ({ cierre }: { cierre: CierreDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '72mm', // 75mm - 3mm de márgenes laterales (área imprimible real)
+        width: '68mm', // 71mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
         padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',

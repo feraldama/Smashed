@@ -164,7 +164,7 @@ export function useComprobante(id: string | null) {
 
 // ───── Emisión ─────
 
-export type MetodoPago = 'EFECTIVO' | 'BANCARD' | 'DINELCO' | 'TRANSFERENCIA' | 'CHEQUE';
+export type MetodoPago = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO';
 
 export interface EmitirComprobanteInput {
   pedidoId: string;
