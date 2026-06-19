@@ -772,6 +772,23 @@ model DireccionCliente {
   @@map("direccion_cliente")
 }
 
+// Padrón de cédulas (referencia global, NO multi-tenant).
+//
+// Tabla de consulta poblada una sola vez desde un registro externo de CI →
+// nombre/apellido (~6,9M filas). NO es la lista de clientes: sólo sirve para
+// autocompletar el nombre cuando el cajero tipea una CI. El `cliente` real se
+// crea recién cuando la persona compra. Por eso no tiene empresa_id ni soft
+// delete — es dato de referencia compartido por todas las empresas.
+//
+// La carga masiva se hace por `COPY` fuera de Prisma (ver scripts/padron-ci).
+model PadronCi {
+  ci       String @id // CI normalizada (sin DV), igual semántica que cliente.documento
+  nombre   String
+  apellido String
+
+  @@map("padron_ci")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  CONTINÚA EN sección 2: INVENTARIO + RECETAS + COMBOS + MODIFICADORES
 //  Por legibilidad el archivo sigue abajo sin separar — Prisma requiere uno solo.

@@ -1,10 +1,10 @@
 'use client';
 
-import { Loader2, Plus, Search, User, UserCheck, UserPlus, X } from 'lucide-react';
-import { useState } from 'react';
+import { IdCard, Loader2, Plus, Search, User, UserCheck, UserPlus, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 import { ClienteFormModal } from '@/components/ClienteFormModal';
-import { type Cliente, useClientes } from '@/hooks/useClientes';
+import { buscarPadronCi, type Cliente, type PadronCi, useClientes } from '@/hooks/useClientes';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +24,8 @@ export function ClienteSelector({
 }: Props) {
   const [busqueda, setBusqueda] = useState('');
   const [showForm, setShowForm] = useState(false);
+  // CI con la que abrimos el form al crear desde una sugerencia del padrón.
+  const [documentoFormInicial, setDocumentoFormInicial] = useState<string | undefined>(undefined);
   const { data: clientes = [], isLoading } = useClientes(busqueda.trim() || undefined);
 
   const busquedaKb = useKeyboardInput({
@@ -36,6 +38,46 @@ export function ClienteSelector({
   const consumidorFinal = clientes.find((c) => c.esConsumidorFinal);
   const otros = clientes.filter((c) => !c.esConsumidorFinal);
 
+  // Si el cajero busca por CI y no hay ningún cliente que coincida, consultamos
+  // el padrón global: puede ser alguien que todavía no es cliente pero está en
+  // el registro de cédulas. Así ofrecemos crearlo de un toque, sin re-tipear.
+  const ciBuscada = busqueda.trim();
+  const buscarEnPadron = !isLoading && otros.length === 0 && /^\d{4,}$/.test(ciBuscada);
+  const [padronHit, setPadronHit] = useState<PadronCi | null>(null);
+  const [buscandoPadron, setBuscandoPadron] = useState(false);
+
+  useEffect(() => {
+    if (!buscarEnPadron) {
+      setPadronHit(null);
+      setBuscandoPadron(false);
+      return;
+    }
+    let cancelado = false;
+    setBuscandoPadron(true);
+    const t = setTimeout(() => {
+      void buscarPadronCi(ciBuscada)
+        .then((res) => {
+          if (cancelado) return;
+          setPadronHit(res);
+          setBuscandoPadron(false);
+        })
+        .catch(() => {
+          if (cancelado) return;
+          setPadronHit(null);
+          setBuscandoPadron(false);
+        });
+    }, 350);
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [buscarEnPadron, ciBuscada]);
+
+  function abrirNuevo(documento?: string) {
+    setDocumentoFormInicial(documento);
+    setShowForm(true);
+  }
+
   return (
     <>
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
@@ -45,7 +87,7 @@ export function ClienteSelector({
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setShowForm(true)}
+                onClick={() => abrirNuevo()}
                 className="flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground hover:bg-primary/90"
                 title="Crear nuevo cliente"
               >
@@ -82,9 +124,35 @@ export function ClienteSelector({
                 <p className="mb-3 text-muted-foreground">
                   {busqueda ? 'Sin coincidencias para esa búsqueda.' : 'Buscá un cliente'}
                 </p>
+
+                {/* Sugerencia del padrón: la CI buscada existe en el registro */}
+                {buscandoPadron && (
+                  <p className="mb-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Buscando CI en el padrón…
+                  </p>
+                )}
+                {!buscandoPadron && padronHit && (
+                  <button
+                    type="button"
+                    onClick={() => abrirNuevo(padronHit.ci)}
+                    className="mx-auto mb-3 flex w-full max-w-xs items-center gap-3 rounded-lg border border-primary/40 bg-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-primary/10"
+                  >
+                    <IdCard className="h-5 w-5 shrink-0 text-primary" />
+                    <span className="flex-1">
+                      <span className="block font-semibold leading-tight">
+                        {padronHit.nombre} {padronHit.apellido}
+                      </span>
+                      <span className="block text-xs text-muted-foreground">
+                        CI {padronHit.ci} · encontrado en el padrón — tocá para crear
+                      </span>
+                    </span>
+                    <UserPlus className="h-4 w-4 shrink-0 text-primary" />
+                  </button>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => setShowForm(true)}
+                  onClick={() => abrirNuevo(/^\d{4,}$/.test(ciBuscada) ? ciBuscada : undefined)}
                   className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
                 >
                   <Plus className="h-4 w-4" /> Crear cliente nuevo
@@ -118,13 +186,18 @@ export function ClienteSelector({
 
       {showForm && (
         <ClienteFormModal
+          documentoInicial={documentoFormInicial}
           onCreado={(c) => {
             setShowForm(false);
+            setDocumentoFormInicial(undefined);
             // Seleccionamos el cliente recién creado y cerramos el selector,
             // así el cajero vuelve al modal de cobro con el cliente cargado.
             onSeleccionar(c);
           }}
-          onClose={() => setShowForm(false)}
+          onClose={() => {
+            setShowForm(false);
+            setDocumentoFormInicial(undefined);
+          }}
         />
       )}
     </>

@@ -10,6 +10,10 @@ router.use(authRequired);
 const requireOperativo = requireRol('CAJERO', 'MESERO', 'GERENTE_SUCURSAL', 'ADMIN_EMPRESA');
 const requireAdmin = requireRol('ADMIN_EMPRESA', 'GERENTE_SUCURSAL');
 
+// Lookup en el padrón de cédulas (CI → nombre/apellido). Antes de '/:id' para
+// que el segmento 'padron' no se interprete como un id de cliente.
+router.get('/padron/:ci', requireOperativo, asyncH(ctrl.buscarPadron));
+
 // Listado y detalle: cualquier rol operativo puede consultar (para autocomplete del POS futuro)
 router.get('/', requireOperativo, asyncH(ctrl.listar));
 router.get('/:id', requireOperativo, asyncH(ctrl.obtener));

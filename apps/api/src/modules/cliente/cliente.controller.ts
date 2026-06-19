@@ -1,4 +1,3 @@
-
 import { Errors } from '../../lib/errors.js';
 
 import {
@@ -8,6 +7,7 @@ import {
   direccionIdParam,
   direccionInput,
   listarClientesQuery,
+  padronCiParam,
 } from './cliente.schemas.js';
 import * as service from './cliente.service.js';
 
@@ -17,6 +17,14 @@ function requireEmpresa(req: Request) {
   if (!req.context) throw Errors.unauthorized();
   if (!req.context.empresaId) throw Errors.forbidden('Usuario sin empresa');
   return { ctx: req.context, empresaId: req.context.empresaId };
+}
+
+export async function buscarPadron(req: Request, res: Response) {
+  requireEmpresa(req); // sólo exige sesión/empresa válida; el padrón es global
+  const { ci } = padronCiParam.parse(req.params);
+  const registro = await service.buscarEnPadron(ci);
+  if (!registro) throw Errors.notFound('CI no encontrada en el padrón');
+  res.json({ padron: registro });
 }
 
 export async function listar(req: Request, res: Response) {

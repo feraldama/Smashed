@@ -55,6 +55,60 @@ describe('GET /clientes', () => {
   });
 });
 
+describe('GET /clientes/padron/:ci', () => {
+  // CI de 9 dígitos que no existe en el padrón real (máximo real ~7-9 díg.),
+  // la sembramos y borramos para no depender de datos cargados.
+  const CI_TEST = '999999991';
+
+  beforeAll(async () => {
+    await prisma.padronCi.upsert({
+      where: { ci: CI_TEST },
+      create: { ci: CI_TEST, nombre: 'JUAN TEST', apellido: 'PADRON PRUEBA' },
+      update: { nombre: 'JUAN TEST', apellido: 'PADRON PRUEBA' },
+    });
+  });
+  afterAll(async () => {
+    await prisma.padronCi.deleteMany({ where: { ci: CI_TEST } });
+  });
+
+  it('devuelve nombre/apellido para una CI existente', async () => {
+    const token = await login(CAJERO);
+    const res = await request(app)
+      .get(`/clientes/padron/${CI_TEST}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    expect(res.body.padron).toMatchObject({
+      ci: CI_TEST,
+      nombre: 'JUAN TEST',
+      apellido: 'PADRON PRUEBA',
+    });
+  });
+
+  it('CI inexistente → 404', async () => {
+    const token = await login(CAJERO);
+    const res = await request(app)
+      .get('/clientes/padron/123123123123')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(404);
+  });
+
+  it('CI no numérica → 400', async () => {
+    const token = await login(CAJERO);
+    const res = await request(app)
+      .get('/clientes/padron/abc')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(400);
+  });
+
+  it('cocina (rol no operativo) → 403', async () => {
+    const token = await login(COCINA);
+    const res = await request(app)
+      .get(`/clientes/padron/${CI_TEST}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(403);
+  });
+});
+
 describe('POST /clientes', () => {
   it('crea PERSONA_FISICA con CI', async () => {
     const token = await login(CAJERO);

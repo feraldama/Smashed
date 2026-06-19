@@ -1,13 +1,18 @@
 'use client';
 
 import { calcularDvRuc } from '@smash/shared-utils';
-import { Loader2, Save, X } from 'lucide-react';
-import { useState } from 'react';
+import { Check, Loader2, Save, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 import { toast } from '@/components/Toast';
 import { Field, Input } from '@/components/ui/Input';
 import { SwitchField } from '@/components/ui/Switch';
-import { type Cliente, useActualizarCliente, useCrearCliente } from '@/hooks/useClientes';
+import {
+  buscarPadronCi,
+  type Cliente,
+  useActualizarCliente,
+  useCrearCliente,
+} from '@/hooks/useClientes';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useNumpadInput } from '@/hooks/useNumpadInput';
 import { ApiError } from '@/lib/api';
@@ -15,6 +20,11 @@ import { cn } from '@/lib/utils';
 
 interface ClienteFormModalProps {
   cliente?: Cliente;
+  /** CI con la que arranca el form en un alta (persona física). Se usa cuando
+   * el cajero buscó por cédula en el POS: precargamos el documento, lo que
+   * además dispara el autocompletado de nombre contra el padrón. Ignorado en
+   * edición (cuando se pasa `cliente`). */
+  documentoInicial?: string;
   /** Si lo pasás, se llama tras un alta exitosa con el cliente creado.
    * Útil para flujos como POS → "Elegí un cliente" → "+ Nuevo" donde querés
    * preseleccionar el cliente recién creado en el selector. */
@@ -28,7 +38,12 @@ const TIPOS = [
   { value: 'EXTRANJERO', label: 'Extranjero' },
 ] as const;
 
-export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModalProps) {
+export function ClienteFormModal({
+  cliente,
+  documentoInicial,
+  onCreado,
+  onClose,
+}: ClienteFormModalProps) {
   const crear = useCrearCliente();
   const actualizar = useActualizarCliente();
   const isPending = crear.isPending || actualizar.isPending;
@@ -44,7 +59,8 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
   // `documento` pero sí `ruc` (porque el RUC PF en Paraguay es la misma CI),
   // mostramos el RUC como CI para que el cajero pueda editarlo.
   const [documento, setDocumento] = useState(
-    cliente?.documento ?? (tipoInicial === 'PERSONA_FISICA' ? (cliente?.ruc ?? '') : ''),
+    cliente?.documento ??
+      (tipoInicial === 'PERSONA_FISICA' ? (cliente?.ruc ?? documentoInicial ?? '') : ''),
   );
   // En PF activamos esto si el cliente quiere RUC para que le emitan factura.
   // En PJ siempre se manda RUC (tiene sentido por definición).
@@ -62,6 +78,59 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
     cliente?.sinRecargoDelivery ?? false,
   );
   const [error, setError] = useState<string | null>(null);
+
+  // Autocompletado contra el padrón de cédulas (CI → nombre/apellido).
+  // Sólo aplica a persona física. `valorAutollenadoRef` guarda lo último que
+  // escribimos nosotros en razonSocial: sólo pisamos el campo si sigue vacío o
+  // si conserva ese valor (es decir, el cajero no lo editó a mano).
+  const [padronStatus, setPadronStatus] = useState<
+    'idle' | 'buscando' | 'encontrado' | 'no-encontrado'
+  >('idle');
+  const valorAutollenadoRef = useRef<string>(cliente?.razonSocial ?? '');
+
+  useEffect(() => {
+    // En edición no autocompletamos: respetamos lo que ya está cargado.
+    if (isEdit || tipo !== 'PERSONA_FISICA') {
+      setPadronStatus('idle');
+      return;
+    }
+    const ci = documento.trim();
+    if (!/^\d{4,}$/.test(ci)) {
+      setPadronStatus('idle');
+      return;
+    }
+
+    let cancelado = false;
+    setPadronStatus('buscando');
+    const t = setTimeout(() => {
+      void buscarPadronCi(ci)
+        .then((res) => {
+          if (cancelado) return;
+          if (!res) {
+            setPadronStatus('no-encontrado');
+            return;
+          }
+          setPadronStatus('encontrado');
+          const nombreCompleto = `${res.nombre} ${res.apellido}`.replace(/\s+/g, ' ').trim();
+          // No pisar lo que el cajero escribió a mano.
+          setRazonSocial((actual) => {
+            if (actual.trim() === '' || actual === valorAutollenadoRef.current) {
+              valorAutollenadoRef.current = nombreCompleto;
+              return nombreCompleto;
+            }
+            return actual;
+          });
+        })
+        .catch(() => {
+          if (!cancelado) setPadronStatus('idle');
+        });
+    }, 400);
+
+    return () => {
+      cancelado = true;
+      clearTimeout(t);
+    };
+  }, [documento, tipo, isEdit]);
 
   // Hooks de teclado virtual (solo activos para rol CAJERO; admins no los notan)
   const razonSocialKb = useKeyboardInput({
@@ -259,6 +328,23 @@ export function ClienteFormModal({ cliente, onCreado, onClose }: ClienteFormModa
                     placeholder="1234567"
                     {...documentoNp.inputProps}
                   />
+                  {padronStatus === 'buscando' && (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      Buscando en el padrón…
+                    </p>
+                  )}
+                  {padronStatus === 'encontrado' && (
+                    <p className="mt-1 flex items-center gap-1 text-xs text-emerald-600">
+                      <Check className="h-3 w-3" />
+                      Nombre cargado desde el padrón
+                    </p>
+                  )}
+                  {padronStatus === 'no-encontrado' && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      CI no está en el padrón — cargá el nombre a mano
+                    </p>
+                  )}
                 </Field>
                 <Field label="DV" hint="Calculado automático">
                   <Input

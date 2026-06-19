@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { api } from '@/lib/api';
+import { ApiError, api } from '@/lib/api';
 
 export interface Cliente {
   id: string;
@@ -38,6 +38,29 @@ export function useClientes(busqueda?: string) {
     queryFn: () => api<{ clientes: Cliente[] }>(`/clientes${params}`),
     select: (d) => d.clientes,
   });
+}
+
+export interface PadronCi {
+  ci: string;
+  nombre: string;
+  apellido: string;
+}
+
+/**
+ * Consulta el padrón global de cédulas para autocompletar nombre/apellido al
+ * cargar un cliente persona física. Devuelve `null` si la CI no está en el
+ * padrón (404) — el llamador trata "no encontrada" como caso normal, no error.
+ */
+export async function buscarPadronCi(ci: string): Promise<PadronCi | null> {
+  try {
+    const { padron } = await api<{ padron: PadronCi }>(
+      `/clientes/padron/${encodeURIComponent(ci)}`,
+    );
+    return padron;
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
 }
 
 export function useCliente(id: string | null) {

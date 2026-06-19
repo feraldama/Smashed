@@ -62,6 +62,14 @@ export const listarClientesQuery = z.object({
 
 export const clienteIdParam = z.object({ id: z.string().cuid() });
 
+// Lookup contra el padrón de cédulas (CI numérica, sin DV).
+export const padronCiParam = z.object({
+  ci: z
+    .string()
+    .trim()
+    .regex(/^\d{1,15}$/, 'CI debe ser numérica'),
+});
+
 // ───── Direcciones ─────
 
 export const direccionInput = z.object({

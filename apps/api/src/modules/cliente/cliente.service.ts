@@ -74,6 +74,20 @@ export async function obtenerCliente(empresaId: string, id: string) {
   return cliente;
 }
 
+// ───── Padrón de cédulas (referencia global) ─────
+
+/**
+ * Busca una CI en el padrón global para autocompletar nombre/apellido al cargar
+ * un cliente. NO crea ni devuelve un `cliente`: es sólo consulta de referencia.
+ * Devuelve `null` si la CI no está en el padrón.
+ */
+export async function buscarEnPadron(ci: string) {
+  return prisma.padronCi.findUnique({
+    where: { ci },
+    select: { ci: true, nombre: true, apellido: true },
+  });
+}
+
 // ───── Crear / actualizar / eliminar ─────
 
 export async function crearCliente(empresaId: string, input: CrearClienteInput) {
