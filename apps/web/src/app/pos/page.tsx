@@ -50,6 +50,7 @@ import { type Promocion, usePromocionesVigentes } from '@/hooks/usePromociones';
 import { useSucursal } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import { imprimirComprobante } from '@/lib/imprimir';
 import {
   aPayloadPedidoItems,
   calcularRecargoDelivery,
@@ -371,8 +372,9 @@ function POSScreen() {
     setMesa(null);
     setCliente(null);
     setTipo('MOSTRADOR');
-    // Abrir impresión en nueva tab
-    window.open(`/comprobantes/${comprobanteId}/imprimir`, '_blank');
+    // Imprimir directo en un iframe oculto: no saca al cajero del POS ni abre
+    // otra pestaña con el diálogo de impresión.
+    imprimirComprobante(comprobanteId);
     router.refresh();
   }
 

@@ -30,6 +30,7 @@ import {
 } from '@/hooks/usePedidos';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
+import { imprimirComprobante } from '@/lib/imprimir';
 import { cn } from '@/lib/utils';
 
 const TIPO_ICON = {
@@ -81,7 +82,7 @@ function EntregasScreen() {
 
   function handleCobrarSuccess(comprobanteId: string) {
     setCobrarPedido(null);
-    window.open(`/comprobantes/${comprobanteId}/imprimir`, '_blank');
+    imprimirComprobante(comprobanteId);
     router.refresh();
   }
 
