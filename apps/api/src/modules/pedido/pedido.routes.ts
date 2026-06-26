@@ -8,6 +8,7 @@ const router = Router();
 router.use(authRequired);
 
 const requireOperativo = requireRol('CAJERO', 'MESERO', 'GERENTE_SUCURSAL', 'ADMIN_EMPRESA');
+const requireGestion = requireRol('GERENTE_SUCURSAL', 'ADMIN_EMPRESA');
 const requireKitchen = requireRol(
   'COCINA',
   'CAJERO',
@@ -24,6 +25,7 @@ router.post('/:id/confirmar', requireOperativo, asyncH(ctrl.confirmar));
 router.post('/:id/items', requireOperativo, asyncH(ctrl.agregarItems));
 router.patch('/:id/estado', requireKitchen, asyncH(ctrl.transicionar));
 router.patch('/:id/items/:itemId/estado', requireKitchen, asyncH(ctrl.cambiarEstadoItem));
+router.post('/:id/items/:itemId/cancelar', requireGestion, asyncH(ctrl.cancelarItem));
 router.patch(
   '/:id/combo-opciones/:comboOpcionId/estado',
   requireKitchen,

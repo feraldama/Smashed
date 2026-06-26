@@ -1,4 +1,4 @@
-import { AlertCircle, Ban, CheckCircle2, Clock, CircleSlash, XCircle } from 'lucide-react';
+import { AlertCircle, Ban, CheckCircle2, Clock, CircleSlash, Send, XCircle } from 'lucide-react';
 
 import type { EstadoSifen } from '@/hooks/useComprobantes';
 
@@ -9,6 +9,11 @@ const STYLES: Record<EstadoSifen, { label: string; className: string; Icon: type
     label: 'No enviado',
     className: 'bg-muted text-muted-foreground border-muted-foreground/20',
     Icon: CircleSlash,
+  },
+  ENVIANDO: {
+    label: 'Enviando',
+    className: 'bg-sky-100 text-sky-900 border-sky-300 dark:bg-sky-950/50 dark:text-sky-200',
+    Icon: Send,
   },
   PENDIENTE: {
     label: 'Pendiente',
@@ -49,7 +54,13 @@ export function EstadoSifenBadge({
   size?: 'xs' | 'sm' | 'md';
   withIcon?: boolean;
 }) {
-  const { label, className, Icon } = STYLES[estado];
+  // Fallback defensivo: si el backend agrega un estado que el front todavía no
+  // mapea, mostramos el código crudo en vez de romper la pantalla.
+  const { label, className, Icon } = STYLES[estado] ?? {
+    label: estado,
+    className: 'bg-muted text-muted-foreground border-muted-foreground/20',
+    Icon: CircleSlash,
+  };
   const sizeClass =
     size === 'xs'
       ? 'text-[10px] px-1.5 py-0.5 gap-1'

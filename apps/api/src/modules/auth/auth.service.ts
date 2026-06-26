@@ -40,7 +40,15 @@ export async function login(input: LoginInput, meta: ClientMeta) {
       empresa: { select: { activa: true, motivoInactiva: true, nombreFantasia: true } },
       sucursales: {
         include: {
-          sucursal: { select: { id: true, nombre: true, codigo: true, establecimiento: true } },
+          sucursal: {
+            select: {
+              id: true,
+              nombre: true,
+              codigo: true,
+              establecimiento: true,
+              esDeposito: true,
+            },
+          },
         },
       },
     },
@@ -60,8 +68,10 @@ export async function login(input: LoginInput, meta: ClientMeta) {
   }
 
   // Sucursal activa por default: la marcada como principal, o la primera, o null.
+  // Nunca un depósito (no vende), salvo que el usuario sólo tenga depósitos.
   const sucursalActivaId =
-    usuario.sucursales.find((s) => s.esPrincipal)?.sucursalId ??
+    usuario.sucursales.find((s) => s.esPrincipal && !s.sucursal.esDeposito)?.sucursalId ??
+    usuario.sucursales.find((s) => !s.sucursal.esDeposito)?.sucursalId ??
     usuario.sucursales[0]?.sucursalId ??
     null;
 
@@ -111,6 +121,7 @@ export async function login(input: LoginInput, meta: ClientMeta) {
         nombre: us.sucursal.nombre,
         codigo: us.sucursal.codigo,
         establecimiento: us.sucursal.establecimiento,
+        esDeposito: us.sucursal.esDeposito,
         esPrincipal: us.esPrincipal,
       })),
       sucursalActivaId,
@@ -133,7 +144,13 @@ export async function refresh(
       usuario: {
         include: {
           empresa: { select: { activa: true, motivoInactiva: true } },
-          sucursales: { select: { sucursalId: true, esPrincipal: true } },
+          sucursales: {
+            select: {
+              sucursalId: true,
+              esPrincipal: true,
+              sucursal: { select: { esDeposito: true } },
+            },
+          },
         },
       },
     },
@@ -202,7 +219,8 @@ export async function refresh(
 
   const sucursalActivaId =
     hintAceptable ??
-    stored.usuario.sucursales.find((s) => s.esPrincipal)?.sucursalId ??
+    stored.usuario.sucursales.find((s) => s.esPrincipal && !s.sucursal.esDeposito)?.sucursalId ??
+    stored.usuario.sucursales.find((s) => !s.sucursal.esDeposito)?.sucursalId ??
     stored.usuario.sucursales[0]?.sucursalId ??
     null;
 
@@ -238,7 +256,15 @@ export async function me(userId: string) {
     include: {
       sucursales: {
         include: {
-          sucursal: { select: { id: true, nombre: true, codigo: true, establecimiento: true } },
+          sucursal: {
+            select: {
+              id: true,
+              nombre: true,
+              codigo: true,
+              establecimiento: true,
+              esDeposito: true,
+            },
+          },
         },
       },
       empresa: { select: { id: true, nombreFantasia: true, razonSocial: true } },
@@ -259,6 +285,7 @@ export async function me(userId: string) {
       nombre: us.sucursal.nombre,
       codigo: us.sucursal.codigo,
       establecimiento: us.sucursal.establecimiento,
+      esDeposito: us.sucursal.esDeposito,
       esPrincipal: us.esPrincipal,
     })),
     menusPermitidos,

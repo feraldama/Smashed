@@ -1,15 +1,24 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+// Fuente única del tipo (compartido con la API vía @smash/shared-types).
+// Se re-exporta para no tocar a los muchos componentes que ya lo importan
+// desde este hook.
+import type { UnidadMedida } from '@smash/shared-types';
+
 import { api } from '@/lib/api';
 
-export type UnidadMedida =
-  | 'UNIDAD'
-  | 'KILOGRAMO'
-  | 'GRAMO'
-  | 'LITRO'
-  | 'MILILITRO'
-  | 'PORCION'
-  | 'DOCENA';
+export type { UnidadMedida };
+
+/**
+ * Equivalencia de una unidad alternativa respecto a la unidad de stock del
+ * insumo: `cantidadUnidad [unidad] = cantidadBase [unidadMedida del insumo]`.
+ */
+export interface UnidadAlternativa {
+  id?: string;
+  unidad: UnidadMedida;
+  cantidadUnidad: string | number;
+  cantidadBase: string | number;
+}
 
 export interface Insumo {
   id: string;
@@ -22,6 +31,7 @@ export interface Insumo {
   categoria: string | null;
   activo: boolean;
   proveedor: { id: string; razonSocial: string } | null;
+  unidadesAlternativas: UnidadAlternativa[];
   stock: {
     stockActual: string;
     stockMinimo: string;
@@ -80,6 +90,12 @@ interface InsumoInput {
   costoUnitario?: number;
   categoria?: string;
   proveedorId?: string;
+  // Si se pasa, reemplaza TODAS las equivalencias del insumo.
+  unidadesAlternativas?: Array<{
+    unidad: UnidadMedida;
+    cantidadUnidad: number;
+    cantidadBase: number;
+  }>;
 }
 
 export function useCrearInsumo() {

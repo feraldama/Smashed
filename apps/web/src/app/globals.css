@@ -26,12 +26,73 @@
     --radius: 0.625rem;
   }
 
+  /*
+   * Tema oscuro con elevación por capas: el fondo es la capa más profunda y
+   * las superficies (sidebar, tarjetas, popovers) van aclarándose para
+   * "flotar" por encima. Antes `--card` == `--background`, así que las
+   * tarjetas no se despegaban del fondo y todo se veía plano.
+   */
+  .dark {
+    --background: 222 40% 9%;
+    --foreground: 210 38% 96%;
+    --card: 222 33% 13%;
+    --card-foreground: 210 38% 96%;
+    --popover: 222 36% 11%;
+    --popover-foreground: 210 38% 96%;
+    --primary: 199 90% 56%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 217 30% 19%;
+    --secondary-foreground: 210 38% 96%;
+    --muted: 217 30% 17%;
+    --muted-foreground: 217 16% 66%;
+    --accent: 217 32% 23%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 56%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217 26% 23%;
+    --input: 217 26% 23%;
+    --ring: 199 90% 56%;
+  }
+
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
   }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+ *  Scrollbars temáticas — finas y acordes al tema (la nativa de Windows
+ *  pinta una barra blanca gruesa que rompe el tema oscuro).
+ * ───────────────────────────────────────────────────────────────────────── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--border)) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: hsl(var(--muted-foreground) / 0.55);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────

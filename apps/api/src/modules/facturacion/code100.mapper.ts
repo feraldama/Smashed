@@ -456,6 +456,10 @@ function mapMetodoPago(metodo: MetodoPago): string {
       // completar los campos obligatorios de tarjeta (iDenTarj, procesadora,
       // etc.) que exigen los códigos específicos 3 (crédito) y 4 (débito).
       return '21';
+    case 'PEDIDOS_YA':
+      // PedidosYa liquida el cobro electrónicamente a la cuenta del comercio →
+      // "Pago Electrónico" (21), mismo criterio que las tarjetas.
+      return '21';
     default:
       return '99';
   }

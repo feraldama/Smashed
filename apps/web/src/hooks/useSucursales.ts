@@ -9,7 +9,10 @@ export interface Sucursal {
   empresaId: string;
   nombre: string;
   codigo: string;
-  establecimiento: string;
+  // null para depósitos (no facturan, no tienen establecimiento SIFEN).
+  establecimiento: string | null;
+  // Depósito: sólo inventario, no vende ni factura.
+  esDeposito: boolean;
   direccion: string;
   ciudad: string | null;
   departamento: string | null;
@@ -33,7 +36,8 @@ export interface Sucursal {
 export interface CrearSucursalInput {
   nombre: string;
   codigo: string;
-  establecimiento: string;
+  establecimiento?: string;
+  esDeposito?: boolean;
   direccion: string;
   ciudad?: string;
   departamento?: string;
@@ -45,7 +49,8 @@ export interface CrearSucursalInput {
 export interface ActualizarSucursalInput {
   nombre?: string;
   codigo?: string;
-  establecimiento?: string;
+  establecimiento?: string | null;
+  esDeposito?: boolean;
   direccion?: string;
   ciudad?: string | null;
   departamento?: string | null;

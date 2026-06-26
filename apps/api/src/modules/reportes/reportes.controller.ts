@@ -168,10 +168,12 @@ export async function descuentosListado(req: Request, res: Response) {
     const csv = csvFromRows(result, [
       { key: 'aplicado_en', label: 'Fecha/Hora' },
       { key: 'numero', label: 'Pedido #' },
+      { key: 'comprobante_numero', label: 'Ticket' },
       { key: 'tipo_pedido', label: 'Canal' },
       { key: 'tipo', label: 'Tipo descuento' },
       { key: 'monto', label: 'Monto' },
       { key: 'motivo', label: 'Motivo' },
+      { key: 'empleado_beneficiario', label: 'Beneficiario' },
       { key: 'aplicado_por', label: 'Aplicado por' },
       { key: 'autorizado_por', label: 'Autorizado por' },
       { key: 'observacion', label: 'Observación' },
@@ -200,6 +202,39 @@ export async function promocionesAhorro(req: Request, res: Response) {
     return;
   }
   res.json({ promociones: result });
+}
+
+export async function combosOpciones(req: Request, res: Response) {
+  const c = ctx(req);
+  const q = rangoFechasQuery.parse(req.query);
+  const result = await service.combosOpciones(c, q);
+  if (q.formato === 'csv') {
+    const csv = csvFromRows(result as unknown as Record<string, unknown>[], [
+      { key: 'combo_nombre', label: 'Combo' },
+      { key: 'grupo_nombre', label: 'Grupo' },
+      { key: 'opcion_nombre', label: 'Opción' },
+      { key: 'veces', label: 'Veces pedida' },
+    ]);
+    sendCsv(res, nombreArchivo('combos_opciones', q.desde, q.hasta), csv);
+    return;
+  }
+  res.json({ opciones: result });
+}
+
+export async function combosCombinaciones(req: Request, res: Response) {
+  const c = ctx(req);
+  const q = rangoFechasQuery.parse(req.query);
+  const result = await service.combosCombinaciones(c, q);
+  if (q.formato === 'csv') {
+    const csv = csvFromRows(result as unknown as Record<string, unknown>[], [
+      { key: 'combo_nombre', label: 'Combo' },
+      { key: 'combinacion', label: 'Combinación' },
+      { key: 'veces', label: 'Veces pedida' },
+    ]);
+    sendCsv(res, nombreArchivo('combos_combinaciones', q.desde, q.hasta), csv);
+    return;
+  }
+  res.json({ combinaciones: result });
 }
 
 export async function descuentosPorEmpleado(req: Request, res: Response) {

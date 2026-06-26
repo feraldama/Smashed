@@ -8,6 +8,7 @@ import { CajaIndicator } from '@/components/CajaIndicator';
 import { CartSidebar } from '@/components/CartSidebar';
 import { ProductCard, type ProductCardData } from '@/components/ProductCard';
 import { ProductoModal } from '@/components/ProductoModal';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { toast } from '@/components/Toast';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useCategorias, useProductos, type ProductoListado } from '@/hooks/useProductos';
@@ -122,6 +123,7 @@ function PosHome() {
 
             <div className="flex items-center gap-2">
               <CajaIndicator />
+              <ThemeToggle />
               <span className="hidden text-xs text-muted-foreground sm:inline">
                 {user?.nombreCompleto}
               </span>
@@ -223,6 +225,7 @@ function PosHome() {
                   imagenUrl: p.imagenUrl,
                   categoria: p.categoria?.nombre ?? null,
                   esCombo: p.esCombo,
+                  sinStock: p.sinStock,
                 };
                 return (
                   <ProductCard key={p.id} producto={card} onClick={() => handleClickProducto(p)} />

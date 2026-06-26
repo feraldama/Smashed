@@ -8,13 +8,15 @@ import { type ProcesarEmisionResultado, procesarEmision } from './emision.servic
 /**
  * Barrido de reconciliación: reintenta documentos que quedaron sin resolver.
  *
- * Cubre dos huecos del flujo normal:
+ * Cubre tres huecos del flujo normal:
  *  - NO_ENVIADO: el encolado falló (Redis caído al emitir) y nunca se procesó.
+ *  - ENVIANDO: el proceso murió alrededor del alta; `procesarEmision` consulta
+ *    a SIFEN y sólo re-da de alta si no lo encuentra (no duplica el documento).
  *  - PENDIENTE: el alta entró pero SIFEN aún no había aprobado/rechazado cuando
  *    se agotaron los reintentos del job; hay que volver a consultar.
  *
- * Procesa cada comprobante con `procesarEmision` (idempotente: PENDIENTE sólo
- * consulta, no re-da de alta), aislando errores por documento.
+ * Procesa cada comprobante con `procesarEmision` (idempotente), aislando
+ * errores por documento.
  */
 
 export interface ReconciliacionOpts {
@@ -50,7 +52,9 @@ export async function reconciliarPendientes(
       deletedAt: null,
       estado: { not: EstadoComprobante.ANULADO },
       tipoDocumento: { not: TipoDocumentoFiscal.TICKET },
-      estadoSifen: { in: [EstadoSifen.NO_ENVIADO, EstadoSifen.PENDIENTE] },
+      estadoSifen: {
+        in: [EstadoSifen.NO_ENVIADO, EstadoSifen.ENVIANDO, EstadoSifen.PENDIENTE],
+      },
       createdAt: { lt: corte },
     },
     select: { id: true },

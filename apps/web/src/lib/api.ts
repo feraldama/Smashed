@@ -134,7 +134,8 @@ export async function bootstrapAuth() {
           id: string;
           nombre: string;
           codigo: string;
-          establecimiento: string;
+          establecimiento: string | null;
+          esDeposito: boolean;
           esPrincipal: boolean;
         }[];
         menusPermitidos: string[];

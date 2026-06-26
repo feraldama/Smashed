@@ -6,22 +6,31 @@ import {
   Loader2,
   Receipt,
   Store,
+  Trash2,
   Truck,
   Utensils,
   User,
+  X,
 } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
+import { useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
+import { toast } from '@/components/Toast';
 import {
   type EstadoPedido,
   type PedidoDetalleItem,
   type TipoPedido,
+  useCancelarItemPedido,
   usePedidoDetalle,
 } from '@/hooks/usePedidos';
+import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 import { cn } from '@/lib/utils';
+
+const ROLES_CANCELAR_ITEM = ['GERENTE_SUCURSAL', 'ADMIN_EMPRESA', 'SUPER_ADMIN'];
 
 export default function PedidoDetallePage() {
   return (
@@ -61,6 +70,13 @@ function PedidoDetalleScreen() {
   const recargoDelivery = BigInt(pedido.recargoDelivery);
   const total = BigInt(pedido.total);
 
+  // Cancelar ítems: solo gerente/admin y mientras el pedido no esté cerrado.
+  const rol = useAuthStore((s) => s.user?.rol);
+  const puedeCancelarItems =
+    Boolean(rol && ROLES_CANCELAR_ITEM.includes(rol)) &&
+    pedido.estado !== 'FACTURADO' &&
+    pedido.estado !== 'CANCELADO';
+
   return (
     <div>
       <header className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -97,7 +113,12 @@ function PedidoDetalleScreen() {
             </h2>
             <ul className="divide-y">
               {pedido.items.map((it) => (
-                <ItemRow key={it.id} item={it} />
+                <ItemRow
+                  key={it.id}
+                  item={it}
+                  pedidoId={pedido.id}
+                  puedeCancelar={puedeCancelarItems}
+                />
               ))}
             </ul>
             <div className="space-y-1 border-t bg-muted/20 px-4 py-3 text-sm">
@@ -146,7 +167,38 @@ function PedidoDetalleScreen() {
 
 // ───── Items ─────
 
-function ItemRow({ item }: { item: PedidoDetalleItem }) {
+function ItemRow({
+  item,
+  pedidoId,
+  puedeCancelar,
+}: {
+  item: PedidoDetalleItem;
+  pedidoId: string;
+  puedeCancelar: boolean;
+}) {
+  const [mostrarMotivo, setMostrarMotivo] = useState(false);
+  const [motivo, setMotivo] = useState('');
+  const cancelarItem = useCancelarItemPedido();
+
+  const cancelado = item.estado === 'CANCELADO';
+  const puedeAccionar = puedeCancelar && !cancelado;
+
+  async function confirmarCancelacion() {
+    const m = motivo.trim();
+    if (m.length < 3) {
+      toast.error('El motivo debe tener al menos 3 caracteres');
+      return;
+    }
+    try {
+      await cancelarItem.mutateAsync({ pedidoId, itemId: item.id, motivo: m });
+      toast.success('Ítem cancelado');
+      setMostrarMotivo(false);
+      setMotivo('');
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'No se pudo cancelar el ítem');
+    }
+  }
+
   // Mods agrupados: globales del item + por componente del combo
   const modsGlobal = item.modificadores.filter((m) => !m.comboGrupo);
   const modsPorComponente = new Map<string, typeof item.modificadores>();
@@ -159,13 +211,20 @@ function ItemRow({ item }: { item: PedidoDetalleItem }) {
   }
 
   return (
-    <li className={cn('px-4 py-3', item.estado === 'CANCELADO' && 'opacity-50')}>
+    <li className={cn('px-4 py-3', cancelado && 'opacity-50')}>
       <div className="flex items-start gap-3">
         <span className="shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-base font-bold tabular-nums text-primary">
           {item.cantidad}×
         </span>
         <div className="flex-1">
-          <p className="font-semibold">{item.productoVenta.nombre}</p>
+          <p className={cn('font-semibold', cancelado && 'line-through')}>
+            {item.productoVenta.nombre}
+            {cancelado && (
+              <span className="ml-2 rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-900 dark:bg-red-950/40 dark:text-red-200">
+                Cancelado
+              </span>
+            )}
+          </p>
           {item.productoVenta.codigo && (
             <p className="text-[11px] text-muted-foreground">{item.productoVenta.codigo}</p>
           )}
@@ -209,10 +268,66 @@ function ItemRow({ item }: { item: PedidoDetalleItem }) {
             <p className="mt-1 text-[11px] italic text-muted-foreground">⚠ {item.observaciones}</p>
           )}
         </div>
-        <p className="shrink-0 font-mono text-sm font-semibold tabular-nums">
-          {formatGs(item.subtotal)}
-        </p>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <p className="font-mono text-sm font-semibold tabular-nums">{formatGs(item.subtotal)}</p>
+          {puedeAccionar && !mostrarMotivo && (
+            <button
+              type="button"
+              onClick={() => setMostrarMotivo(true)}
+              className="flex items-center gap-1 rounded-md border border-red-300 px-2 py-0.5 text-[11px] font-medium text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
+            >
+              <Trash2 className="h-3 w-3" /> Cancelar
+            </button>
+          )}
+        </div>
       </div>
+
+      {puedeAccionar && mostrarMotivo && (
+        <div className="mt-3 space-y-2 rounded-md border border-red-200 bg-red-50/50 p-3 dark:border-red-900/40 dark:bg-red-950/20">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-red-800 dark:text-red-200">
+              Cancelar este ítem (se revierte el stock)
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setMostrarMotivo(false);
+                setMotivo('');
+              }}
+              className="rounded-sm p-0.5 hover:bg-red-100 dark:hover:bg-red-950/40"
+              aria-label="Cerrar"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+          <textarea
+            autoFocus
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            rows={2}
+            maxLength={300}
+            placeholder="Motivo de la cancelación (ej: cliente cambió de opinión)"
+            className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          />
+          <div className="flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                void confirmarCancelacion();
+              }}
+              disabled={cancelarItem.isPending || motivo.trim().length < 3}
+              className="flex items-center gap-1.5 rounded-md bg-red-600 px-3 py-1 text-xs font-medium text-white shadow hover:bg-red-700 disabled:opacity-50"
+            >
+              {cancelarItem.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Trash2 className="h-3.5 w-3.5" />
+              )}
+              Confirmar cancelación
+            </button>
+          </div>
+        </div>
+      )}
     </li>
   );
 }

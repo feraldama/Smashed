@@ -186,27 +186,64 @@ export async function ventasPorHora(user: UserCtx, q: RangoFechasQuery) {
 
 export async function topProductos(user: UserCtx, q: TopQuery) {
   const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  // Mismo filtro de "venta real" para ambas fuentes (líneas del comprobante y
+  // componentes de combo). Se embebe dos veces; Prisma reutiliza los params.
+  const ventasWhere = Prisma.sql`
+    c."empresa_id" = ${user.empresaId}
+    AND c."estado" = 'EMITIDO'
+    AND c."deleted_at" IS NULL
+    ${soloVentas}
+    AND c."fecha_emision" >= ${q.desde}
+    AND c."fecha_emision" <= ${q.hasta}
+    ${sucursalFragment(sucursalId)}
+  `;
+
+  // Un combo se factura como una sola línea (el producto combo, con su precio
+  // completo). Sus componentes elegidos (la Smash Kesu del combo, etc.) viven
+  // sólo en item_pedido_combo_opcion. Para que esos componentes se reflejen en
+  // "productos más pedidos" unimos dos fuentes:
+  //   1. líneas del comprobante tal cual (incluye la propia línea del combo,
+  //      que conserva su ingreso completo).
+  //   2. cada selección de combo, sumando SÓLO unidades (ingreso 0) — así no se
+  //      duplica plata: el precio del combo ya está en su línea de la fuente 1.
+  // La cantidad del componente es la cantidad del item de pedido (un combo con
+  // cantidad 2 aporta 2 a cada componente elegido).
   return prisma.$queryRaw<
     { producto_id: string | null; nombre: string; cantidad_total: bigint; ingreso_total: bigint }[]
   >`
     SELECT
-      ic."producto_venta_id" AS producto_id,
-      COALESCE(pv."nombre", ic."descripcion") AS nombre,
-      SUM(ic."cantidad")::bigint AS cantidad_total,
-      SUM(ic."subtotal")::bigint AS ingreso_total
-    FROM item_comprobante ic
-    JOIN comprobante c ON c.id = ic."comprobante_id"
-    LEFT JOIN producto_venta pv ON pv.id = ic."producto_venta_id"
-    WHERE
-      c."empresa_id" = ${user.empresaId}
-      AND c."estado" = 'EMITIDO'
-      AND c."deleted_at" IS NULL
-      ${soloVentas}
-      AND c."fecha_emision" >= ${q.desde}
-      AND c."fecha_emision" <= ${q.hasta}
-      ${sucursalFragment(sucursalId)}
-    GROUP BY 1, 2
-    ORDER BY ingreso_total DESC
+      u.producto_id,
+      u.nombre,
+      SUM(u.cantidad)::bigint AS cantidad_total,
+      SUM(u.ingreso)::bigint AS ingreso_total
+    FROM (
+      SELECT
+        ic."producto_venta_id" AS producto_id,
+        COALESCE(pv."nombre", ic."descripcion") AS nombre,
+        ic."cantidad" AS cantidad,
+        ic."subtotal" AS ingreso
+      FROM item_comprobante ic
+      JOIN comprobante c ON c.id = ic."comprobante_id"
+      LEFT JOIN producto_venta pv ON pv.id = ic."producto_venta_id"
+      WHERE ${ventasWhere}
+
+      UNION ALL
+
+      SELECT
+        op_pv."id" AS producto_id,
+        op_pv."nombre" AS nombre,
+        ip."cantidad" AS cantidad,
+        0::bigint AS ingreso
+      FROM comprobante c
+      JOIN pedido p ON p.id = c."pedido_id"
+      JOIN item_pedido ip ON ip."pedido_id" = p.id
+      JOIN item_pedido_combo_opcion ipco ON ipco."item_pedido_id" = ip.id
+      JOIN combo_grupo_opcion cgo ON cgo.id = ipco."combo_grupo_opcion_id"
+      JOIN producto_venta op_pv ON op_pv.id = cgo."producto_venta_id"
+      WHERE ${ventasWhere}
+    ) u
+    GROUP BY u.producto_id, u.nombre
+    ORDER BY ingreso_total DESC, cantidad_total DESC
     LIMIT ${q.limite}
   `;
 }
@@ -408,6 +445,9 @@ export async function descuentosListado(user: UserCtx, q: DescuentosListadoQuery
       motivo: string | null;
       aplicado_por: string | null;
       autorizado_por: string | null;
+      empleado_beneficiario: string | null;
+      comprobante_id: string | null;
+      comprobante_numero: string | null;
       tipo_pedido: string;
       sucursal_nombre: string;
     }[]
@@ -422,13 +462,29 @@ export async function descuentosListado(user: UserCtx, q: DescuentosListadoQuery
       md."nombre" AS motivo,
       ua."nombre_completo" AS aplicado_por,
       uz."nombre_completo" AS autorizado_por,
+      eb."nombre_completo" AS empleado_beneficiario,
+      cmp.id AS comprobante_id,
+      cmp."numero_documento" AS comprobante_numero,
       p."tipo" AS tipo_pedido,
       s."nombre" AS sucursal_nombre
     FROM pedido p
     LEFT JOIN motivo_descuento md ON md.id = p."motivo_descuento_id"
     LEFT JOIN usuario ua ON ua.id = p."descuento_aplicado_por_id"
     LEFT JOIN usuario uz ON uz.id = p."descuento_autorizado_por_id"
+    LEFT JOIN usuario eb ON eb.id = p."empleado_beneficiario_id"
     LEFT JOIN sucursal s ON s.id = p."sucursal_id"
+    -- Ticket de venta del pedido: tomamos el comprobante de venta emitido más
+    -- reciente (un pedido puede tener varios si hubo reemisión / nota de crédito).
+    LEFT JOIN LATERAL (
+      SELECT cc.id, cc."numero_documento"
+      FROM comprobante cc
+      WHERE cc."pedido_id" = p.id
+        AND cc."estado" = 'EMITIDO'
+        AND cc."deleted_at" IS NULL
+        AND cc."tipo_documento" IN ('TICKET', 'FACTURA')
+      ORDER BY cc."fecha_emision" DESC
+      LIMIT 1
+    ) cmp ON true
     WHERE
       p."empresa_id" = ${user.empresaId}
       AND p."deleted_at" IS NULL
@@ -496,6 +552,116 @@ export async function promocionesAhorro(user: UserCtx, q: RangoFechasQuery) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+//  COMBOS — qué se pide dentro de cada combo
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Filtro común de los reportes de combos: pedidos no cancelados del rango.
+// Igual que promociones, medimos sobre `pedido` (no comprobante) porque la
+// selección de combo vive en item_pedido, y usamos `created_at` para el rango.
+// `SUM(ip.cantidad)` cuenta unidades de combo (un item con cantidad=2 son 2
+// combos), no filas de selección.
+function combosWhere(empresaId: string, q: RangoFechasQuery, sucursalId: string | undefined) {
+  return Prisma.sql`
+    p."empresa_id" = ${empresaId}
+    AND p."deleted_at" IS NULL
+    AND p."estado" <> 'CANCELADO'::"EstadoPedido"
+    AND p."created_at" >= ${q.desde}
+    AND p."created_at" <= ${q.hasta}
+    ${sucursalId ? Prisma.sql`AND p."sucursal_id" = ${sucursalId}` : Prisma.empty}
+  `;
+}
+
+/**
+ * Por cada combo y cada grupo de elección (Bebida, Acompañamiento…), cuántas
+ * veces se eligió cada opción. Responde "en el Combo X la bebida más pedida es
+ * Coca". El % dentro del grupo lo calcula el front (veces / total del grupo).
+ *
+ * No filtra grupos/opciones soft-deleted: la selección histórica del pedido
+ * sigue siendo válida aunque hoy el combo haya cambiado de composición.
+ */
+export async function combosOpciones(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      combo_id: string;
+      combo_nombre: string;
+      grupo_id: string;
+      grupo_nombre: string;
+      grupo_orden: number;
+      opcion_producto_id: string;
+      opcion_nombre: string;
+      veces: bigint;
+    }[]
+  >`
+    SELECT
+      cb_pv."id" AS combo_id,
+      cb_pv."nombre" AS combo_nombre,
+      cg."id" AS grupo_id,
+      cg."nombre" AS grupo_nombre,
+      cg."orden" AS grupo_orden,
+      op_pv."id" AS opcion_producto_id,
+      op_pv."nombre" AS opcion_nombre,
+      SUM(ip."cantidad")::bigint AS veces
+    FROM item_pedido_combo_opcion ipco
+    JOIN item_pedido ip ON ip.id = ipco."item_pedido_id"
+    JOIN pedido p ON p.id = ip."pedido_id"
+    JOIN combo_grupo cg ON cg.id = ipco."combo_grupo_id"
+    JOIN combo cb ON cb.id = cg."combo_id"
+    JOIN producto_venta cb_pv ON cb_pv.id = cb."producto_venta_id"
+    JOIN combo_grupo_opcion cgo ON cgo.id = ipco."combo_grupo_opcion_id"
+    JOIN producto_venta op_pv ON op_pv.id = cgo."producto_venta_id"
+    WHERE ${combosWhere(user.empresaId, q, sucursalId)}
+    GROUP BY 1, 2, 3, 4, 5, 6, 7
+    ORDER BY combo_nombre ASC, grupo_orden ASC, grupo_nombre ASC, veces DESC
+  `;
+}
+
+/**
+ * Ranking de la canasta exacta por combo: el conjunto de opciones elegidas
+ * juntas en un mismo item de pedido. Responde "la combinación más pedida del
+ * Combo X es Papas + Coca". `combinacion` concatena las opciones ordenadas por
+ * el orden del grupo para que la misma canasta agrupe siempre igual.
+ */
+export async function combosCombinaciones(user: UserCtx, q: RangoFechasQuery) {
+  const sucursalId = efectiveSucursalId(user, q.sucursalId);
+  return prisma.$queryRaw<
+    {
+      combo_id: string;
+      combo_nombre: string;
+      combinacion: string;
+      veces: bigint;
+    }[]
+  >`
+    WITH item_combo AS (
+      SELECT
+        ip.id AS item_id,
+        ip."cantidad" AS cantidad,
+        cb_pv."id" AS combo_id,
+        cb_pv."nombre" AS combo_nombre,
+        STRING_AGG(op_pv."nombre", ' + ' ORDER BY cg."orden", cg."nombre") AS combinacion
+      FROM item_pedido_combo_opcion ipco
+      JOIN item_pedido ip ON ip.id = ipco."item_pedido_id"
+      JOIN pedido p ON p.id = ip."pedido_id"
+      JOIN combo_grupo cg ON cg.id = ipco."combo_grupo_id"
+      JOIN combo cb ON cb.id = cg."combo_id"
+      JOIN producto_venta cb_pv ON cb_pv.id = cb."producto_venta_id"
+      JOIN combo_grupo_opcion cgo ON cgo.id = ipco."combo_grupo_opcion_id"
+      JOIN producto_venta op_pv ON op_pv.id = cgo."producto_venta_id"
+      WHERE ${combosWhere(user.empresaId, q, sucursalId)}
+      GROUP BY ip.id, ip."cantidad", cb_pv."id", cb_pv."nombre"
+    )
+    SELECT
+      combo_id,
+      combo_nombre,
+      combinacion,
+      SUM(cantidad)::bigint AS veces
+    FROM item_combo
+    GROUP BY combo_id, combo_nombre, combinacion
+    ORDER BY combo_nombre ASC, veces DESC
+  `;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 //  DESCUENTOS POR EMPLEADO — agregación por beneficiario
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -521,6 +687,15 @@ export async function descuentosPorEmpleado(user: UserCtx, q: RangoFechasQuery) 
       total_descontado: bigint;
       base_original: bigint;
       total_cobrado: bigint;
+      // Detalle fila-por-pedido para drill-down: cada descuento con su ticket.
+      tickets: {
+        pedido_id: string;
+        numero: number;
+        fecha: string;
+        monto: string;
+        comprobante_id: string | null;
+        comprobante_numero: string | null;
+      }[];
     }[]
   >`
     SELECT
@@ -530,9 +705,30 @@ export async function descuentosPorEmpleado(user: UserCtx, q: RangoFechasQuery) 
       COUNT(*)::bigint AS cantidad_ventas,
       COALESCE(SUM(p."total_descuento"), 0)::bigint AS total_descontado,
       COALESCE(SUM(p."subtotal" + p."total_iva"), 0)::bigint AS base_original,
-      COALESCE(SUM(p."total"), 0)::bigint AS total_cobrado
+      COALESCE(SUM(p."total"), 0)::bigint AS total_cobrado,
+      json_agg(
+        json_build_object(
+          'pedido_id', p.id,
+          'numero', p."numero",
+          'fecha', p."created_at",
+          'monto', p."total_descuento"::text,
+          'comprobante_id', cmp.id,
+          'comprobante_numero', cmp."numero_documento"
+        ) ORDER BY p."created_at" DESC
+      ) AS tickets
     FROM pedido p
     INNER JOIN usuario u ON u.id = p."empleado_beneficiario_id"
+    -- Ticket de venta del pedido: comprobante de venta emitido más reciente.
+    LEFT JOIN LATERAL (
+      SELECT cc.id, cc."numero_documento"
+      FROM comprobante cc
+      WHERE cc."pedido_id" = p.id
+        AND cc."estado" = 'EMITIDO'
+        AND cc."deleted_at" IS NULL
+        AND cc."tipo_documento" IN ('TICKET', 'FACTURA')
+      ORDER BY cc."fecha_emision" DESC
+      LIMIT 1
+    ) cmp ON true
     WHERE
       p."empresa_id" = ${user.empresaId}
       AND p."deleted_at" IS NULL

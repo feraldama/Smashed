@@ -1,4 +1,5 @@
 import {
+  EstadoComprobante,
   EstadoMesa,
   EstadoPedido,
   Prisma,
@@ -9,6 +10,7 @@ import {
   TipoPedido,
 } from '@prisma/client';
 
+import { siguienteNumeroSucursal } from '../../lib/correlativos.js';
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 import { emitPedido } from '../../lib/socketio.js';
@@ -190,15 +192,7 @@ export async function crearPedido(user: UserCtx, input: CrearPedidoInput) {
   //    `UPDATE ... RETURNING` atómico sobre Sucursal.ultimoNumeroPedido — Postgres
   //    toma un row-lock exclusivo, así que las concurrentes hacen cola sin perder ni duplicar.
   return prisma.$transaction(async (tx) => {
-    const rows = await tx.$queryRaw<{ ultimo_numero_pedido: number }[]>`
-      UPDATE "sucursal"
-      SET "ultimo_numero_pedido" = "ultimo_numero_pedido" + 1
-      WHERE "id" = ${sucursalId}
-      RETURNING "ultimo_numero_pedido"
-    `;
-    const fila = rows[0];
-    if (!fila) throw Errors.notFound('Sucursal no encontrada');
-    const numero = fila.ultimo_numero_pedido;
+    const numero = await siguienteNumeroSucursal(tx, sucursalId, 'pedido');
 
     return tx.pedido.create({
       data: {
@@ -502,6 +496,51 @@ type PedidoParaConfirmar = Prisma.PedidoGetPayload<{
   include: typeof PEDIDO_INCLUDE_PARA_CONFIRMAR;
 }>;
 
+/** Shape mínimo de un item para calcular su consumo de insumos. */
+type ItemParaConsumo = PedidoParaConfirmar['items'][number];
+
+/**
+ * Expande el consumo de insumos de UN item (producto/combo + modificadores con
+ * vínculo de stock), en la unidad del ProductoInventario. Es la unidad de
+ * descuento que `aplicarConfirmacionInline` acumula al confirmar y que la
+ * cancelación de un item revierte. Extraído para que ambos lados usen
+ * exactamente la misma expansión y no se desincronicen.
+ */
+async function consumoDeItem(
+  tx: Prisma.TransactionClient,
+  item: ItemParaConsumo,
+): Promise<Map<string, number>> {
+  const consumo = new Map<string, number>();
+  const acumular = (insumoId: string, cant: number) =>
+    consumo.set(insumoId, (consumo.get(insumoId) ?? 0) + cant);
+
+  if (item.combosOpcion.length > 0) {
+    for (const eleccion of item.combosOpcion) {
+      const sub = await expandirReceta(
+        tx,
+        eleccion.comboGrupoOpcion.productoVentaId,
+        item.cantidad,
+      );
+      for (const [insumoId, cant] of sub) acumular(insumoId, cant);
+    }
+  } else {
+    const sub = await expandirReceta(tx, item.productoVentaId, item.cantidad);
+    for (const [insumoId, cant] of sub) acumular(insumoId, cant);
+  }
+
+  for (const mod of item.modificadores) {
+    const opcion = mod.modificadorOpcion;
+    if (opcion.productoVentaId) {
+      const sub = await expandirReceta(tx, opcion.productoVentaId, item.cantidad);
+      for (const [insumoId, cant] of sub) acumular(insumoId, cant);
+    } else if (opcion.productoInventarioId && opcion.cantidadInventario) {
+      acumular(opcion.productoInventarioId, opcion.cantidadInventario.toNumber() * item.cantidad);
+    }
+  }
+
+  return consumo;
+}
+
 /**
  * Lógica reutilizable de "confirmar pedido" — descuenta stock con expansión
  * recursiva, marca mesa OCUPADA si aplica, actualiza estado y crea audit log.
@@ -520,49 +559,15 @@ export async function aplicarConfirmacionInline(
   user: UserCtx,
   pedido: PedidoParaConfirmar,
 ) {
-  // Expandir consumo total de insumos para todo el pedido
+  // Expandir consumo total de insumos para todo el pedido. La expansión por item
+  // (producto/combo + modificadores con vínculo de stock) vive en `consumoDeItem`,
+  // que también usa la cancelación de un item para revertir exactamente lo mismo.
   const consumoTotal = new Map<string, number>();
 
   for (const item of pedido.items) {
-    // Si es combo: expandir la receta de cada producto elegido en lugar del combo
-    if (item.combosOpcion.length > 0) {
-      for (const eleccion of item.combosOpcion) {
-        const subConsumo = await expandirReceta(
-          tx,
-          eleccion.comboGrupoOpcion.productoVentaId,
-          item.cantidad,
-        );
-        for (const [insumoId, cant] of subConsumo) {
-          consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
-        }
-      }
-    } else {
-      const subConsumo = await expandirReceta(tx, item.productoVentaId, item.cantidad);
-      for (const [insumoId, cant] of subConsumo) {
-        consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
-      }
-    }
-
-    // Modificadores con vínculo de stock descuentan según su tipo (XOR):
-    //  - productoVentaId (típicamente sub-preparaciones como "Cheddar —
-    //    porción"): se expande su receta, multiplicada por la cantidad del item.
-    //  - productoInventarioId (insumo directo, ej. "Huevo"): se descuenta
-    //    `cantidadInventario × cantidad del item` directo, sin expandir receta.
-    // Opciones sin vínculo (ej. "sin sal") no descuentan nada.
-    for (const mod of item.modificadores) {
-      const opcion = mod.modificadorOpcion;
-      if (opcion.productoVentaId) {
-        const subConsumo = await expandirReceta(tx, opcion.productoVentaId, item.cantidad);
-        for (const [insumoId, cant] of subConsumo) {
-          consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
-        }
-      } else if (opcion.productoInventarioId && opcion.cantidadInventario) {
-        const cant = opcion.cantidadInventario.toNumber() * item.cantidad;
-        consumoTotal.set(
-          opcion.productoInventarioId,
-          (consumoTotal.get(opcion.productoInventarioId) ?? 0) + cant,
-        );
-      }
+    const subConsumo = await consumoDeItem(tx, item);
+    for (const [insumoId, cant] of subConsumo) {
+      consumoTotal.set(insumoId, (consumoTotal.get(insumoId) ?? 0) + cant);
     }
   }
 
@@ -1334,6 +1339,201 @@ export async function aplicarCancelacionInline(
   });
 
   return actualizado;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+//  CANCELAR UN ITEM — reverso parcial de stock + recálculo de totales
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Cancela un único item de un pedido (no todo el pedido). Solo gerente/admin.
+ *
+ *  - Revierte el stock de ese item (re-expandiendo su receta con `consumoDeItem`,
+ *    lo mismo que se descontó al confirmar) si el pedido ya tenía stock descontado.
+ *  - Marca el item (y sus opciones de combo) CANCELADO → el KDS los filtra solo.
+ *  - Recalcula los totales del pedido restando el aporte del item (inverso exacto
+ *    de lo que hace `agregarItemsAPedido` al sumar).
+ *  - Si no quedan items activos, cancela el pedido entero (libera mesa, etc.).
+ *
+ * Bloquea si el pedido ya tiene comprobante EMITIDO: en ese caso hay que emitir
+ * una nota de crédito (ver `comprobante.service.emitirNotaCreditoParcial`).
+ */
+export async function cancelarItemPedido(
+  user: UserCtx,
+  pedidoId: string,
+  itemId: string,
+  motivo: string,
+) {
+  if (!user.isSuperAdmin && !ROLES_GESTION.includes(user.rol)) {
+    throw Errors.forbidden('Solo un gerente o admin puede cancelar items');
+  }
+
+  return prisma
+    .$transaction(async (tx) => {
+      const item = await tx.itemPedido.findUnique({
+        where: { id: itemId },
+        include: {
+          productoVenta: { select: { tasaIva: true } },
+          combosOpcion: {
+            select: {
+              comboGrupoOpcionId: true,
+              comboGrupoOpcion: { select: { productoVentaId: true } },
+            },
+          },
+          modificadores: {
+            select: {
+              modificadorOpcionId: true,
+              modificadorOpcion: {
+                select: {
+                  productoVentaId: true,
+                  productoInventarioId: true,
+                  cantidadInventario: true,
+                },
+              },
+            },
+          },
+          pedido: true,
+        },
+      });
+      if (!item || item.pedidoId !== pedidoId) throw Errors.notFound('Item no encontrado');
+      const pedido = item.pedido;
+      assertTenant(user, pedido);
+
+      if (item.estado === EstadoPedido.CANCELADO) {
+        throw Errors.conflict('El item ya está cancelado');
+      }
+      if (pedido.estado === EstadoPedido.CANCELADO) {
+        throw Errors.conflict('El pedido ya está cancelado');
+      }
+      if (pedido.estado === EstadoPedido.FACTURADO) {
+        throw Errors.conflict('Pedido facturado: emití una nota de crédito');
+      }
+      // Si ya hay comprobante emitido, tocar el pedido descuadra lo facturado.
+      const conComprobante = await tx.comprobante.count({
+        where: { pedidoId, estado: EstadoComprobante.EMITIDO, deletedAt: null },
+      });
+      if (conComprobante > 0) {
+        throw Errors.conflict(
+          'El pedido ya tiene comprobante emitido: cancelá el item con una nota de crédito',
+        );
+      }
+
+      // Reverso de stock parcial (solo si el pedido ya lo había descontado).
+      if (ESTADOS_CON_STOCK_DESCONTADO.includes(pedido.estado)) {
+        const consumo = await consumoDeItem(tx, item);
+        for (const [insumoId, cant] of consumo) {
+          const cantDecimal = new Prisma.Decimal(cant.toFixed(3));
+          if (cantDecimal.isZero()) continue;
+          await tx.movimientoStock.create({
+            data: {
+              productoInventarioId: insumoId,
+              sucursalId: pedido.sucursalId,
+              usuarioId: user.userId,
+              tipo: TipoMovimientoStock.ENTRADA_AJUSTE,
+              cantidad: cantDecimal,
+              cantidadSigned: cantDecimal,
+              motivo: `Cancelación item pedido #${pedido.numero}: ${motivo}`,
+              pedidoId,
+            },
+          });
+          await tx.stockSucursal.updateMany({
+            where: { productoInventarioId: insumoId, sucursalId: pedido.sucursalId },
+            data: { stockActual: { increment: cantDecimal } },
+          });
+        }
+      }
+
+      // Marcar el item (y sus sub-tareas de combo) CANCELADO.
+      await tx.itemPedido.update({
+        where: { id: itemId },
+        data: { estado: EstadoPedido.CANCELADO },
+      });
+      if (item.combosOpcion.length > 0) {
+        await tx.itemPedidoComboOpcion.updateMany({
+          where: { itemPedidoId: itemId },
+          data: { estado: EstadoPedido.CANCELADO },
+        });
+      }
+
+      // Recalcular totales: restar el aporte del item. `item.subtotal` es
+      // IVA-incluido (igual que en `construirItemsPedido`), así que el inverso
+      // del alta es: subtotal -= (subtotal_item - iva_item); totalIva -= iva_item;
+      // total -= subtotal_item.
+      const ivaItem = calcularIva(item.subtotal, item.productoVenta.tasaIva);
+      await tx.pedido.update({
+        where: { id: pedidoId },
+        data: {
+          subtotal: { decrement: item.subtotal - ivaItem },
+          totalIva: { decrement: ivaItem },
+          total: { decrement: item.subtotal },
+        },
+      });
+
+      // ¿Quedan items activos? Si no, cancelamos el pedido entero.
+      const activos = await tx.itemPedido.count({
+        where: { pedidoId, estado: { not: EstadoPedido.CANCELADO } },
+      });
+
+      const ahora = new Date();
+      let pedidoCancelado = false;
+      let estadoFinal: EstadoPedido | null = null;
+      if (activos === 0) {
+        await tx.pedido.update({
+          where: { id: pedidoId },
+          data: { estado: EstadoPedido.CANCELADO, canceladoEn: ahora, motivoCancel: motivo },
+        });
+        if (pedido.tipo === TipoPedido.MESA && pedido.mesaId) {
+          await tx.mesa.update({
+            where: { id: pedido.mesaId },
+            data: { estado: EstadoMesa.LIBRE },
+          });
+        }
+        pedidoCancelado = true;
+        estadoFinal = EstadoPedido.CANCELADO;
+      } else {
+        // El item cancelado pudo destrabar una transición (ej: era el único que
+        // faltaba marcar listo). Recalcular el estado de cocina.
+        estadoFinal = await recalcularEstadoPedido(tx, pedidoId, pedido.estado, ahora);
+      }
+
+      await tx.auditLog.create({
+        data: {
+          empresaId: pedido.empresaId,
+          sucursalId: pedido.sucursalId,
+          usuarioId: user.userId,
+          accion: 'ACTUALIZAR',
+          entidad: 'ItemPedido',
+          entidadId: itemId,
+          metadata: {
+            operacion: 'CANCELAR_ITEM',
+            pedidoId,
+            motivo,
+            pedidoCancelado,
+          },
+        },
+      });
+
+      return {
+        pedidoId,
+        itemId,
+        sucursalId: pedido.sucursalId,
+        numero: pedido.numero,
+        pedidoCancelado,
+        estadoPedido: estadoFinal ?? pedido.estado,
+      };
+    })
+    .then((result) => {
+      emitPedido(
+        result.pedidoCancelado ? 'pedido.cancelado' : 'pedido.actualizado',
+        result.sucursalId,
+        {
+          id: result.pedidoId,
+          numero: result.numero,
+          estado: result.estadoPedido,
+        },
+      );
+      return result;
+    });
 }
 
 // ───────────────────────────────────────────────────────────────────────────

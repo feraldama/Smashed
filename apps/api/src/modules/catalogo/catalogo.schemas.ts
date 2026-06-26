@@ -67,6 +67,9 @@ const productoBaseInput = z.object({
   esCombo: z.boolean().default(false),
   esVendible: z.boolean().default(true),
   esPreparacion: z.boolean().default(false),
+  // Orden dentro de la categoría en el menú del POS. Normalmente se gestiona
+  // desde la pantalla de reordenamiento (drag & drop), no desde el alta.
+  ordenMenu: z.number().int().nonnegative().optional(),
   // Reventa: vínculo a un insumo para imputar costo y descontar stock al vender
   // (bebidas envasadas, snacks). XOR con receta — validado en el service.
   // `null` explícito desvincula; `undefined` deja como está (en update).
@@ -118,6 +121,11 @@ export const actualizarProductoInput = productoBaseInput
   .superRefine(checkReventa);
 
 export const productoIdParam = z.object({ id: z.string().cuid() });
+
+// Reordenamiento en lote: los ids vienen en el orden deseado (0..n-1).
+export const reordenarProductosInput = z.object({
+  ids: z.array(z.string().cuid()).min(1).max(500),
+});
 
 // ───── Precio por sucursal ─────
 
@@ -191,6 +199,7 @@ export type CrearCategoriaInput = z.infer<typeof crearCategoriaInput>;
 export type ActualizarCategoriaInput = z.infer<typeof actualizarCategoriaInput>;
 export type CrearProductoInput = z.infer<typeof crearProductoInput>;
 export type ActualizarProductoInput = z.infer<typeof actualizarProductoInput>;
+export type ReordenarProductosInput = z.infer<typeof reordenarProductosInput>;
 export type SetPrecioSucursalInput = z.infer<typeof setPrecioSucursalInput>;
 export type SetRecetaInput = z.infer<typeof setRecetaInput>;
 export type ItemRecetaInput = z.infer<typeof itemRecetaInput>;

@@ -5,6 +5,7 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  ArrowUpDown,
   Loader2,
   Pencil,
   Plus,
@@ -96,12 +97,20 @@ function ProductosScreen() {
             {total} producto{total !== 1 ? 's' : ''}
           </p>
         </div>
-        <Link
-          href="/productos/nuevo"
-          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" /> Nuevo
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/productos/orden"
+            className="flex items-center gap-1.5 rounded-md border border-input px-3 py-2 text-sm font-medium hover:bg-accent"
+          >
+            <ArrowUpDown className="h-4 w-4" /> Ordenar
+          </Link>
+          <Link
+            href="/productos/nuevo"
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" /> Nuevo
+          </Link>
+        </div>
       </header>
 
       {/* Filtros */}

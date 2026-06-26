@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useState } from 'react';
 
 import { AuthGate } from '@/components/AuthGate';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import {
   useAbrirCaja,
   useApertura,
@@ -42,6 +43,7 @@ function CajaScreen() {
             </Link>
             <h1 className="text-xl font-bold tracking-tight">Caja</h1>
           </div>
+          <ThemeToggle />
         </div>
       </header>
 

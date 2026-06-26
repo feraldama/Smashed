@@ -10,20 +10,14 @@ import {
   useEliminarReceta,
   useInsumos,
   useSetReceta,
+  type Insumo,
   type UnidadMedida,
 } from '@/hooks/useInventario';
 import { ApiError } from '@/lib/api';
+import { etiquetaUnidad, TODAS_UNIDADES, unidadesPermitidasParaInsumo } from '@/lib/unidades';
 import { cn } from '@/lib/utils';
 
-const UNIDADES: UnidadMedida[] = [
-  'UNIDAD',
-  'KILOGRAMO',
-  'GRAMO',
-  'LITRO',
-  'MILILITRO',
-  'PORCION',
-  'DOCENA',
-];
+const UNIDADES = TODAS_UNIDADES;
 
 interface RecetaItem {
   /** id local para el form. */
@@ -316,13 +310,24 @@ export function RecetaEditor({ producto }: RecetaEditorProps) {
 
 interface ItemRowProps {
   item: RecetaItem;
-  insumos: Array<{ id: string; nombre: string; codigo: string | null; unidadMedida: UnidadMedida }>;
+  insumos: Insumo[];
   subProductos: Array<{ id: string; nombre: string }>;
   onChange: (patch: Partial<RecetaItem>) => void;
   onRemove: () => void;
 }
 
 function ItemRow({ item, insumos, subProductos, onChange, onRemove }: ItemRowProps) {
+  // Para un insumo, la receta solo puede medirlo en unidades de la familia de su
+  // stock o de sus equivalencias cargadas (el backend rechaza lo demás). Para
+  // sub-recetas dejamos todas (la validación de rinde la hace el backend).
+  const insumoSel =
+    item.tipo === 'INSUMO' ? insumos.find((i) => i.id === item.productoInventarioId) : undefined;
+  const unidadesDisponibles = insumoSel ? unidadesPermitidasParaInsumo(insumoSel) : UNIDADES;
+  // Aseguramos que la unidad actual aparezca aunque sea "rara" (datos viejos).
+  const opcionesUnidad = unidadesDisponibles.includes(item.unidadMedida)
+    ? unidadesDisponibles
+    : [item.unidadMedida, ...unidadesDisponibles];
+
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-md border bg-muted/20 p-2 md:flex-nowrap">
       {/* Tipo */}
@@ -400,8 +405,11 @@ function ItemRow({ item, insumos, subProductos, onChange, onRemove }: ItemRowPro
         value={item.unidadMedida}
         onChange={(e) => onChange({ unidadMedida: e.target.value as UnidadMedida })}
         className="w-24 px-2 py-1 text-xs"
+        title={
+          insumoSel ? `Stock en ${etiquetaUnidad(insumoSel.unidadMedida).toLowerCase()}` : undefined
+        }
       >
-        {UNIDADES.map((u) => (
+        {opcionesUnidad.map((u) => (
           <option key={u} value={u}>
             {u.toLowerCase()}
           </option>

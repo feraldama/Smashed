@@ -88,6 +88,37 @@ export function useAgregarItems() {
   });
 }
 
+/**
+ * Cancela un único item de un pedido (no todo el pedido). Solo gerente/admin.
+ * Revierte el stock del item y recalcula los totales del pedido.
+ */
+export function useCancelarItemPedido() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      pedidoId,
+      itemId,
+      motivo,
+    }: {
+      pedidoId: string;
+      itemId: string;
+      motivo: string;
+    }) =>
+      api<{
+        pedidoId: string;
+        itemId: string;
+        pedidoCancelado: boolean;
+        estadoPedido: EstadoPedido;
+      }>(`/pedidos/${pedidoId}/items/${itemId}/cancelar`, { method: 'POST', body: { motivo } }),
+    onSuccess: (_d, { pedidoId }) => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'pedidos'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'pedido', pedidoId] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'mesas'] });
+      void qc.invalidateQueries({ queryKey: ['kds', 'pedidos'] });
+    },
+  });
+}
+
 export function useTransicionarPedido() {
   const qc = useQueryClient();
   return useMutation({

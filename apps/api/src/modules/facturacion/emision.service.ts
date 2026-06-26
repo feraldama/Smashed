@@ -25,9 +25,15 @@ import { cargarCredenciales } from './facturacion-config.service.js';
  *   2. Polling de consulta de estado (tipOpe=2) hasta que SIFEN lo procese.
  *   3. Persistencia del resultado (cdc/qr/estado) + EventoSifen de auditoría.
  *
- * Idempotencia: tras un alta exitosa el comprobante queda PENDIENTE. Si el
- * proceso muere a mitad del polling, un reintento detecta PENDIENTE y SÓLO
- * consulta (no re-da de alta) para no duplicar el documento en SIFEN.
+ * Idempotencia (clave para no duplicar documentos fiscales):
+ *   - ANTES del alta se persiste el estado ENVIANDO (intent marker durable).
+ *   - Tras un alta exitosa el comprobante pasa a PENDIENTE.
+ *   - En una recuperación:
+ *       · PENDIENTE → el alta ya está confirmada → sólo consulta.
+ *       · ENVIANDO  → el alta quedó a mitad (crash); NO se re-da de alta a
+ *         ciegas: se CONSULTA a SIFEN y sólo si responde NO_ENCONTRADO se
+ *         re-intenta el alta. Así un crash entre "alta enviada" y "PENDIENTE
+ *         persistido" no genera un segundo documento en SIFEN.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,43 +156,94 @@ export async function procesarEmision(
     tipoDoc: tipoDocAbrev(mapTipoDE(comp.tipoDocumento)),
   };
 
-  // Si ya fue dado de alta (PENDIENTE), sólo reconciliamos por consulta.
-  const yaEnviado = comp.estadoSifen === EstadoSifen.PENDIENTE;
+  // Decisión según el estado SIFEN actual:
+  //  - PENDIENTE: el alta ya está confirmada → sólo consultar (idempotente).
+  //  - ENVIANDO:  el alta quedó a mitad (crash) → CONSULTAR primero; sólo re-dar
+  //    de alta si SIFEN responde NO_ENCONTRADO (evita duplicar el documento).
+  //  - resto (NO_ENVIADO / RECHAZADO): primer intento (o reintento) de alta.
+  const creds = cfg.credentials;
 
-  if (!yaEnviado) {
-    // Errores de mapeo (tipo no soportado, totales que no reconcilian) son
-    // permanentes: marcar RECHAZADO sin reintentar (no relanzar al worker).
-    let payload;
-    try {
-      payload = mapearComprobanteACode100(toMapperInput(comp));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      await persistirRechazo(comp.id, `No se pudo construir el documento: ${msg}`);
-      return { comprobanteId, estadoSifen: EstadoSifen.RECHAZADO, mensaje: msg };
-    }
-    const errorAlta = await intentarAlta(client, cfg.credentials, payload);
-    if (errorAlta) {
-      await persistirRechazo(comp.id, errorAlta);
-      return { comprobanteId, estadoSifen: EstadoSifen.RECHAZADO, mensaje: errorAlta };
-    }
-    // Alta OK → marcar PENDIENTE + crear evento ENVIANDO (idempotency record).
-    await prisma.$transaction([
-      prisma.comprobante.update({
-        where: { id: comp.id },
-        data: {
-          estadoSifen: EstadoSifen.PENDIENTE,
-          fechaEnvioSifen: new Date(),
-          motivoRechazoSifen: null,
-        },
-      }),
-      prisma.eventoSifen.create({
-        data: { comprobanteId: comp.id, tipo: 'ENVIO', estado: EV_ENVIANDO },
-      }),
-    ]);
+  if (comp.estadoSifen === EstadoSifen.PENDIENTE) {
+    return persistirResultado(comp.id, await pollEstado({ client, creds, consulta }));
   }
 
-  const resultado = await pollEstado({ client, creds: cfg.credentials, consulta });
-  return persistirResultado(comp.id, resultado);
+  if (comp.estadoSifen === EstadoSifen.ENVIANDO) {
+    // El alta quedó a mitad (crash). Consultamos a SIFEN para saber si lo tiene.
+    // Usamos varios intentos a propósito: `normalizarEstado` mapea CUALQUIER
+    // error de transporte (timeout, 5xx, sesión vencida) a NO_ENCONTRADO, y el
+    // alta de SIFEN es asíncrono — un único intento podría concluir "no existe"
+    // por un error transitorio o por latencia de ingestión, y re-dar de alta
+    // duplicaría el documento. Sólo re-damos de alta si SIFEN insiste en no
+    // tenerlo tras reintentar.
+    const sonda = await pollEstado({ client, creds, consulta, maxIntentos: 3 });
+    if (sonda.estado !== 'NO_ENCONTRADO') {
+      // SIFEN sí tiene el documento → el alta había llegado. Confirmar PENDIENTE
+      // y persistir según el estado de la sonda (si aún no está procesado,
+      // persistirResultado relanza y el barrido vuelve a consultar). No re-alta.
+      await marcarPendiente(comp.id);
+      return persistirResultado(comp.id, sonda);
+    }
+    // NO_ENCONTRADO tras varios intentos → el alta no llegó → re-alta seguro (sigue abajo).
+  }
+
+  return altaYReconciliar(comp, client, creds, consulta);
+}
+
+/**
+ * Primer envío (o reintento) de un comprobante: persiste el intent marker
+ * ENVIANDO ANTES del alta, da de alta y arranca el polling. El marcador durable
+ * garantiza que, si el proceso muere tras el alta, la recuperación consulte en
+ * vez de re-dar de alta — no duplica el documento fiscal.
+ */
+async function altaYReconciliar(
+  comp: ComprobanteEmision,
+  client: Code100Client,
+  creds: Code100Credentials,
+  consulta: Code100ConsultaPayload,
+): Promise<ProcesarEmisionResultado> {
+  // Errores de mapeo (tipo no soportado, totales que no reconcilian) son
+  // permanentes: marcar RECHAZADO sin reintentar (no relanzar al worker).
+  let payload;
+  try {
+    payload = mapearComprobanteACode100(toMapperInput(comp));
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await persistirRechazo(comp.id, `No se pudo construir el documento: ${msg}`);
+    return { comprobanteId: comp.id, estadoSifen: EstadoSifen.RECHAZADO, mensaje: msg };
+  }
+
+  // Intent marker durable ANTES del alta (estado + evento de auditoría).
+  await prisma.$transaction([
+    prisma.comprobante.update({
+      where: { id: comp.id },
+      data: {
+        estadoSifen: EstadoSifen.ENVIANDO,
+        fechaEnvioSifen: new Date(),
+        motivoRechazoSifen: null,
+      },
+    }),
+    prisma.eventoSifen.create({
+      data: { comprobanteId: comp.id, tipo: 'ENVIO', estado: EV_ENVIANDO },
+    }),
+  ]);
+
+  const errorAlta = await intentarAlta(client, creds, payload);
+  if (errorAlta) {
+    await persistirRechazo(comp.id, errorAlta);
+    return { comprobanteId: comp.id, estadoSifen: EstadoSifen.RECHAZADO, mensaje: errorAlta };
+  }
+
+  // Alta OK → confirmar PENDIENTE y pasar al polling de estado.
+  await marcarPendiente(comp.id);
+  return persistirResultado(comp.id, await pollEstado({ client, creds, consulta }));
+}
+
+/** ENVIANDO → PENDIENTE: el alta quedó confirmada (enviada/encontrada en SIFEN). */
+async function marcarPendiente(comprobanteId: string): Promise<void> {
+  await prisma.comprobante.update({
+    where: { id: comprobanteId },
+    data: { estadoSifen: EstadoSifen.PENDIENTE },
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

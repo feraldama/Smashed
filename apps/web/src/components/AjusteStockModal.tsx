@@ -15,6 +15,14 @@ interface AjusteStockModalProps {
   unidad: string;
   stockActual: string;
   onClose: () => void;
+  /** Sucursal preseleccionada (ej. la que se está viendo en el listado). */
+  sucursalIdInicial?: string;
+  /**
+   * Lista de sucursales para el selector. Si se pasa, reemplaza a las sucursales
+   * asignadas del usuario — necesario para ajustar el stock de un depósito, que
+   * no es una sucursal asignada.
+   */
+  sucursales?: Array<{ id: string; nombre: string; esDeposito?: boolean }>;
 }
 
 const TIPOS = [
@@ -30,12 +38,16 @@ export function AjusteStockModal({
   unidad,
   stockActual,
   onClose,
+  sucursalIdInicial,
+  sucursales: sucursalesProp,
 }: AjusteStockModalProps) {
   const ajustar = useAjustarStock();
   const user = useAuthStore((s) => s.user);
-  const sucursales = user?.sucursales ?? [];
+  const sucursales = sucursalesProp ?? user?.sucursales ?? [];
 
-  const [sucursalId, setSucursalId] = useState(user?.sucursalActivaId ?? sucursales[0]?.id ?? '');
+  const [sucursalId, setSucursalId] = useState(
+    sucursalIdInicial ?? user?.sucursalActivaId ?? sucursales[0]?.id ?? '',
+  );
   const [tipo, setTipo] = useState<(typeof TIPOS)[number]['value']>('ENTRADA_AJUSTE');
   const [cantidad, setCantidad] = useState('');
   const [motivo, setMotivo] = useState('');
@@ -118,6 +130,7 @@ export function AjusteStockModal({
               {sucursales.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.nombre}
+                  {s.esDeposito ? ' (depósito)' : ''}
                 </option>
               ))}
             </select>

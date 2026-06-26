@@ -1,7 +1,8 @@
-import { Prisma, TipoMovimientoStock } from '@prisma/client';
+import { Prisma, TipoMovimientoStock, type UnidadMedida } from '@prisma/client';
 
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { familiaDe } from '../../lib/unidad-medida.js';
 
 import type {
   ActualizarInsumoInput,
@@ -33,6 +34,50 @@ const ENTRADAS: TipoMovimientoStock[] = [
   TipoMovimientoStock.ENTRADA_PRODUCCION,
   TipoMovimientoStock.ENTRADA_TRANSFERENCIA,
 ];
+
+type UnidadAlternativa = {
+  unidad: UnidadMedida;
+  cantidadUnidad: number | string;
+  cantidadBase: number | string;
+};
+
+/**
+ * Valida las equivalencias de unidad de un insumo contra su unidad de stock:
+ *  - cada equivalencia debe ser de una FAMILIA distinta a la de stock (si fuera
+ *    la misma, la conversión universal ya alcanza y el registro sobra);
+ *  - a lo sumo una equivalencia por familia (no tiene sentido cargar dos formas
+ *    distintas de pasar de peso a la unidad base).
+ */
+function validarEquivalencias(base: UnidadMedida, unidades: UnidadAlternativa[]) {
+  const familias = new Set<string>();
+  for (const u of unidades) {
+    const fam = familiaDe(u.unidad);
+    if (fam === familiaDe(base)) {
+      throw Errors.validation({
+        unidadesAlternativas:
+          `La equivalencia en ${u.unidad.toLowerCase()} es del mismo tipo que la unidad de ` +
+          `stock (${base.toLowerCase()}); esa conversión ya es automática, no hace falta cargarla.`,
+      });
+    }
+    if (familias.has(fam)) {
+      throw Errors.validation({
+        unidadesAlternativas:
+          `Hay más de una equivalencia para el mismo tipo de unidad (${fam.toLowerCase()}). ` +
+          `Dejá una sola por tipo.`,
+      });
+    }
+    familias.add(fam);
+  }
+}
+
+/** Mapea el input de equivalencias al `create` anidado de Prisma. */
+function crearEquivalencias(unidades: UnidadAlternativa[]) {
+  return unidades.map((u) => ({
+    unidad: u.unidad,
+    cantidadUnidad: String(u.cantidadUnidad),
+    cantidadBase: String(u.cantidadBase),
+  }));
+}
 
 // ───── Insumos: list / detail ─────
 
@@ -69,6 +114,9 @@ export async function listarInsumos(empresaId: string, q: ListarInsumosQuery, su
       categoria: true,
       activo: true,
       proveedor: { select: { id: true, razonSocial: true } },
+      unidadesAlternativas: {
+        select: { id: true, unidad: true, cantidadUnidad: true, cantidadBase: true },
+      },
       ...(sucursalId
         ? {
             stockSucursal: {
@@ -93,6 +141,9 @@ export async function obtenerInsumo(empresaId: string, id: string) {
     where: { id, empresaId, deletedAt: null },
     include: {
       proveedor: { select: { id: true, razonSocial: true } },
+      unidadesAlternativas: {
+        select: { id: true, unidad: true, cantidadUnidad: true, cantidadBase: true },
+      },
       stockSucursal: {
         include: { sucursal: { select: { id: true, nombre: true, codigo: true } } },
         orderBy: { sucursal: { nombre: 'asc' } },
@@ -106,31 +157,44 @@ export async function obtenerInsumo(empresaId: string, id: string) {
 // ───── CRUD ─────
 
 export async function crearInsumo(empresaId: string, input: CrearInsumoInput) {
-  if (input.proveedorId) {
+  const { unidadesAlternativas, ...datos } = input;
+
+  if (datos.proveedorId) {
     const prov = await prisma.proveedor.findFirst({
-      where: { id: input.proveedorId, empresaId, deletedAt: null },
+      where: { id: datos.proveedorId, empresaId, deletedAt: null },
     });
     if (!prov) throw Errors.validation({ proveedorId: 'no encontrado' });
   }
 
   // Verificar duplicados por código si se pasa
-  if (input.codigo) {
+  if (datos.codigo) {
     const dup = await prisma.productoInventario.findFirst({
-      where: { empresaId, codigo: input.codigo, deletedAt: null },
+      where: { empresaId, codigo: datos.codigo, deletedAt: null },
     });
-    if (dup) throw Errors.conflict(`Ya existe un insumo con código "${input.codigo}"`);
+    if (dup) throw Errors.conflict(`Ya existe un insumo con código "${datos.codigo}"`);
   }
-  if (input.codigoBarras) {
+  if (datos.codigoBarras) {
     const dup = await prisma.productoInventario.findFirst({
-      where: { empresaId, codigoBarras: input.codigoBarras, deletedAt: null },
+      where: { empresaId, codigoBarras: datos.codigoBarras, deletedAt: null },
     });
     if (dup)
-      throw Errors.conflict(`Ya existe un insumo con código de barras "${input.codigoBarras}"`);
+      throw Errors.conflict(`Ya existe un insumo con código de barras "${datos.codigoBarras}"`);
   }
 
+  if (unidadesAlternativas?.length) validarEquivalencias(datos.unidadMedida, unidadesAlternativas);
+
   return prisma.productoInventario.create({
-    data: { empresaId, ...input },
-    include: { proveedor: { select: { id: true, razonSocial: true } } },
+    data: {
+      empresaId,
+      ...datos,
+      ...(unidadesAlternativas?.length
+        ? { unidadesAlternativas: { create: crearEquivalencias(unidadesAlternativas) } }
+        : {}),
+    },
+    include: {
+      proveedor: { select: { id: true, razonSocial: true } },
+      unidadesAlternativas: true,
+    },
   });
 }
 
@@ -139,22 +203,71 @@ export async function actualizarInsumo(
   id: string,
   input: ActualizarInsumoInput,
 ) {
+  const { unidadesAlternativas, ...datos } = input;
+
   const insumo = await prisma.productoInventario.findFirst({
     where: { id, empresaId, deletedAt: null },
   });
   if (!insumo) throw Errors.notFound('Insumo no encontrado');
 
-  if (input.proveedorId) {
+  if (datos.proveedorId) {
     const prov = await prisma.proveedor.findFirst({
-      where: { id: input.proveedorId, empresaId, deletedAt: null },
+      where: { id: datos.proveedorId, empresaId, deletedAt: null },
     });
     if (!prov) throw Errors.validation({ proveedorId: 'no encontrado' });
   }
 
-  return prisma.productoInventario.update({
-    where: { id },
-    data: input,
-    include: { proveedor: { select: { id: true, razonSocial: true } } },
+  // La base contra la que se validan las equivalencias es la unidad de stock
+  // efectiva tras este update (la nueva si se cambia, o la actual).
+  const baseEfectiva = datos.unidadMedida ?? insumo.unidadMedida;
+  if (unidadesAlternativas) {
+    validarEquivalencias(baseEfectiva, unidadesAlternativas);
+  } else if (datos.unidadMedida && datos.unidadMedida !== insumo.unidadMedida) {
+    // Cambia la unidad de stock pero NO se reenvían las equivalencias: revalidar
+    // las existentes contra la nueva base. Si alguna queda de la misma familia
+    // que la nueva base, quedaría como dato muerto/inconsistente → rechazamos y
+    // pedimos al usuario que las ajuste primero.
+    const existentes = await prisma.unidadInsumo.findMany({
+      where: { productoInventarioId: id },
+      select: { unidad: true, cantidadUnidad: true, cantidadBase: true },
+    });
+    try {
+      validarEquivalencias(
+        baseEfectiva,
+        existentes.map((u) => ({
+          unidad: u.unidad,
+          cantidadUnidad: Number(u.cantidadUnidad),
+          cantidadBase: Number(u.cantidadBase),
+        })),
+      );
+    } catch {
+      throw Errors.validation({
+        unidadMedida:
+          `No se puede cambiar la unidad de stock a ${baseEfectiva.toLowerCase()}: el insumo ` +
+          `tiene equivalencias incompatibles con esa unidad. Editá o quitá las equivalencias primero.`,
+      });
+    }
+  }
+
+  return prisma.$transaction(async (tx) => {
+    // `unidadesAlternativas` presente = reemplazo total (borra y recrea).
+    // Ausente = no se tocan.
+    if (unidadesAlternativas) {
+      await tx.unidadInsumo.deleteMany({ where: { productoInventarioId: id } });
+    }
+    return tx.productoInventario.update({
+      where: { id },
+      data: {
+        ...datos,
+        ...(unidadesAlternativas?.length
+          ? { unidadesAlternativas: { create: crearEquivalencias(unidadesAlternativas) } }
+          : {}),
+      },
+      include: {
+        proveedor: { select: { id: true, razonSocial: true } },
+        unidadesAlternativas: true,
+      },
+    });
   });
 }
 

@@ -13,7 +13,9 @@ export interface ProductCardData {
   imagenUrl?: string | null;
   categoria?: string | null;
   esCombo?: boolean;
-  agotado?: boolean;
+  /** Algún insumo del producto está en 0/negativo en la sucursal. Es sólo un
+   *  AVISO visual — la venta NO se bloquea (se permite stock negativo). */
+  sinStock?: boolean;
 }
 
 interface ProductCardProps {
@@ -28,26 +30,25 @@ interface ProductCardProps {
  * Diseño:
  *  - Tile cuadrado, imagen arriba (16:9 o square), datos abajo
  *  - Click en cualquier parte → agrega al pedido
- *  - Estado "agotado" oscurece la imagen y deshabilita click
- *  - Badge de combo en esquina superior derecha
+ *  - Aviso "Sin stock": badge visible, pero NO bloquea la venta (el sistema
+ *    permite stock negativo) — sólo alerta al cajero.
+ *  - Badge de combo en esquina superior izquierda
  *  - Botón "+" flotante con animación al hover
  */
 export function ProductCard({ producto, onClick, className }: ProductCardProps) {
   const handleClick = () => {
-    if (producto.agotado) return;
     onClick?.(producto);
   };
 
   return (
     <button
       type="button"
-      disabled={producto.agotado}
       onClick={handleClick}
       className={cn(
         'group relative flex flex-col overflow-hidden rounded-xl border bg-card text-left shadow-sm transition-all',
         'hover:shadow-lg hover:-translate-y-0.5',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        'disabled:cursor-not-allowed disabled:opacity-60',
+        producto.sinStock && 'border-amber-400/60',
         className,
       )}
     >
@@ -62,7 +63,6 @@ export function ProductCard({ producto, onClick, className }: ProductCardProps) 
             className={cn(
               'object-cover transition-transform duration-300',
               'group-hover:scale-105',
-              producto.agotado && 'grayscale',
             )}
           />
         ) : (
@@ -77,12 +77,10 @@ export function ProductCard({ producto, onClick, className }: ProductCardProps) 
           </span>
         )}
 
-        {producto.agotado && (
-          <div className="absolute inset-0 flex items-center justify-center bg-background/70">
-            <span className="rounded-md bg-destructive px-3 py-1 text-xs font-bold uppercase tracking-wider text-destructive-foreground">
-              Agotado
-            </span>
-          </div>
+        {producto.sinStock && (
+          <span className="absolute right-2 top-2 rounded-full bg-amber-500 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white shadow-md">
+            Sin stock
+          </span>
         )}
 
         {/* Plus button — aparece al hover */}

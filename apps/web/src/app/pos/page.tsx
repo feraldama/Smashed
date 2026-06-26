@@ -10,6 +10,7 @@ import {
   Plus,
   Search,
   Receipt,
+  ShoppingBag,
   Store,
   Trash2,
   Truck,
@@ -28,6 +29,7 @@ import { CobrarModal } from '@/components/pos/CobrarModal';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
 import { MesaSelector } from '@/components/pos/MesaSelector';
 import { ProductoCard } from '@/components/pos/ProductoCard';
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { confirmar, toast } from '@/components/Toast';
 import { LogoutButton } from '@/components/ui/LogoutButton';
 import { useMiAperturaActiva } from '@/hooks/useCaja';
@@ -281,17 +283,17 @@ function POSScreen() {
   /**
    * Confirma el pedido y decide qué pasa según tipo + opción:
    *
-   *  - MOSTRADOR (fast-food): crea PENDIENTE → abre modal cobro. La emisión del
-   *    comprobante confirma + manda a cocina + descuenta stock.
+   *  - MOSTRADOR / RETIRO_LOCAL (fast-food): crea PENDIENTE → abre modal cobro.
+   *    La emisión del comprobante confirma + manda a cocina + descuenta stock.
+   *    RETIRO_LOCAL ("para llevar") es igual a MOSTRADOR pero se marca como
+   *    para llevar y la cocina lo ve resaltado en el KDS.
    *
    *  - MESA: crea + confirma (cocina ya prepara) → NO abre cobro. Se cobra
    *    desde /entregas cuando la mesa terminó.
    *
-   *  - DELIVERY_PROPIO con `cobroInmediato=true` (prepago): igual a MOSTRADOR.
-   *    Útil para clientes que pagan al hacer el pedido (web/app/tarjeta).
-   *
-   *  - DELIVERY_PROPIO con `cobroInmediato=false` (pago contra entrega): igual
-   *    a MESA. Cocina prepara, repartidor sale, cobro al volver desde /entregas.
+   *  - DELIVERY_PROPIO (`cobroInmediato=true`): igual a MOSTRADOR. Delivery
+   *    factura sí o sí antes de ir a cocina — la emisión del comprobante
+   *    confirma y recién ahí el pedido va a cocina. No hay pago contra entrega.
    */
   async function handleConfirmarPedido(opts: { cobroInmediato?: boolean } = {}) {
     if (cart.items.length === 0) return;
@@ -345,10 +347,13 @@ function POSScreen() {
         }
       }
 
-      // ¿Abrir el modal de cobro acá? Sí para MOSTRADOR y DELIVERY con cobro
-      // inmediato. Para MESA y DELIVERY contra entrega el cobro va a /entregas.
+      // ¿Abrir el modal de cobro acá? Sí para MOSTRADOR, RETIRO_LOCAL (para
+      // llevar) y DELIVERY con cobro inmediato. Para MESA y DELIVERY contra
+      // entrega el cobro va a /entregas.
       const cobrarAhora =
-        tipo === 'MOSTRADOR' || (tipo === 'DELIVERY_PROPIO' && opts.cobroInmediato === true);
+        tipo === 'MOSTRADOR' ||
+        tipo === 'RETIRO_LOCAL' ||
+        (tipo === 'DELIVERY_PROPIO' && opts.cobroInmediato === true);
 
       if (!cobrarAhora) {
         toast.success(`Pedido #${created.pedido.numero} enviado a cocina`);
@@ -376,6 +381,18 @@ function POSScreen() {
     // Imprimir directo en un iframe oculto: no saca al cajero del POS ni abre
     // otra pestaña con el diálogo de impresión.
     imprimirComprobante(comprobante);
+    router.refresh();
+  }
+
+  // Cortesía 100%: el pedido ya se mandó a cocina desde el modal (sin facturar).
+  // Solo limpiamos el estado del POS — no hay comprobante que imprimir.
+  function handleCortesia() {
+    dispatch({ type: 'CLEAR' });
+    setPedidoConfirmado(null);
+    setShowCobrar(false);
+    setMesa(null);
+    setCliente(null);
+    setTipo('MOSTRADOR');
     router.refresh();
   }
 
@@ -417,6 +434,7 @@ function POSScreen() {
             <Wallet className="h-3.5 w-3.5" />
             Caja
           </Link>
+          <ThemeToggle variant="icon" />
           <LogoutButton />
         </div>
       </header>
@@ -539,6 +557,15 @@ function POSScreen() {
                 }}
               />
               <ModoBtn
+                active={tipo === 'RETIRO_LOCAL'}
+                icon={<ShoppingBag className="h-3.5 w-3.5" />}
+                label="Para llevar"
+                onClick={() => {
+                  setTipo('RETIRO_LOCAL');
+                  setMesa(null);
+                }}
+              />
+              <ModoBtn
                 active={tipo === 'MESA'}
                 icon={<Utensils className="h-3.5 w-3.5" />}
                 label="Mesa"
@@ -585,7 +612,7 @@ function POSScreen() {
               </>
             )}
 
-            {(tipo === 'DELIVERY_PROPIO' || tipo === 'MOSTRADOR') && (
+            {(tipo === 'DELIVERY_PROPIO' || tipo === 'MOSTRADOR' || tipo === 'RETIRO_LOCAL') && (
               <button
                 type="button"
                 onClick={() => setShowClienteSel(true)}
@@ -672,38 +699,26 @@ function POSScreen() {
               </div>
             )}
             {tipo === 'DELIVERY_PROPIO' && !pedidoExistenteId ? (
-              // Delivery: dos botones — el cajero decide si cobra ahora (prepago)
-              // o si cobra el repartidor al entregar (pago contra entrega).
-              <div className="space-y-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleConfirmarPedido({ cobroInmediato: false });
-                  }}
-                  disabled={cart.items.length === 0 || crearPedido.isPending}
-                  className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-base font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
-                  title="Pago contra entrega — el repartidor cobra al entregar"
-                >
-                  {crearPedido.isPending ? (
-                    <Loader2 className="h-5 w-5 animate-spin" />
-                  ) : (
-                    <>
-                      <Truck className="h-5 w-5" /> Enviar (cobra repartidor)
-                    </>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleConfirmarPedido({ cobroInmediato: true });
-                  }}
-                  disabled={cart.items.length === 0 || crearPedido.isPending}
-                  className="flex w-full items-center justify-center gap-2 rounded-md border-2 border-primary bg-card px-4 py-2.5 text-sm font-semibold text-primary hover:bg-primary/5 disabled:opacity-50"
-                  title="Cobrar ahora (prepago) — la emisión del comprobante manda el pedido a cocina"
-                >
-                  <Wallet className="h-4 w-4" /> Cobrar ahora (prepago)
-                </button>
-              </div>
+              // Delivery: facturación obligatoria antes de mandar a cocina. La
+              // emisión del comprobante confirma el pedido y recién ahí va a
+              // cocina — no se permite enviar sin cobrar (pago contra entrega).
+              <button
+                type="button"
+                onClick={() => {
+                  void handleConfirmarPedido({ cobroInmediato: true });
+                }}
+                disabled={cart.items.length === 0 || crearPedido.isPending}
+                className="flex w-full items-center justify-center gap-2 rounded-md bg-primary px-4 py-3 text-base font-semibold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+                title="Delivery factura antes de ir a cocina — la emisión del comprobante manda el pedido a cocina"
+              >
+                {crearPedido.isPending ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <Truck className="h-5 w-5" /> Cobrar y enviar a cocina
+                  </>
+                )}
+              </button>
             ) : (
               <button
                 type="button"
@@ -812,6 +827,7 @@ function POSScreen() {
             clienteInicial={cliente}
             onCancel={() => setShowCobrar(false)}
             onSuccess={handleCobrarSuccess}
+            onCortesia={handleCortesia}
           />
         )}
         {showMesaSel && (

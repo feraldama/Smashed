@@ -24,10 +24,12 @@ let insumoLechuga: string; // KILOGRAMO
 let insumoAceite: string; // LITRO
 let insumoCheddar: string; // UNIDAD
 let insumoMostaza: string; // MILILITRO
+let insumoTomate: string; // UNIDAD + equivalencia "1 UNIDAD = 150 GRAMO"
 
 let prodPlato: string; // producto vendible con receta plana + sub-receta
 let prodReventa: string; // producto sin receta, vinculado a PI
 let prodIncompatible: string; // producto con unidad inválida (PORCION vs UNIDAD)
+let prodCrossUnit: string; // usa tomate en GRAMO contra stock en UNIDAD (cross-familia)
 
 async function cleanup() {
   // Borrar en orden: stock, movimientos, items de receta, recetas, productos, insumos.
@@ -81,6 +83,18 @@ beforeAll(async () => {
   await prisma.productoInventario.update({
     where: { id: insumoMostaza },
     data: { unidadMedida: 'MILILITRO' },
+  });
+
+  // Tomate: stock en UNIDAD, con equivalencia "1 UNIDAD = 150 GRAMO" para poder
+  // usarlo en recetas medido por peso (cruza CONTEO↔MASA).
+  insumoTomate = await mk('TOM', 'Tomate TEST', 'UNIDAD');
+  await prisma.unidadInsumo.create({
+    data: {
+      productoInventarioId: insumoTomate,
+      unidad: 'GRAMO',
+      cantidadUnidad: 150,
+      cantidadBase: 1,
+    },
   });
 
   // Sub-receta: "Salsa TEST" rinde 100 ML, lleva 60 ML de mostaza y 40 ML de aceite.
@@ -200,6 +214,33 @@ beforeAll(async () => {
     select: { id: true },
   });
   prodIncompatible = malo.id;
+
+  // Producto que usa el tomate medido en GRAMO (300 g) contra stock en UNIDAD.
+  // Con la equivalencia 1 UNIDAD = 150 GRAMO → debe consumir 2 unidades.
+  const crossUnit = await prisma.productoVenta.create({
+    data: {
+      empresaId,
+      nombre: PREFIX + 'CROSS',
+      precioBase: 0n,
+      esVendible: true,
+      receta: {
+        create: {
+          empresaId,
+          rinde: 1,
+          unidadRinde: 'UNIDAD',
+          items: {
+            create: {
+              productoInventarioId: insumoTomate,
+              cantidad: 300,
+              unidadMedida: 'GRAMO',
+            },
+          },
+        },
+      },
+    },
+    select: { id: true },
+  });
+  prodCrossUnit = crossUnit.id;
 });
 
 afterAll(async () => {
@@ -227,6 +268,14 @@ describe('expandirReceta — conversión de unidades', () => {
     expect(c.get(insumoPan)).toBe(3);
     expect(c.get(insumoLechuga)).toBeCloseTo(0.09, 6); // 30g × 3 = 90g = 0.09 kg
     expect(c.get(insumoAceite)).toBeCloseTo(0.036, 6); // 0.012 × 3
+  });
+
+  it('cruza familias con la equivalencia del insumo: 300 g de tomate = 2 unidades', async () => {
+    const c = await expandirReceta(prisma, prodCrossUnit, 1);
+    expect(c.get(insumoTomate)).toBeCloseTo(2, 6);
+    // Escala lineal: 3 platos → 6 unidades de tomate.
+    const c3 = await expandirReceta(prisma, prodCrossUnit, 3);
+    expect(c3.get(insumoTomate)).toBeCloseTo(6, 6);
   });
 
   it('reventa: usa cantidadInventario del PI directo', async () => {

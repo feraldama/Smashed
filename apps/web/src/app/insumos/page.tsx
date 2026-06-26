@@ -11,7 +11,7 @@ import {
   TrendingUp,
   X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AjusteStockModal } from '@/components/AjusteStockModal';
@@ -19,7 +19,9 @@ import { AuthGate } from '@/components/AuthGate';
 import { InsumoFormModal } from '@/components/InsumoFormModal';
 import { confirmar, mensaje, toast } from '@/components/Toast';
 import { type Insumo, useEliminarInsumo, useInsumos } from '@/hooks/useInventario';
+import { useSucursales } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
 import { cn, formatGs } from '@/lib/utils';
 
 export default function InsumosPage() {
@@ -37,7 +39,20 @@ function InsumosScreen() {
   const [editing, setEditing] = useState<Insumo | 'NEW' | null>(null);
   const [ajustar, setAjustar] = useState<Insumo | null>(null);
 
-  const { data, isLoading } = useInsumos({ busqueda: busqueda.trim() || undefined });
+  const sucursalActivaId = useAuthStore((s) => s.user?.sucursalActivaId ?? null);
+  const { data: todasSucursales = [] } = useSucursales();
+  // Todas las sucursales activas de la empresa (ventas + depósitos): permite ver
+  // el stock de un depósito, que nunca puede ser la sucursal activa.
+  const sucursalesStock = useMemo(() => todasSucursales.filter((s) => s.activa), [todasSucursales]);
+  const [sucursalId, setSucursalId] = useState<string>('');
+  // Default: sucursal activa; si no hay (ej. usuario sin asignación), la primera.
+  const sucursalSel = sucursalId || sucursalActivaId || sucursalesStock[0]?.id || '';
+  const sucursalActual = sucursalesStock.find((s) => s.id === sucursalSel);
+
+  const { data, isLoading } = useInsumos({
+    busqueda: busqueda.trim() || undefined,
+    sucursalId: sucursalSel || undefined,
+  });
   const insumos = data?.insumos ?? [];
   const eliminar = useEliminarInsumo();
 
@@ -70,16 +85,35 @@ function InsumosScreen() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Insumos</h1>
           <p className="text-sm text-muted-foreground">
-            {insumos.length} insumo{insumos.length !== 1 ? 's' : ''} · stock de la sucursal activa
+            {insumos.length} insumo{insumos.length !== 1 ? 's' : ''} · stock de{' '}
+            <strong>{sucursalActual?.nombre ?? 'la sucursal activa'}</strong>
+            {sucursalActual?.esDeposito ? ' (depósito)' : ''}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setEditing('NEW')}
-          className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
-        >
-          <Plus className="h-4 w-4" /> Nuevo insumo
-        </button>
+        <div className="flex items-center gap-2">
+          {sucursalesStock.length > 1 && (
+            <select
+              value={sucursalSel}
+              onChange={(e) => setSucursalId(e.target.value)}
+              className="rounded-md border border-input bg-background px-2.5 py-2 text-sm"
+              aria-label="Sucursal"
+            >
+              {sucursalesStock.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.nombre}
+                  {s.esDeposito ? ' (depósito)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditing('NEW')}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90"
+          >
+            <Plus className="h-4 w-4" /> Nuevo insumo
+          </button>
+        </div>
       </header>
 
       <div className="mb-4">
@@ -221,6 +255,12 @@ function InsumosScreen() {
           insumoNombre={ajustar.nombre}
           unidad={ajustar.unidadMedida.toLowerCase()}
           stockActual={ajustar.stock?.stockActual ?? '0'}
+          sucursalIdInicial={sucursalSel || undefined}
+          sucursales={sucursalesStock.map((s) => ({
+            id: s.id,
+            nombre: s.nombre,
+            esDeposito: s.esDeposito,
+          }))}
           onClose={() => setAjustar(null)}
         />
       )}

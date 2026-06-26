@@ -21,8 +21,9 @@ async function login() {
 }
 
 const productosTemp: string[] = [];
+const insumosTemp: string[] = [];
 async function cleanup() {
-  if (productosTemp.length === 0) return;
+  if (productosTemp.length === 0 && insumosTemp.length === 0) return;
   // Primero borrar TODOS los items que referencian a estos productos como sub-receta
   await prisma.itemReceta.deleteMany({
     where: { subProductoVentaId: { in: productosTemp } },
@@ -34,6 +35,11 @@ async function cleanup() {
   await prisma.receta.deleteMany({ where: { productoVentaId: { in: productosTemp } } });
   await prisma.productoVenta.deleteMany({ where: { id: { in: productosTemp } } });
   productosTemp.length = 0;
+  // Insumos temp (sus UnidadInsumo caen por cascada).
+  if (insumosTemp.length > 0) {
+    await prisma.productoInventario.deleteMany({ where: { id: { in: insumosTemp } } });
+    insumosTemp.length = 0;
+  }
 }
 
 describe('PUT /catalogo/productos/:id/receta', () => {
@@ -192,6 +198,72 @@ describe('PUT /catalogo/productos/:id/receta', () => {
         ],
       });
     expect(res.status).toBe(400);
+  });
+
+  it('rechaza item en unidad incompatible si el insumo no tiene equivalencia', async () => {
+    const token = await login();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    // PAN-001 se stockea en UNIDAD (conteo); pedirlo en GRAMO (masa) sin
+    // equivalencia cargada debe rebotar al guardar.
+    const pan = await prisma.productoInventario.findFirstOrThrow({ where: { codigo: 'PAN-001' } });
+    const prod = await prisma.productoVenta.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: `INCU-${Date.now()}`,
+        nombre: 'Unidad incompatible test',
+        precioBase: 10000n,
+        tasaIva: 'IVA_10',
+      },
+    });
+    productosTemp.push(prod.id);
+
+    const res = await request(app)
+      .put(`/catalogo/productos/${prod.id}/receta`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        rinde: 1,
+        items: [{ productoInventarioId: pan.id, cantidad: 300, unidadMedida: 'GRAMO' }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('acepta item en unidad incompatible si el insumo tiene equivalencia cargada', async () => {
+    const token = await login();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    // Tomate en UNIDAD con equivalencia "1 UNIDAD = 150 GRAMO".
+    const tomate = await prisma.productoInventario.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: `EQTOM-${Date.now()}`,
+        nombre: 'Tomate equivalencia test',
+        unidadMedida: 'UNIDAD',
+        unidadesAlternativas: {
+          create: [{ unidad: 'GRAMO', cantidadUnidad: 150, cantidadBase: 1 }],
+        },
+      },
+    });
+    insumosTemp.push(tomate.id);
+    const prod = await prisma.productoVenta.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: `EQOK-${Date.now()}`,
+        nombre: 'Equivalencia OK test',
+        precioBase: 10000n,
+        tasaIva: 'IVA_10',
+      },
+    });
+    productosTemp.push(prod.id);
+
+    const res = await request(app)
+      .put(`/catalogo/productos/${prod.id}/receta`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        rinde: 1,
+        items: [{ productoInventarioId: tomate.id, cantidad: 300, unidadMedida: 'GRAMO' }],
+      });
+    expect(res.status).toBe(200);
+    expect(res.body.receta.items[0].unidadMedida).toBe('GRAMO');
   });
 
   it('item con AMBOS insumo Y subProducto → 400 (XOR)', async () => {

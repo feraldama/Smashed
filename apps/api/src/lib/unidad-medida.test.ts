@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { AppError } from './errors.js';
-import { convertirCantidad } from './unidad-medida.js';
+import {
+  convertirAUnidadBase,
+  convertirCantidad,
+  familiaDe,
+  puedeConvertirAUnidadBase,
+  type UnidadInsumoSlim,
+} from './unidad-medida.js';
 
 describe('convertirCantidad', () => {
   it('misma unidad: factor 1', () => {
@@ -50,5 +56,81 @@ describe('convertirCantidad', () => {
       expect(err.message).toContain('UNIDAD');
       expect(err.details).toMatchObject({ desde: 'GRAMO', hacia: 'UNIDAD' });
     }
+  });
+});
+
+describe('familiaDe', () => {
+  it('agrupa por tipo de magnitud', () => {
+    expect(familiaDe('GRAMO')).toBe('MASA');
+    expect(familiaDe('KILOGRAMO')).toBe('MASA');
+    expect(familiaDe('MILILITRO')).toBe('VOLUMEN');
+    expect(familiaDe('UNIDAD')).toBe('CONTEO');
+    expect(familiaDe('DOCENA')).toBe('CONTEO');
+    expect(familiaDe('PORCION')).toBe('PORCION');
+  });
+});
+
+describe('convertirAUnidadBase', () => {
+  // Tomate: stock en UNIDAD, equivalencia "1 UNIDAD = 150 GRAMO".
+  const tomate: UnidadInsumoSlim[] = [{ unidad: 'GRAMO', cantidadUnidad: 150, cantidadBase: 1 }];
+  // Salsa: stock en LITRO, equivalencia "1 LITRO = 1050 GRAMO".
+  const salsa: UnidadInsumoSlim[] = [{ unidad: 'GRAMO', cantidadUnidad: 1050, cantidadBase: 1 }];
+  // Ajo: stock en GRAMO, equivalencia "1 UNIDAD (diente) = 5 GRAMO".
+  const ajo: UnidadInsumoSlim[] = [{ unidad: 'UNIDAD', cantidadUnidad: 1, cantidadBase: 5 }];
+
+  it('sin conversión cuando la unidad ya es la base', () => {
+    expect(convertirAUnidadBase(2, 'UNIDAD', 'UNIDAD', tomate)).toBe(2);
+  });
+
+  it('misma familia: usa la conversión universal aunque haya equivalencias', () => {
+    expect(convertirAUnidadBase(300, 'GRAMO', 'KILOGRAMO')).toBe(0.3);
+    expect(convertirAUnidadBase(500, 'MILILITRO', 'LITRO')).toBe(0.5);
+  });
+
+  it('cruza CONTEO→MASA: 300 g de tomate = 2 unidades', () => {
+    expect(convertirAUnidadBase(300, 'GRAMO', 'UNIDAD', tomate)).toBeCloseTo(2, 6);
+  });
+
+  it('cruza VOLUMEN→MASA usando una unidad-puente de otra escala (kg)', () => {
+    // 2.1 kg de salsa → en gramos 2100 → / 1050 = 2 litros
+    expect(convertirAUnidadBase(2.1, 'KILOGRAMO', 'LITRO', salsa)).toBeCloseTo(2, 6);
+    // 300 g → 0.2857 L
+    expect(convertirAUnidadBase(300, 'GRAMO', 'LITRO', salsa)).toBeCloseTo(300 / 1050, 6);
+  });
+
+  it('cruza en dirección inversa (base en MASA, equivalencia en CONTEO)', () => {
+    // 3 dientes de ajo → 15 g (stock en gramos)
+    expect(convertirAUnidadBase(3, 'UNIDAD', 'GRAMO', ajo)).toBeCloseTo(15, 6);
+  });
+
+  it('tira VALIDATION_ERROR si no hay equivalencia que cubra la familia', () => {
+    expect(() => convertirAUnidadBase(300, 'GRAMO', 'UNIDAD')).toThrow(AppError);
+    // Equivalencia en MASA no sirve para convertir desde VOLUMEN.
+    expect(() => convertirAUnidadBase(300, 'MILILITRO', 'UNIDAD', tomate)).toThrow(AppError);
+  });
+
+  it('el mensaje sugiere cargar la equivalencia', () => {
+    try {
+      convertirAUnidadBase(300, 'GRAMO', 'UNIDAD');
+      expect.fail('debería haber tirado');
+    } catch (e) {
+      expect((e as AppError).message).toContain('equivalencia');
+      expect((e as AppError).details).toMatchObject({ desde: 'GRAMO', base: 'UNIDAD' });
+    }
+  });
+});
+
+describe('puedeConvertirAUnidadBase', () => {
+  const tomate: UnidadInsumoSlim[] = [{ unidad: 'GRAMO', cantidadUnidad: 150, cantidadBase: 1 }];
+
+  it('true para misma unidad y misma familia', () => {
+    expect(puedeConvertirAUnidadBase('UNIDAD', 'UNIDAD')).toBe(true);
+    expect(puedeConvertirAUnidadBase('GRAMO', 'KILOGRAMO')).toBe(true);
+  });
+
+  it('true cruzando familias solo si hay equivalencia', () => {
+    expect(puedeConvertirAUnidadBase('GRAMO', 'UNIDAD', tomate)).toBe(true);
+    expect(puedeConvertirAUnidadBase('GRAMO', 'UNIDAD')).toBe(false);
+    expect(puedeConvertirAUnidadBase('MILILITRO', 'UNIDAD', tomate)).toBe(false);
   });
 });

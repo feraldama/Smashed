@@ -73,6 +73,56 @@ describe('GET /catalogo/productos', () => {
     });
   });
 
+  it('marca sinStock=true si un insumo de la receta no tiene stock en la sucursal', async () => {
+    const token = await loginAdmin();
+    const empresa = await prisma.empresa.findFirstOrThrow();
+    const ts = Date.now();
+    // Insumo sin StockSucursal en ninguna sucursal → saldo 0 → sin stock.
+    const insumo = await prisma.productoInventario.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: `QASS-${ts}`,
+        nombre: 'Insumo QA sin stock',
+        unidadMedida: 'UNIDAD',
+      },
+    });
+    const prod = await prisma.productoVenta.create({
+      data: {
+        empresaId: empresa.id,
+        codigo: `QASSP-${ts}`,
+        nombre: 'QA Producto sin stock',
+        precioBase: 10000n,
+        tasaIva: 'IVA_10',
+        esVendible: true,
+        receta: {
+          create: {
+            empresaId: empresa.id,
+            rinde: 1,
+            unidadRinde: 'UNIDAD',
+            items: {
+              create: { productoInventarioId: insumo.id, cantidad: 1, unidadMedida: 'UNIDAD' },
+            },
+          },
+        },
+      },
+    });
+
+    const res = await request(app)
+      .get('/catalogo/productos')
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const card = res.body.productos.find((p: { id: string }) => p.id === prod.id) as
+      | { sinStock: boolean }
+      | undefined;
+    expect(card?.sinStock).toBe(true);
+
+    // cleanup
+    await prisma.itemReceta.deleteMany({ where: { receta: { productoVentaId: prod.id } } });
+    await prisma.receta.deleteMany({ where: { productoVentaId: prod.id } });
+    await prisma.productoVenta.delete({ where: { id: prod.id } });
+    await prisma.productoInventario.delete({ where: { id: insumo.id } });
+  });
+
   it('filtra por categoría', async () => {
     const token = await loginAdmin();
     const cat = await prisma.categoriaProductoEmpresa.findFirst({

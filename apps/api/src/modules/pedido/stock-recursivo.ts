@@ -1,4 +1,8 @@
-import { convertirCantidad } from '../../lib/unidad-medida.js';
+import {
+  convertirAUnidadBase,
+  convertirCantidad,
+  type UnidadInsumoSlim,
+} from '../../lib/unidad-medida.js';
 
 import type { ModoStockReceta, Prisma, PrismaClient, UnidadMedida } from '@prisma/client';
 
@@ -34,7 +38,14 @@ export interface ItemRecetaSlim {
   subProductoVentaId: string | null;
   cantidad: Prisma.Decimal | number;
   unidadMedida: UnidadMedida;
-  insumo: { unidadMedida: UnidadMedida } | null;
+  insumo: {
+    unidadMedida: UnidadMedida;
+    unidadesAlternativas: Array<{
+      unidad: UnidadMedida;
+      cantidadUnidad: Prisma.Decimal | number;
+      cantidadBase: Prisma.Decimal | number;
+    }>;
+  } | null;
   esOpcional: boolean;
 }
 
@@ -130,7 +141,14 @@ async function expandirInterno(
             cantidad: true,
             unidadMedida: true,
             esOpcional: true,
-            insumo: { select: { unidadMedida: true } },
+            insumo: {
+              select: {
+                unidadMedida: true,
+                unidadesAlternativas: {
+                  select: { unidad: true, cantidadUnidad: true, cantidadBase: true },
+                },
+              },
+            },
           },
         },
       },
@@ -191,10 +209,17 @@ async function expandirInterno(
       // de stock y el cálculo de costo posterior trabajan en la unidad base
       // del insumo.
       const unidadPI = item.insumo?.unidadMedida ?? item.unidadMedida;
+      const unidadesAlt: UnidadInsumoSlim[] = (item.insumo?.unidadesAlternativas ?? []).map(
+        (u) => ({
+          unidad: u.unidad,
+          cantidadUnidad: dec(u.cantidadUnidad),
+          cantidadBase: dec(u.cantidadBase),
+        }),
+      );
       const cantEnPI =
         unidadPI === item.unidadMedida
           ? cantNecesaria
-          : convertirCantidad(cantNecesaria, item.unidadMedida, unidadPI);
+          : convertirAUnidadBase(cantNecesaria, item.unidadMedida, unidadPI, unidadesAlt);
       const prev = consumo.get(item.productoInventarioId) ?? 0;
       consumo.set(item.productoInventarioId, prev + cantEnPI);
     } else if (item.subProductoVentaId) {

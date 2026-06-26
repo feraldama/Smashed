@@ -6,9 +6,14 @@ import {
   Boxes,
   Building2,
   ChefHat,
+  ChevronDown,
+  ChevronRight,
   Download,
   DollarSign,
+  Layers,
+  ListTree,
   Loader2,
+  Package,
   Percent,
   Printer,
   Receipt,
@@ -20,7 +25,8 @@ import {
   Users,
   Wallet,
 } from 'lucide-react';
-import { useState } from 'react';
+import Link from 'next/link';
+import { Fragment, useMemo, useState } from 'react';
 
 import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
@@ -31,6 +37,8 @@ import { DateRangePicker, type DateRange } from '@/components/DateRangePicker';
 import {
   buildCsvUrl,
   useCajaTurnos,
+  useCombosCombinaciones,
+  useCombosOpciones,
   useComparativaSucursales,
   useDescuentosListado,
   useDescuentosPorEmpleado,
@@ -48,6 +56,8 @@ import {
   useVentasPorCanal,
   useVentasPorDia,
   useVentasPorHora,
+  type ComboOpcionFila,
+  type DescuentoEmpleadoTicket,
   type OrdenRentabilidad,
   type RangoFechas,
 } from '@/hooks/useReportes';
@@ -59,6 +69,7 @@ type Tab =
   | 'cocina'
   | 'caja'
   | 'productos'
+  | 'combos'
   | 'rentabilidad'
   | 'clientes'
   | 'sucursales'
@@ -66,6 +77,7 @@ type Tab =
 
 type SubTabVentas = 'resumen' | 'canales' | 'descuentos' | 'descuento-empleado' | 'promociones';
 type SubTabInventario = 'stock' | 'movimientos';
+type SubTabCombos = 'opciones' | 'combinaciones';
 
 export default function ReportesPage() {
   return (
@@ -117,6 +129,9 @@ function ReportesScreen() {
         <TabButton active={tab === 'productos'} onClick={() => setTab('productos')} icon={Trophy}>
           Productos
         </TabButton>
+        <TabButton active={tab === 'combos'} onClick={() => setTab('combos')} icon={Package}>
+          Combos
+        </TabButton>
         <TabButton
           active={tab === 'rentabilidad'}
           onClick={() => setTab('rentabilidad')}
@@ -145,6 +160,7 @@ function ReportesScreen() {
       {tab === 'cocina' && <TabCocina rango={rango} />}
       {tab === 'caja' && <TabCaja rango={rango} />}
       {tab === 'productos' && <TabProductos rango={rango} />}
+      {tab === 'combos' && <TabCombos rango={rango} />}
       {tab === 'rentabilidad' && <TabRentabilidad rango={rango} />}
       {tab === 'clientes' && <TabClientes rango={rango} />}
       {tab === 'sucursales' && esAdminEmpresa && <TabSucursales rango={rango} />}
@@ -431,9 +447,11 @@ function VentasDescuentos({ rango }: { rango: DateRange }) {
                 <tr>
                   <th className="px-2 py-2">Fecha/Hora</th>
                   <th className="px-2 py-2">Pedido</th>
+                  <th className="px-2 py-2">Ticket</th>
                   <th className="px-2 py-2">Tipo</th>
                   <th className="px-2 py-2 text-right">Monto</th>
                   <th className="px-2 py-2">Motivo</th>
+                  <th className="px-2 py-2">Beneficiario</th>
                   <th className="px-2 py-2">Aplicó</th>
                   <th className="px-2 py-2">Autorizó</th>
                 </tr>
@@ -448,11 +466,28 @@ function VentasDescuentos({ rango }: { rango: DateRange }) {
                       })}
                     </td>
                     <td className="px-2 py-2 font-mono">#{d.numero}</td>
+                    <td className="px-2 py-2 font-mono">
+                      {d.comprobante_id ? (
+                        <Link
+                          href={`/comprobantes/${d.comprobante_id}`}
+                          className="inline-flex items-center gap-1 text-primary hover:underline"
+                          title="Ver ticket / comprobante"
+                        >
+                          <Receipt className="h-3 w-3" />
+                          {d.comprobante_numero}
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </td>
                     <td className="px-2 py-2">{d.tipo}</td>
                     <td className="px-2 py-2 text-right font-mono text-red-700 dark:text-red-300">
                       −{formatGs(d.monto)}
                     </td>
                     <td className="px-2 py-2 truncate max-w-[180px]">{d.motivo ?? '—'}</td>
+                    <td className="px-2 py-2 truncate max-w-[150px]">
+                      {d.empleado_beneficiario ?? <span className="text-muted-foreground">—</span>}
+                    </td>
                     <td className="px-2 py-2 truncate max-w-[150px]">{d.aplicado_por ?? '—'}</td>
                     <td className="px-2 py-2 truncate max-w-[150px]">
                       {d.autorizado_por ?? <span className="text-muted-foreground">—</span>}
@@ -470,6 +505,7 @@ function VentasDescuentos({ rango }: { rango: DateRange }) {
 
 function DescuentosPorEmpleado({ rango }: { rango: DateRange }) {
   const { data: filas = [], isLoading } = useDescuentosPorEmpleado(rango);
+  const [expandido, setExpandido] = useState<string | null>(null);
 
   const totales = filas.reduce(
     (acc, f) => ({
@@ -521,20 +557,46 @@ function DescuentosPorEmpleado({ rango }: { rango: DateRange }) {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {filas.map((f) => (
-                  <tr key={f.empleado_id}>
-                    <td className="px-2 py-2 font-medium">{f.empleado_nombre}</td>
-                    <td className="px-2 py-2 text-muted-foreground">{f.empleado_rol}</td>
-                    <td className="px-2 py-2 text-right font-mono">{f.cantidad_ventas}</td>
-                    <td className="px-2 py-2 text-right font-mono">{formatGs(f.base_original)}</td>
-                    <td className="px-2 py-2 text-right font-mono text-red-700 dark:text-red-300">
-                      −{formatGs(f.total_descontado)}
-                    </td>
-                    <td className="px-2 py-2 text-right font-mono font-semibold">
-                      {formatGs(f.total_cobrado)}
-                    </td>
-                  </tr>
-                ))}
+                {filas.map((f) => {
+                  const abierto = expandido === f.empleado_id;
+                  return (
+                    <Fragment key={f.empleado_id}>
+                      <tr
+                        className="cursor-pointer hover:bg-muted/30"
+                        onClick={() => setExpandido(abierto ? null : f.empleado_id)}
+                      >
+                        <td className="px-2 py-2 font-medium">
+                          <span className="inline-flex items-center gap-1">
+                            {abierto ? (
+                              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            {f.empleado_nombre}
+                          </span>
+                        </td>
+                        <td className="px-2 py-2 text-muted-foreground">{f.empleado_rol}</td>
+                        <td className="px-2 py-2 text-right font-mono">{f.cantidad_ventas}</td>
+                        <td className="px-2 py-2 text-right font-mono">
+                          {formatGs(f.base_original)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono text-red-700 dark:text-red-300">
+                          −{formatGs(f.total_descontado)}
+                        </td>
+                        <td className="px-2 py-2 text-right font-mono font-semibold">
+                          {formatGs(f.total_cobrado)}
+                        </td>
+                      </tr>
+                      {abierto && (
+                        <tr className="bg-muted/20">
+                          <td colSpan={6} className="px-2 py-2">
+                            <TicketsEmpleado tickets={f.tickets} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </tbody>
               {filas.length > 0 && (
                 <tfoot className="border-t-2 font-bold">
@@ -555,6 +617,57 @@ function DescuentosPorEmpleado({ rango }: { rango: DateRange }) {
           </div>
         )}
       </Card>
+    </div>
+  );
+}
+
+// Detalle de descuentos de un empleado (drill-down): cada pedido con su ticket.
+function TicketsEmpleado({ tickets }: { tickets: DescuentoEmpleadoTicket[] }) {
+  if (tickets.length === 0) {
+    return <p className="text-[11px] text-muted-foreground">Sin detalle disponible</p>;
+  }
+  return (
+    <div className="rounded-md border bg-card">
+      <table className="w-full text-[11px]">
+        <thead className="text-left uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="px-2 py-1.5">Fecha/Hora</th>
+            <th className="px-2 py-1.5">Pedido</th>
+            <th className="px-2 py-1.5">Ticket</th>
+            <th className="px-2 py-1.5 text-right">Descontado</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {tickets.map((t) => (
+            <tr key={t.pedido_id}>
+              <td className="px-2 py-1.5 font-mono">
+                {new Date(t.fecha).toLocaleString('es-PY', {
+                  dateStyle: 'short',
+                  timeStyle: 'short',
+                })}
+              </td>
+              <td className="px-2 py-1.5 font-mono">#{t.numero}</td>
+              <td className="px-2 py-1.5 font-mono">
+                {t.comprobante_id ? (
+                  <Link
+                    href={`/comprobantes/${t.comprobante_id}`}
+                    className="inline-flex items-center gap-1 text-primary hover:underline"
+                    title="Ver ticket / comprobante"
+                  >
+                    <Receipt className="h-3 w-3" />
+                    {t.comprobante_numero}
+                  </Link>
+                ) : (
+                  <span className="text-muted-foreground">—</span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right font-mono text-red-700 dark:text-red-300">
+                −{formatGs(t.monto)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -901,6 +1014,10 @@ function TabProductos({ rango }: { rango: DateRange }) {
 
   return (
     <Card title={`Top ${top.length} productos por ingreso`}>
+      <p className="mb-3 text-[11px] text-muted-foreground">
+        Las unidades incluyen los productos pedidos dentro de combos (ej. la hamburguesa elegida en
+        un combo suma a su total). El ingreso del combo se mantiene en su propia línea.
+      </p>
       {isLoading ? (
         <div className="flex h-32 items-center justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -935,6 +1052,191 @@ function TabProductos({ rango }: { rango: DateRange }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// ───── TAB COMBOS — qué se pide dentro de cada combo ─────
+
+function TabCombos({ rango }: { rango: DateRange }) {
+  const [sub, setSub] = useState<SubTabCombos>('opciones');
+  return (
+    <div className="space-y-4">
+      <nav className="flex flex-wrap gap-1">
+        <SubTabBtn active={sub === 'opciones'} onClick={() => setSub('opciones')} icon={ListTree}>
+          Por grupo / opción
+        </SubTabBtn>
+        <SubTabBtn
+          active={sub === 'combinaciones'}
+          onClick={() => setSub('combinaciones')}
+          icon={Layers}
+        >
+          Combinación completa
+        </SubTabBtn>
+      </nav>
+      {sub === 'opciones' && <CombosOpciones rango={rango} />}
+      {sub === 'combinaciones' && <CombosCombinaciones rango={rango} />}
+    </div>
+  );
+}
+
+function CombosOpciones({ rango }: { rango: DateRange }) {
+  const { data: filas = [], isLoading } = useCombosOpciones(rango);
+
+  // Reagrupamos el listado plano del backend: combo → grupo → opciones[].
+  // El backend ya ordena por combo, orden de grupo y veces desc, así que el
+  // Map preserva ese orden de inserción.
+  const combos = useMemo(() => {
+    const map = new Map<
+      string,
+      {
+        id: string;
+        nombre: string;
+        grupos: Map<string, { id: string; nombre: string; opciones: ComboOpcionFila[] }>;
+      }
+    >();
+    for (const f of filas) {
+      let combo = map.get(f.combo_id);
+      if (!combo) {
+        combo = { id: f.combo_id, nombre: f.combo_nombre, grupos: new Map() };
+        map.set(f.combo_id, combo);
+      }
+      let grupo = combo.grupos.get(f.grupo_id);
+      if (!grupo) {
+        grupo = { id: f.grupo_id, nombre: f.grupo_nombre, opciones: [] };
+        combo.grupos.set(f.grupo_id, grupo);
+      }
+      grupo.opciones.push(f);
+    }
+    return [...map.values()];
+  }, [filas]);
+
+  return (
+    <div className="space-y-4">
+      <ExportarBtns
+        rango={rango}
+        items={[{ endpoint: '/reportes/combos/opciones', label: 'Combos — por opción' }]}
+      />
+      {isLoading ? (
+        <SkeletonChart />
+      ) : combos.length === 0 ? (
+        <Empty mensaje="No se vendieron combos en este período" />
+      ) : (
+        combos.map((combo) => (
+          <Card key={combo.id} title={combo.nombre}>
+            <div className="grid gap-4 md:grid-cols-2">
+              {[...combo.grupos.values()].map((grupo) => {
+                const totalGrupo = grupo.opciones.reduce((acc, o) => acc + Number(o.veces), 0);
+                return (
+                  <div key={grupo.id}>
+                    <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {grupo.nombre}
+                    </p>
+                    <div className="space-y-1.5">
+                      {grupo.opciones.map((o) => {
+                        const veces = Number(o.veces);
+                        const pct = totalGrupo > 0 ? (veces / totalGrupo) * 100 : 0;
+                        return (
+                          <div
+                            key={o.opcion_producto_id}
+                            className="grid grid-cols-[1fr,52px,44px] items-center gap-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="truncate text-sm">{o.opcion_nombre}</p>
+                              <div className="relative mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                                <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                              </div>
+                            </div>
+                            <span className="text-right font-mono text-xs text-muted-foreground">
+                              {veces}×
+                            </span>
+                            <span className="text-right font-mono text-xs font-semibold">
+                              {pct.toFixed(0)}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        ))
+      )}
+    </div>
+  );
+}
+
+function CombosCombinaciones({ rango }: { rango: DateRange }) {
+  const { data: filas = [], isLoading } = useCombosCombinaciones(rango);
+
+  // Reagrupamos por combo, conservando el orden (veces desc) del backend.
+  const combos = useMemo(() => {
+    const map = new Map<
+      string,
+      { id: string; nombre: string; total: number; combinaciones: typeof filas }
+    >();
+    for (const f of filas) {
+      let combo = map.get(f.combo_id);
+      if (!combo) {
+        combo = { id: f.combo_id, nombre: f.combo_nombre, total: 0, combinaciones: [] };
+        map.set(f.combo_id, combo);
+      }
+      combo.total += Number(f.veces);
+      combo.combinaciones.push(f);
+    }
+    return [...map.values()];
+  }, [filas]);
+
+  return (
+    <div className="space-y-4">
+      <ExportarBtns
+        rango={rango}
+        items={[{ endpoint: '/reportes/combos/combinaciones', label: 'Combos — combinaciones' }]}
+      />
+      {isLoading ? (
+        <SkeletonChart />
+      ) : combos.length === 0 ? (
+        <Empty mensaje="No se vendieron combos en este período" />
+      ) : (
+        combos.map((combo) => {
+          const max = combo.combinaciones.reduce((acc, c) => Math.max(acc, Number(c.veces)), 0);
+          return (
+            <Card key={combo.id} title={`${combo.nombre} — ${combo.total} vendidos`}>
+              <div className="space-y-1.5">
+                {combo.combinaciones.map((c, i) => {
+                  const veces = Number(c.veces);
+                  const pct = max > 0 ? (veces / max) * 100 : 0;
+                  const pctTotal = combo.total > 0 ? (veces / combo.total) * 100 : 0;
+                  return (
+                    <div
+                      key={c.combinacion}
+                      className="grid grid-cols-[24px,1fr,52px,44px] items-center gap-2 rounded-md p-1.5 hover:bg-muted/30"
+                    >
+                      <span className="text-center font-mono text-xs text-muted-foreground">
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{c.combinacion}</p>
+                        <div className="relative mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                          <div className="h-full bg-primary" style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                      <span className="text-right font-mono text-xs text-muted-foreground">
+                        {veces}×
+                      </span>
+                      <span className="text-right font-mono text-xs font-semibold">
+                        {pctTotal.toFixed(0)}%
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </Card>
+          );
+        })
+      )}
+    </div>
   );
 }
 

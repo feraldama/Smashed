@@ -1,10 +1,10 @@
-
 import { Errors } from '../../lib/errors.js';
 
 import {
   anularComprobanteInput,
   comprobanteIdParam,
   emitirComprobanteInput,
+  emitirNotaCreditoInput,
   listarComprobantesQuery,
 } from './comprobante.schemas.js';
 import * as service from './comprobante.service.js';
@@ -29,6 +29,14 @@ export async function anular(req: Request, res: Response) {
   const input = anularComprobanteInput.parse(req.body);
   const comprobante = await service.anularComprobante(ctx, id, input);
   res.json({ comprobante });
+}
+
+export async function notaCredito(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id } = comprobanteIdParam.parse(req.params);
+  const input = emitirNotaCreditoInput.parse(req.body);
+  const comprobante = await service.emitirNotaCreditoParcial(ctx, id, input);
+  res.status(201).json({ comprobante });
 }
 
 export async function listar(req: Request, res: Response) {

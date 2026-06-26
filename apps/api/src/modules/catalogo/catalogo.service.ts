@@ -1,5 +1,6 @@
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
+import { puedeConvertirAUnidadBase } from '../../lib/unidad-medida.js';
 
 import type {
   ActualizarCategoriaInput,
@@ -12,7 +13,7 @@ import type {
   SetPrecioSucursalInput,
   SetRecetaInput,
 } from './catalogo.schemas.js';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, UnidadMedida } from '@prisma/client';
 
 /**
  * Servicio de catálogo (lectura).
@@ -93,6 +94,7 @@ export async function listarProductos(args: {
         esCombo: true,
         esVendible: true,
         esPreparacion: true,
+        ordenMenu: true,
         // Sólo necesitamos saber si tiene grupos vinculados (para que el POS
         // sepa si abrir el modal de configuración). Un count basta.
         _count: { select: { modificadorGrupos: true } },
@@ -109,29 +111,87 @@ export async function listarProductos(args: {
                 take: 1,
                 select: { precio: true },
               },
+              // Para calcular disponibilidad de stock en el POS: insumo de
+              // reventa + insumos directos de la receta. No expandimos
+              // sub-preparaciones (v1) — ver cálculo de `sinStock` abajo.
+              productoInventarioId: true,
+              receta: { select: { items: { select: { productoInventarioId: true } } } },
             }
           : {}),
       },
-      orderBy: [{ categoria: { ordenMenu: 'asc' } }, { nombre: 'asc' }],
+      // Orden del menú: primero por categoría, luego por el orden manual del
+      // producto dentro de la categoría, y como desempate el nombre.
+      orderBy: [{ categoria: { ordenMenu: 'asc' } }, { ordenMenu: 'asc' }, { nombre: 'asc' }],
       ...(pageSize !== undefined ? { skip: (page - 1) * pageSize, take: pageSize } : {}),
     }),
     paginar ? prisma.productoVenta.count({ where }) : Promise.resolve(0),
   ]);
+
+  // Disponibilidad de stock (sólo con sucursal): un producto se marca `sinStock`
+  // si algún insumo que consume (vínculo de reventa o insumo directo de la
+  // receta) tiene saldo <= 0 en la sucursal. Una sola query de stock en lote
+  // para toda la grilla (no se expande receta por receta). NO bloquea la venta
+  // — es sólo un indicador visual. Limitaciones v1: no recorre
+  // sub-preparaciones ni combos (quedan como disponibles).
+  const sinStockPorProducto = new Map<string, boolean>();
+  if (sucursalId) {
+    const insumosPorProducto = new Map<string, string[]>();
+    const todosLosInsumos = new Set<string>();
+    for (const p of productos) {
+      const conReceta = p as typeof p & {
+        productoInventarioId?: string | null;
+        receta?: { items: { productoInventarioId: string | null }[] } | null;
+      };
+      const ids: string[] = [];
+      if (conReceta.productoInventarioId) ids.push(conReceta.productoInventarioId);
+      for (const it of conReceta.receta?.items ?? []) {
+        if (it.productoInventarioId) ids.push(it.productoInventarioId);
+      }
+      if (ids.length > 0) {
+        insumosPorProducto.set(p.id, ids);
+        for (const id of ids) todosLosInsumos.add(id);
+      }
+    }
+    if (todosLosInsumos.size > 0) {
+      const stock = await prisma.stockSucursal.findMany({
+        where: { sucursalId, productoInventarioId: { in: [...todosLosInsumos] } },
+        select: { productoInventarioId: true, stockActual: true },
+      });
+      const stockPorInsumo = new Map(
+        stock.map((s) => [s.productoInventarioId, Number(s.stockActual)]),
+      );
+      for (const [prodId, ids] of insumosPorProducto) {
+        // Sin registro de stock = 0 → cuenta como sin stock.
+        if (ids.some((id) => (stockPorInsumo.get(id) ?? 0) <= 0)) {
+          sinStockPorProducto.set(prodId, true);
+        }
+      }
+    }
+  }
 
   const items = productos.map((p) => {
     const override = 'preciosSucursal' in p ? p.preciosSucursal[0]?.precio : undefined;
     const {
       preciosSucursal: _drop,
       _count,
+      receta: _receta,
+      productoInventarioId: _pi,
       ...rest
-    } = p as typeof p & { preciosSucursal?: unknown };
+    } = p as typeof p & {
+      preciosSucursal?: unknown;
+      receta?: unknown;
+      productoInventarioId?: unknown;
+    };
     void _drop;
+    void _receta;
+    void _pi;
     return {
       ...rest,
       precio: override ?? p.precioBase,
       precioBase: p.precioBase,
       tienePrecioSucursal: override !== undefined,
       tieneModificadores: _count.modificadorGrupos > 0,
+      sinStock: sinStockPorProducto.get(p.id) ?? false,
     };
   });
 
@@ -404,6 +464,31 @@ export async function actualizarProducto(
   });
 }
 
+/**
+ * Reordena productos seteando su `ordenMenu` en lote. Recibe los ids en el
+ * orden deseado (típicamente todos los de una categoría) y les asigna 0..n-1.
+ *
+ * Valida que todos los ids pertenezcan a la empresa antes de tocar nada, para
+ * no aplicar un reorden parcial si el cliente mandó algún id ajeno o borrado.
+ */
+export async function reordenarProductos(empresaId: string, ids: string[]) {
+  if (ids.length === 0) return;
+
+  const encontrados = await prisma.productoVenta.findMany({
+    where: { id: { in: ids }, empresaId, deletedAt: null },
+    select: { id: true },
+  });
+  if (encontrados.length !== ids.length) {
+    throw Errors.validation({ ids: 'Algún producto no existe o no pertenece a tu empresa' });
+  }
+
+  await prisma.$transaction(
+    ids.map((id, index) =>
+      prisma.productoVenta.update({ where: { id }, data: { ordenMenu: index } }),
+    ),
+  );
+}
+
 export async function eliminarProducto(empresaId: string, id: string) {
   const prod = await prisma.productoVenta.findFirst({
     where: { id, empresaId, deletedAt: null },
@@ -660,28 +745,106 @@ export async function setReceta(empresaId: string, productoVentaId: string, inpu
     ...new Set(input.items.map((i) => i.subProductoVentaId).filter(Boolean) as string[]),
   ];
 
+  // Insumos: además de existir, validamos que la unidad de cada item se pueda
+  // convertir a la unidad de stock del insumo (misma familia, o equivalencia
+  // cargada). Fallar acá da un error claro e inmediato, en vez de reventar
+  // recién al vender / costear (ver lib/unidad-medida.ts).
+  const insumosById = new Map<
+    string,
+    {
+      nombre: string;
+      unidadMedida: UnidadMedida;
+      unidadesAlternativas: {
+        unidad: UnidadMedida;
+        cantidadUnidad: number;
+        cantidadBase: number;
+      }[];
+    }
+  >();
   if (insumoIds.length > 0) {
-    const found = await prisma.productoInventario.count({
+    const found = await prisma.productoInventario.findMany({
       where: { id: { in: insumoIds }, empresaId, deletedAt: null },
+      select: {
+        id: true,
+        nombre: true,
+        unidadMedida: true,
+        unidadesAlternativas: {
+          select: { unidad: true, cantidadUnidad: true, cantidadBase: true },
+        },
+      },
     });
-    if (found !== insumoIds.length) {
+    if (found.length !== insumoIds.length) {
       throw Errors.validation({ insumos: 'Algún insumo no existe o no pertenece a tu empresa' });
+    }
+    for (const i of found) {
+      insumosById.set(i.id, {
+        nombre: i.nombre,
+        unidadMedida: i.unidadMedida,
+        unidadesAlternativas: i.unidadesAlternativas.map((u) => ({
+          unidad: u.unidad,
+          cantidadUnidad: Number(u.cantidadUnidad),
+          cantidadBase: Number(u.cantidadBase),
+        })),
+      });
     }
   }
 
+  // Sub-preparaciones: validar existencia + (más abajo) compatibilidad de unidad
+  // contra su `unidadRinde`. Las subprep no admiten equivalencias (no son
+  // ProductoInventario) → la unidad del item debe ser de la misma familia.
+  const subsById = new Map<string, { nombre: string; unidadRinde: UnidadMedida | null }>();
   if (subProdIds.length > 0) {
     if (subProdIds.includes(productoVentaId)) {
       throw Errors.validation({ subProducto: 'Un producto no puede ser sub-receta de sí mismo' });
     }
     const subs = await prisma.productoVenta.findMany({
       where: { id: { in: subProdIds }, empresaId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, nombre: true, receta: { select: { unidadRinde: true } } },
     });
     if (subs.length !== subProdIds.length) {
       throw Errors.validation({ subProducto: 'Algún sub-producto no existe' });
     }
+    for (const s of subs) {
+      subsById.set(s.id, { nombre: s.nombre, unidadRinde: s.receta?.unidadRinde ?? null });
+    }
 
     await assertSinCiclos(productoVentaId, subProdIds, empresaId);
+  }
+
+  // Validación de unidades por item.
+  for (const [idx, it] of input.items.entries()) {
+    if (it.productoInventarioId) {
+      const insumo = insumosById.get(it.productoInventarioId);
+      if (
+        insumo &&
+        !puedeConvertirAUnidadBase(
+          it.unidadMedida,
+          insumo.unidadMedida,
+          insumo.unidadesAlternativas,
+        )
+      ) {
+        throw Errors.validation({
+          items:
+            `Item ${idx + 1} (${insumo.nombre}): la receta lo usa en ` +
+            `${it.unidadMedida.toLowerCase()}, pero el insumo se stockea en ` +
+            `${insumo.unidadMedida.toLowerCase()} y no hay equivalencia cargada para convertir. ` +
+            `Cargá la equivalencia en el insumo ` +
+            `(ej: "1 ${insumo.unidadMedida.toLowerCase()} = N ${it.unidadMedida.toLowerCase()}").`,
+        });
+      }
+    } else if (it.subProductoVentaId) {
+      const sub = subsById.get(it.subProductoVentaId);
+      // Si la subprep no tiene receta todavía, no podemos validar la unidad acá.
+      if (sub?.unidadRinde && !puedeConvertirAUnidadBase(it.unidadMedida, sub.unidadRinde)) {
+        throw Errors.validation({
+          items:
+            `Item ${idx + 1} (${sub.nombre}): la receta lo usa en ` +
+            `${it.unidadMedida.toLowerCase()}, pero la sub-preparación rinde en ` +
+            `${sub.unidadRinde.toLowerCase()} (tipos distintos). Las sub-preparaciones no ` +
+            `admiten equivalencias — usá una unidad compatible.`,
+        });
+      }
+    }
   }
 
   return prisma.$transaction(async (tx) => {

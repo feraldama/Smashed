@@ -203,6 +203,11 @@ enum EstadoComprobante {
 
 enum EstadoSifen {
   NO_ENVIADO
+  // Intent marker: el alta a SIFEN está en curso (se persiste ANTES del alta).
+  // Si el proceso muere alrededor del alta, el documento queda ENVIANDO y la
+  // recuperación CONSULTA a SIFEN en vez de re-dar de alta a ciegas (evita
+  // duplicar el documento fiscal). Ver emision.service.ts.
+  ENVIANDO
   PENDIENTE
   APROBADO
   RECHAZADO
@@ -214,6 +219,7 @@ enum MetodoPago {
   EFECTIVO
   TARJETA_CREDITO
   TARJETA_DEBITO
+  PEDIDOS_YA
 }
 
 /// Proveedor de facturación electrónica configurado por empresa.
@@ -255,6 +261,7 @@ enum AccionAuditable {
   CAMBIO_PRECIO
   APERTURA_CAJA
   CIERRE_CAJA
+  MOVIMIENTO_CAJA
   CAMBIO_PERMISO
   APLICAR_DESCUENTO
   REMOVER_DESCUENTO
@@ -502,7 +509,15 @@ model Sucursal {
   nombre          String
   codigo          String   // código interno corto: "CEN", "SLO"
   // Establecimiento SIFEN: ej "001", "002" — formato XXX según DNIT.
-  establecimiento String   @db.Char(3)
+  // Nullable porque un depósito (esDeposito=true) no factura y no tiene
+  // establecimiento SIFEN. Postgres permite múltiples NULL en el índice único,
+  // así que pueden coexistir varios depósitos sin establecimiento.
+  establecimiento String?  @db.Char(3)
+  // Depósito: sucursal que sólo guarda inventario de insumos y transfiere a
+  // otras sucursales. No vende (no aparece en POS/caja), no factura y no
+  // requiere establecimiento SIFEN. Sigue siendo origen/destino de
+  // transferencias y puede recibir compras de insumos.
+  esDeposito      Boolean  @default(false) @map("es_deposito")
   direccion       String
   ciudad          String?
   departamento    String?
@@ -513,9 +528,13 @@ model Sucursal {
   horarios        Json?    @db.JsonB
   activa          Boolean  @default(true)
 
-  // Contador correlativo de pedidos por sucursal — usado con optimistic lock
-  // (updateMany con check de versión) para garantizar numeración race-free.
-  ultimoNumeroPedido Int   @default(0) @map("ultimo_numero_pedido")
+  // Contadores correlativos por sucursal — incrementados con `UPDATE ... RETURNING`
+  // (row-lock exclusivo de Postgres) para garantizar numeración race-free, igual
+  // que la numeración de pedidos. Compra y transferencia se numeran por la
+  // sucursal (la transferencia, por su sucursal de ORIGEN).
+  ultimoNumeroPedido        Int @default(0) @map("ultimo_numero_pedido")
+  ultimoNumeroCompra        Int @default(0) @map("ultimo_numero_compra")
+  ultimoNumeroTransferencia Int @default(0) @map("ultimo_numero_transferencia")
 
   // Recargo automático para pedidos DELIVERY_PROPIO. Lo configura el admin,
   // el cajero no lo edita. Cuando activo=true se suma al total del pedido
@@ -878,6 +897,10 @@ model ProductoInventario {
   stockSucursal      StockSucursal[]
   itemsReceta        ItemReceta[]      @relation("InsumoReceta")
   movimientosStock   MovimientoStock[]
+  // Unidades alternativas de medida (equivalencias cruzando familias).
+  // Permite stockear en una unidad y usar en recetas otra de tipo distinto
+  // (ej: stock en LITRO, receta en GRAMO). Ver UnidadInsumo.
+  unidadesAlternativas UnidadInsumo[]
   itemsTransferencia ItemTransferencia[]
   itemsCompra        ItemCompra[]
   // Recetas de sub-preparaciones en modo LOTE que usan este insumo como espejo.
@@ -915,6 +938,46 @@ model StockSucursal {
   @@map("stock_sucursal")
 }
 
+// Unidad alternativa de medida de un insumo, con su equivalencia respecto a la
+// unidad de stock (`ProductoInventario.unidadMedida`, la "base").
+//
+// Razón de existir: las conversiones universales (g↔kg, ml↔l, unidad↔docena)
+// las resuelve `lib/unidad-medida.ts` sin datos por insumo. Pero cruzar
+// FAMILIAS distintas (conteo↔peso, volumen↔peso) depende del insumo concreto:
+// "1 tomate = 150 g", "1 litro de salsa = 1050 g". Eso vive acá.
+//
+// La equivalencia se guarda como RATIO (numerador/denominador) en vez de un
+// factor único para no perder precisión al invertir (1/150 = 0.00666…) y para
+// no forzar una dirección de carga:
+//   `cantidadUnidad` [unidad]  =  `cantidadBase` [unidadMedida del insumo]
+// Conversión de q (en `unidad`) a la base: q × cantidadBase / cantidadUnidad.
+//
+// Invariantes (las hace cumplir la capa de servicio, no la BD):
+//  - familia(unidad) ≠ familia(unidadMedida del insumo) — si fueran la misma,
+//    la conversión universal ya alcanza y este registro sobra.
+//  - a lo sumo una unidad alternativa por familia foránea, por insumo.
+//  - cantidadUnidad > 0 y cantidadBase > 0.
+//
+// A futuro este modelo puede crecer con un `rol` (COMPRA/RECETA/STOCK) y una
+// etiqueta libre (caja, botella) para cubrir la unidad de compra; hoy alcanza
+// con el set del enum UnidadMedida para el caso de recetas.
+model UnidadInsumo {
+  id                   String             @id @default(cuid())
+  productoInventarioId String             @map("producto_inventario_id")
+  insumo               ProductoInventario @relation(fields: [productoInventarioId], references: [id], onDelete: Cascade)
+
+  unidad         UnidadMedida
+  cantidadUnidad Decimal      @map("cantidad_unidad") @db.Decimal(18, 6)
+  cantidadBase   Decimal      @map("cantidad_base") @db.Decimal(18, 6)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([productoInventarioId, unidad])
+  @@index([productoInventarioId])
+  @@map("unidad_insumo")
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 //  PRODUCTOS DE VENTA — items vendibles (con receta opcional)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -942,6 +1005,10 @@ model ProductoVenta {
   // Flag para sub-preparaciones que no se venden directamente (salsas, masas).
   esPreparacion Boolean  @default(false) @map("es_preparacion")
   activo        Boolean  @default(true)
+  // Orden de aparición dentro de su categoría en el menú del POS (asc). Lo
+  // setea el admin desde la pantalla de reordenamiento (drag & drop). El POS
+  // ordena por categoria.ordenMenu y luego por este campo (empate → nombre).
+  ordenMenu     Int      @default(0) @map("orden_menu")
 
   // Reventa: producto comprado ya hecho que se revende (bebida envasada, snack).
   // Vincula a un ProductoInventario para descontar stock al vender e imputar
@@ -1522,7 +1589,8 @@ model Pedido {
   observaciones String?
 
   // Número de pager físico entregado al cliente (mostrador / para llevar) para llamarlo
-  // cuando su pedido está LISTO. Opcional. Rango 1–50 validado en API.
+  // cuando su pedido está LISTO. Obligatorio al emitir comprobante (rango 1–50,
+  // validado en API). Sigue nullable en BD por pedidos previos a la regla.
   numeroPager   Int?     @map("numero_pager")
 
   // Totales (calculados al confirmar)

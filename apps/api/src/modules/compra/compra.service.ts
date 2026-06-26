@@ -1,5 +1,6 @@
 import { Prisma, TipoMovimientoStock } from '@prisma/client';
 
+import { siguienteNumeroSucursal } from '../../lib/correlativos.js';
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -107,7 +108,7 @@ export async function crear(user: UserCtx, input: CrearCompraInput) {
     }),
     prisma.sucursal.findFirst({
       where: { id: input.sucursalId, empresaId, deletedAt: null },
-      select: { id: true, activa: true },
+      select: { id: true, activa: true, esDeposito: true },
     }),
   ]);
   if (!proveedor) throw Errors.notFound('Proveedor no encontrado');
@@ -115,7 +116,14 @@ export async function crear(user: UserCtx, input: CrearCompraInput) {
   if (!sucursal) throw Errors.notFound('Sucursal no encontrada');
   if (!sucursal.activa) throw Errors.conflict('Sucursal inactiva');
 
-  if (!user.isSuperAdmin && user.sucursalActivaId && user.sucursalActivaId !== sucursal.id) {
+  // Un depósito es central: cualquier usuario autorizado puede comprarle insumos,
+  // aunque no sea su sucursal activa.
+  if (
+    !user.isSuperAdmin &&
+    user.sucursalActivaId &&
+    user.sucursalActivaId !== sucursal.id &&
+    !sucursal.esDeposito
+  ) {
     throw Errors.sucursalNoAutorizada();
   }
 
@@ -148,13 +156,8 @@ export async function crear(user: UserCtx, input: CrearCompraInput) {
   const total = itemsConSubtotal.reduce((acc, i) => acc + i.subtotal, BigInt(0));
 
   return prisma.$transaction(async (tx) => {
-    // numero correlativo por sucursal
-    const ultima = await tx.compra.findFirst({
-      where: { sucursalId: input.sucursalId },
-      orderBy: { numero: 'desc' },
-      select: { numero: true },
-    });
-    const numero = (ultima?.numero ?? 0) + 1;
+    // Número correlativo por sucursal, race-free (ver lib/correlativos.ts).
+    const numero = await siguienteNumeroSucursal(tx, input.sucursalId, 'compra');
 
     // Crear compra con items
     const compra = await tx.compra.create({

@@ -6,6 +6,7 @@ import {
   ChefHat,
   HandPlatter,
   Loader2,
+  ShoppingBag,
   Store,
   Truck,
   User,
@@ -169,6 +170,12 @@ export function PedidoCard({ pedido, sector }: Props) {
   const transicionOpcion = useTransicionarComboOpcion();
   const entregar = useEntregarPedido();
   const Icon = TIPO_ICON[pedido.tipo];
+  // Para llevar (delivery + retiro en local) se resalta en naranja para que
+  // cocina sepa de un vistazo que va en packaging, no se arma en plato.
+  const esParaLlevar =
+    pedido.tipo === 'DELIVERY_PROPIO' ||
+    pedido.tipo === 'DELIVERY_PEDIDOSYA' ||
+    pedido.tipo === 'RETIRO_LOCAL';
   const isMostrador = sector === null;
   const loading = transicionItem.isPending || transicionOpcion.isPending || entregar.isPending;
 
@@ -273,17 +280,36 @@ export function PedidoCard({ pedido, sector }: Props) {
     <article
       className={cn(
         'flex flex-col overflow-hidden rounded-lg border-2 bg-card shadow-sm',
-        pedido.estado === 'EN_PREPARACION' ? 'border-amber-300' : 'border-input',
+        esParaLlevar
+          ? 'border-orange-400 dark:border-orange-600'
+          : pedido.estado === 'EN_PREPARACION'
+            ? 'border-amber-300'
+            : 'border-input',
       )}
     >
       {/* Header */}
-      <header className="flex items-start gap-2 border-b bg-muted/30 px-3 py-2">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground">
+      <header
+        className={cn(
+          'flex items-start gap-2 border-b px-3 py-2',
+          esParaLlevar ? 'bg-orange-100 dark:bg-orange-950/40' : 'bg-muted/30',
+        )}
+      >
+        <div
+          className={cn(
+            'flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-primary-foreground',
+            esParaLlevar ? 'bg-orange-500' : 'bg-primary',
+          )}
+        >
           <Icon className="h-4 w-4" />
         </div>
         <div className="flex-1">
-          <div className="flex items-baseline gap-2">
+          <div className="flex flex-wrap items-baseline gap-2">
             <p className="text-lg font-bold tabular-nums">#{pedido.numero}</p>
+            {esParaLlevar && (
+              <span className="inline-flex items-center gap-1 rounded-md bg-orange-500 px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-white">
+                <ShoppingBag className="h-3.5 w-3.5" /> Para llevar
+              </span>
+            )}
             {pedido.mesa && (
               <p className="text-sm font-semibold text-muted-foreground">
                 Mesa {pedido.mesa.numero}

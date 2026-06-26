@@ -72,6 +72,50 @@ if (!parsed.success) {
   process.exit(1);
 }
 
+/**
+ * Reglas de endurecimiento que sólo aplican en producción. Se separan en una
+ * función pura (sin `process.exit`) para poder testearlas; el bootstrap de
+ * abajo las corre y aborta si hay errores.
+ *
+ * Por qué: varios defaults son cómodos para dev pero peligrosos en prod
+ *  - `ALLOWED_ORIGINS='*'` hace que CORS refleje CUALQUIER origen con
+ *    `credentials: true` → robo de sesión / CSRF (ver middleware/cors.ts).
+ *  - un `JWT_SECRET` corto/de dev permite forjar tokens (incl. SUPER_ADMIN).
+ */
+export const JWT_SECRET_MIN_PROD = 44; // 32 bytes en base64 = 44 chars
+
+export function validarConfigProduccion(e: {
+  NODE_ENV: string;
+  ALLOWED_ORIGINS: string;
+  JWT_SECRET: string;
+}): string[] {
+  if (e.NODE_ENV !== 'production') return [];
+
+  const errores: string[] = [];
+  if (e.ALLOWED_ORIGINS.trim() === '*') {
+    errores.push(
+      'ALLOWED_ORIGINS no puede ser "*" en producción: con credentials habilitado, CORS ' +
+        'reflejaría cualquier origen (robo de sesión / CSRF). Listá los orígenes explícitos, ' +
+        'ej: ALLOWED_ORIGINS=https://app.tudominio.com,https://admin.tudominio.com',
+    );
+  }
+  if (e.JWT_SECRET.trim().length < JWT_SECRET_MIN_PROD) {
+    errores.push(
+      `JWT_SECRET debe tener al menos ${JWT_SECRET_MIN_PROD} caracteres en producción ` +
+        "(generá uno aleatorio: `node -e \"console.log(require('crypto').randomBytes(48).toString('base64'))\"`). " +
+        'No reuses el secreto de desarrollo.',
+    );
+  }
+  return errores;
+}
+
+const erroresProd = validarConfigProduccion(parsed.data);
+if (erroresProd.length > 0) {
+  console.error('❌ Configuración insegura para producción:');
+  for (const e of erroresProd) console.error(`  • ${e}`);
+  process.exit(1);
+}
+
 export const env = parsed.data;
 
 export const isDev = env.NODE_ENV === 'development';

@@ -84,6 +84,69 @@ describe('POST /inventario', () => {
   });
 });
 
+describe('Equivalencias de unidad (UnidadInsumo)', () => {
+  it('crea insumo con equivalencia cross-familia OK', async () => {
+    const token = await login(ADMIN);
+    const res = await request(app)
+      .post('/inventario')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        codigo: `EQ-${Date.now()}`,
+        nombre: 'Tomate con equivalencia',
+        unidadMedida: 'UNIDAD',
+        unidadesAlternativas: [{ unidad: 'GRAMO', cantidadUnidad: 150, cantidadBase: 1 }],
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.insumo.unidadesAlternativas).toHaveLength(1);
+    expect(res.body.insumo.unidadesAlternativas[0].unidad).toBe('GRAMO');
+
+    await prisma.productoInventario.delete({ where: { id: res.body.insumo.id } });
+  });
+
+  it('rechaza equivalencia de la misma familia que la unidad de stock → 400', async () => {
+    const token = await login(ADMIN);
+    // base GRAMO (masa) + equivalencia en KILOGRAMO (masa) → la conversión ya es
+    // universal, no se permite cargarla.
+    const res = await request(app)
+      .post('/inventario')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        codigo: `EQBAD-${Date.now()}`,
+        nombre: 'Equivalencia redundante',
+        unidadMedida: 'GRAMO',
+        unidadesAlternativas: [{ unidad: 'KILOGRAMO', cantidadUnidad: 1, cantidadBase: 1000 }],
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('PUT reemplaza el set completo de equivalencias', async () => {
+    const token = await login(ADMIN);
+    const crear = await request(app)
+      .post('/inventario')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        codigo: `EQUPD-${Date.now()}`,
+        nombre: 'Salsa con equivalencia',
+        unidadMedida: 'LITRO',
+        unidadesAlternativas: [{ unidad: 'GRAMO', cantidadUnidad: 1050, cantidadBase: 1 }],
+      });
+    expect(crear.status).toBe(201);
+    const id = crear.body.insumo.id;
+
+    // Reemplazar por una equivalencia distinta (en porciones por litro).
+    const upd = await request(app)
+      .patch(`/inventario/${id}`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ unidadesAlternativas: [{ unidad: 'PORCION', cantidadUnidad: 4, cantidadBase: 1 }] });
+    expect(upd.status).toBe(200);
+    expect(upd.body.insumo.unidadesAlternativas).toHaveLength(1);
+    expect(upd.body.insumo.unidadesAlternativas[0].unidad).toBe('PORCION');
+
+    await prisma.productoInventario.delete({ where: { id } });
+  });
+});
+
 describe('POST /inventario/ajustes', () => {
   it('ENTRADA_AJUSTE suma al stock', async () => {
     const token = await login(ADMIN);

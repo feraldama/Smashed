@@ -41,9 +41,13 @@ beforeAll(async () => {
 
   const empresa = await prisma.empresa.findFirstOrThrow();
   empresaId = empresa.id;
-  const sucursal = await prisma.sucursal.findFirstOrThrow({ where: { empresaId } });
+  const sucursal = await prisma.sucursal.findFirstOrThrow({
+    where: { empresaId, esDeposito: false },
+  });
   sucursalId = sucursal.id;
-  establecimiento = sucursal.establecimiento;
+  // Una sucursal que vende siempre tiene establecimiento (sólo los depósitos lo
+  // tienen en null, y los excluimos arriba).
+  establecimiento = sucursal.establecimiento!;
   const pe = await prisma.puntoExpedicion.findFirstOrThrow({ where: { sucursalId } });
   puntoExpedicionId = pe.id;
   puntoExpedicionCodigo = pe.codigo;
@@ -187,6 +191,52 @@ describe('procesarEmision (integración BD)', () => {
 
     const persistido = await prisma.comprobante.findUniqueOrThrow({ where: { id: comp.id } });
     expect(persistido.cdc).toHaveLength(44);
+  });
+
+  it('recuperación ENVIANDO: si SIFEN ya lo tiene, NO re-da de alta (sólo consulta)', async () => {
+    // Simula un crash entre "alta enviada a SIFEN" y "PENDIENTE persistido":
+    // el comprobante quedó en ENVIANDO. SIFEN sí tiene el documento.
+    const comp = await crearComprobante(EstadoSifen.ENVIANDO);
+    const { client, altaDocumento, consultarEstado } = mockClient(); // consulta → Aprobado
+
+    const r = await procesarEmision(comp.id, () => client);
+
+    expect(altaDocumento).not.toHaveBeenCalled(); // clave: NO duplica el documento
+    expect(consultarEstado).toHaveBeenCalled();
+    expect(r.estadoSifen).toBe(EstadoSifen.APROBADO);
+
+    const persistido = await prisma.comprobante.findUniqueOrThrow({ where: { id: comp.id } });
+    expect(persistido.estadoSifen).toBe(EstadoSifen.APROBADO);
+    expect(persistido.cdc).toHaveLength(44);
+  });
+
+  it('recuperación ENVIANDO: si SIFEN NO lo tiene, re-da de alta una sola vez', async () => {
+    // ENVIANDO pero el alta nunca llegó a SIFEN (la red se cortó antes).
+    // La sonda responde NO_ENCONTRADO (status error) y recién ahí se re-da de alta.
+    const comp = await crearComprobante(EstadoSifen.ENVIANDO);
+    // La sonda reintenta (maxIntentos:3): devolvemos NO_ENCONTRADO en sus 3
+    // intentos para confirmar que SIFEN realmente no lo tiene; recién el poll
+    // posterior a la re-alta devuelve Aprobado.
+    const noEncontrado = { status: 'error', message: 'documento no encontrado' };
+    const consultarEstado = vi
+      .fn()
+      .mockResolvedValueOnce(noEncontrado)
+      .mockResolvedValueOnce(noEncontrado)
+      .mockResolvedValueOnce(noEncontrado)
+      .mockResolvedValue({
+        status: 'success',
+        response: {
+          Estado: 'Aprobado',
+          DE: { CDC: '0'.repeat(44), EnlaceQR: 'https://qr.test', Retorno: { Protocolo: '1' } },
+        },
+      });
+    const altaDocumento = vi.fn().mockResolvedValue({ status: 'success', message: 'ok' });
+    const client = { altaDocumento, consultarEstado } as unknown as Code100Client;
+
+    const r = await procesarEmision(comp.id, () => client);
+
+    expect(altaDocumento).toHaveBeenCalledTimes(1); // re-alta exactamente una vez
+    expect(r.estadoSifen).toBe(EstadoSifen.APROBADO);
   });
 
   it('comprobante ya APROBADO se omite (no llama al proveedor)', async () => {

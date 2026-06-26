@@ -1,10 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
+// Fuente única del tipo (compartido con la API vía @smash/shared-types).
+import type { UnidadMedida } from '@smash/shared-types';
+
 import { api } from '@/lib/api';
 
-export type ModoStockReceta = 'CALCULADA' | 'LOTE';
+export type { UnidadMedida };
 
-export type UnidadMedida = 'UNIDAD' | 'GRAMO' | 'KILOGRAMO' | 'MILILITRO' | 'LITRO' | 'PORCION';
+export type ModoStockReceta = 'CALCULADA' | 'LOTE';
 
 export interface StockEnSucursal {
   sucursalId: string;

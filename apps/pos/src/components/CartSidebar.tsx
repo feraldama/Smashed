@@ -3,6 +3,7 @@
 import {
   ArrowLeft,
   Banknote,
+  Bike,
   CheckCircle2,
   CreditCard,
   Loader2,
@@ -285,6 +286,7 @@ const METODOS_PAGO: Array<{
   { codigo: 'EFECTIVO', label: 'Efectivo', icon: Banknote },
   { codigo: 'TARJETA_CREDITO', label: 'Tarjeta de Crédito', icon: CreditCard },
   { codigo: 'TARJETA_DEBITO', label: 'Tarjeta de Débito', icon: CreditCard },
+  { codigo: 'PEDIDOS_YA', label: 'PedidosYa', icon: Bike },
 ];
 
 interface CobroViewProps {
@@ -318,6 +320,7 @@ function CobroView({
   // Si el cajero ya eligió el tipo a mano, no lo pisamos al llegar la config.
   const [tipoDocTouched, setTipoDocTouched] = useState(false);
   const [referencia, setReferencia] = useState('');
+  const [numeroPager, setNumeroPager] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // La config puede llegar después del mount (query async): aplicamos el
@@ -328,8 +331,11 @@ function CobroView({
   }, [empresa, tipoDocTouched]);
 
   const trabajando = crearPedido.isPending || confirmarPedido.isPending || emitir.isPending;
+  // El nº de pager sólo es obligatorio para pedidos que esperan en el local
+  // (mostrador / retiro): delivery y mesa no usan pager.
+  const requierePager = meta.tipo === 'MOSTRADOR' || meta.tipo === 'RETIRO_LOCAL';
   const requiereReferencia = metodo
-    ? (['TARJETA_CREDITO', 'TARJETA_DEBITO'] as MetodoPagoCode[]).includes(metodo)
+    ? (['TARJETA_CREDITO', 'TARJETA_DEBITO', 'PEDIDOS_YA'] as MetodoPagoCode[]).includes(metodo)
     : false;
 
   const referenciaKb = useKeyboardInput({
@@ -339,9 +345,28 @@ function CobroView({
     maxLength: 40,
   });
 
+  const pagerKb = useKeyboardInput({
+    value: numeroPager,
+    onChange: (v) => setNumeroPager(v.replace(/\D/g, '').slice(0, 2)),
+    label: 'Nº de pager (1–50)',
+    maxLength: 2,
+  });
+
   async function handleEmitir() {
     if (!metodo) {
       setErrorMsg('Seleccioná un método de pago');
+      return;
+    }
+    let pagerNum: number | undefined;
+    if (numeroPager.trim()) {
+      const n = parseInt(numeroPager, 10);
+      if (!Number.isFinite(n) || n < 1 || n > 50) {
+        setErrorMsg('El número de pager debe estar entre 1 y 50');
+        return;
+      }
+      pagerNum = n;
+    } else if (requierePager) {
+      setErrorMsg('El número de pager es obligatorio');
       return;
     }
     setErrorMsg(null);
@@ -376,6 +401,7 @@ function CobroView({
             referencia: requiereReferencia && referencia ? referencia : undefined,
           },
         ],
+        numeroPager: pagerNum,
       });
 
       onComprobanteEmitido({
@@ -457,6 +483,25 @@ function CobroView({
               );
             })}
           </div>
+        </div>
+
+        {/* Nº de pager (obligatorio) */}
+        <div className="mt-4">
+          <label
+            htmlFor="pager"
+            className="mb-1 block text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+          >
+            Nº de pager {requierePager && <span className="text-destructive">*</span>}
+          </label>
+          <input
+            id="pager"
+            value={numeroPager}
+            onChange={(e) => setNumeroPager(e.target.value.replace(/\D/g, '').slice(0, 2))}
+            placeholder={requierePager ? 'Obligatorio — entre 1 y 50' : 'Opcional — entre 1 y 50'}
+            maxLength={2}
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+            {...pagerKb.inputProps}
+          />
         </div>
 
         {/* Referencia (para tarjeta/transferencia) */}

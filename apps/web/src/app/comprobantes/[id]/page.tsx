@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  FileMinus,
   Loader2,
   Printer,
   RefreshCw,
@@ -21,6 +22,7 @@ import { AnularComprobanteModal } from '@/components/AnularComprobanteModal';
 import { AuthGate } from '@/components/AuthGate';
 import { CancelarSifenModal } from '@/components/CancelarSifenModal';
 import { EstadoSifenBadge } from '@/components/EstadoSifenBadge';
+import { NotaCreditoModal } from '@/components/NotaCreditoModal';
 import { toast } from '@/components/Toast';
 import {
   type ComprobanteDetalle,
@@ -30,6 +32,9 @@ import {
   useEnviarSifen,
 } from '@/hooks/useComprobantes';
 import { ApiError } from '@/lib/api';
+import { useAuthStore } from '@/lib/auth-store';
+
+const ROLES_NOTA_CREDITO = ['GERENTE_SUCURSAL', 'ADMIN_EMPRESA', 'SUPER_ADMIN'];
 
 export default function ComprobanteDetallePage() {
   return (
@@ -71,6 +76,7 @@ function ComprobanteDetalleScreen() {
 function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
   const [showCancelar, setShowCancelar] = useState(false);
   const [showAnular, setShowAnular] = useState(false);
+  const [showNotaCredito, setShowNotaCredito] = useState(false);
 
   return (
     <div>
@@ -103,6 +109,7 @@ function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
           comp={comp}
           onPedirCancelacion={() => setShowCancelar(true)}
           onPedirAnulacion={() => setShowAnular(true)}
+          onPedirNotaCredito={() => setShowNotaCredito(true)}
         />
       </header>
 
@@ -291,6 +298,15 @@ function DetalleContent({ comp }: { comp: ComprobanteDetalle }) {
           onClose={() => setShowAnular(false)}
         />
       )}
+
+      {showNotaCredito && (
+        <NotaCreditoModal
+          comprobanteId={comp.id}
+          numeroDocumento={comp.numeroDocumento}
+          items={comp.items}
+          onClose={() => setShowNotaCredito(false)}
+        />
+      )}
     </div>
   );
 }
@@ -303,15 +319,19 @@ function SifenAcciones({
   comp,
   onPedirCancelacion,
   onPedirAnulacion,
+  onPedirNotaCredito,
 }: {
   comp: ComprobanteDetalle;
   onPedirCancelacion: () => void;
   onPedirAnulacion: () => void;
+  onPedirNotaCredito: () => void;
 }) {
   const enviar = useEnviarSifen();
   const consultar = useConsultarEstadoSifen(comp.id);
+  const rol = useAuthStore((s) => s.user?.rol);
 
   const isTicket = comp.tipoDocumento === 'TICKET';
+  const esNota = comp.tipoDocumento === 'NOTA_CREDITO' || comp.tipoDocumento === 'NOTA_DEBITO';
   const puedeEnviar =
     !isTicket &&
     comp.estado !== 'ANULADO' &&
@@ -321,6 +341,19 @@ function SifenAcciones({
   const puedeCancelar = comp.estadoSifen === 'APROBADO';
   const puedeConsultar = Boolean(comp.cdc);
   const puedeAnular = comp.estado !== 'ANULADO';
+  // Nota de crédito: solo gerente/admin, sobre un comprobante de venta emitido.
+  const puedeNotaCredito =
+    comp.estado === 'EMITIDO' && !esNota && Boolean(rol && ROLES_NOTA_CREDITO.includes(rol));
+
+  const botonNotaCredito = puedeNotaCredito ? (
+    <button
+      type="button"
+      onClick={onPedirNotaCredito}
+      className="flex items-center gap-1.5 rounded-md border border-orange-300 bg-orange-50 px-3 py-2 text-sm font-medium text-orange-700 hover:bg-orange-100 dark:border-orange-900/50 dark:bg-orange-950/30 dark:text-orange-200 dark:hover:bg-orange-950/50"
+    >
+      <FileMinus className="h-4 w-4" /> Nota de crédito
+    </button>
+  ) : null;
 
   async function handleEnviar() {
     try {
@@ -359,6 +392,7 @@ function SifenAcciones({
         >
           <Printer className="h-4 w-4" /> Imprimir
         </Link>
+        {botonNotaCredito}
         {puedeAnular && (
           <button
             type="button"
@@ -419,6 +453,7 @@ function SifenAcciones({
           Consultar estado
         </button>
       )}
+      {botonNotaCredito}
       {puedeCancelar && (
         <button
           type="button"

@@ -18,6 +18,7 @@ import {
   PackageCheck,
   Percent,
   ScanLine,
+  ScrollText,
   Settings,
   ShieldCheck,
   ShoppingCart,
@@ -35,6 +36,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
+import { ThemeToggle } from '@/components/ThemeToggle';
 import { toast } from '@/components/Toast';
 import { useSalirDeOperar } from '@/hooks/useAdminEmpresas';
 import { api, ApiError } from '@/lib/api';
@@ -83,6 +85,7 @@ const NAV: NavItem[] = [
   { href: '/clientes', label: 'Clientes', icon: Users, group: 'Ventas' },
   { href: '/comprobantes', label: 'Comprobantes', icon: FileText, group: 'Ventas' },
   { href: '/reportes', label: 'Reportes', icon: BarChart3, group: 'Análisis' },
+  { href: '/auditoria', label: 'Auditoría', icon: ScrollText, group: 'Análisis' },
   { href: '/salon', label: 'Salón / Mesas', icon: Armchair, group: 'Configuración' },
   { href: '/cajas', label: 'Cajas', icon: Wallet, group: 'Configuración' },
   { href: '/permisos', label: 'Permisos', icon: ShieldCheck, group: 'Configuración' },
@@ -222,6 +225,9 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="shrink-0 border-t p-3">
           <p className="truncate text-xs font-semibold">{user?.nombreCompleto}</p>
           <p className="truncate text-[11px] text-muted-foreground">{user?.email}</p>
+          <div className="mt-2">
+            <ThemeToggle variant="full" />
+          </div>
           <button
             type="button"
             onClick={() => {
@@ -245,16 +251,19 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
           <h1 className="text-lg font-bold">
             {nombreEmpresaHeader} <span className="text-primary">Admin</span>
           </h1>
-          <button
-            type="button"
-            onClick={() => {
-              void logout();
-            }}
-            className="rounded-md border border-input p-2"
-            aria-label="Logout"
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            <ThemeToggle variant="icon" />
+            <button
+              type="button"
+              onClick={() => {
+                void logout();
+              }}
+              className="rounded-md border border-input p-2"
+              aria-label="Logout"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          </div>
         </header>
 
         <div className="container mx-auto px-4 py-6">{children}</div>

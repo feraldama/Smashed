@@ -208,6 +208,57 @@ describe('POST /cajas/aperturas/:id/movimientos', () => {
     expect(det.body.apertura.totales.totalEsperadoEfectivo).toBe('130000');
     expect(det.body.apertura.movimientos.length).toBe(3); // APERTURA + INGRESO + EGRESO
   });
+
+  it('registra un audit log por cada movimiento de caja', async () => {
+    await resetCajas();
+    const token = await login(CAJERO_CENTRO);
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
+    const apertura = await request(app)
+      .post(`/cajas/${cajas.body.cajas[0].id}/abrir`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ montoInicial: 100000 });
+    const aperturaId = apertura.body.apertura.id as string;
+
+    const mov = await request(app)
+      .post(`/cajas/aperturas/${aperturaId}/movimientos`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'EGRESO', monto: 20000, concepto: 'Compra papel térmico' });
+    expect(mov.status).toBe(201);
+
+    const audit = await prisma.auditLog.findFirst({
+      where: {
+        accion: 'MOVIMIENTO_CAJA',
+        entidad: 'MovimientoCaja',
+        entidadId: mov.body.movimiento.id,
+      },
+    });
+    expect(audit).not.toBeNull();
+    expect(audit?.usuarioId).toBeTruthy();
+    expect((audit?.metadata as { tipo?: string; monto?: string } | null)?.tipo).toBe('EGRESO');
+    expect((audit?.metadata as { monto?: string } | null)?.monto).toBe('20000');
+  });
+
+  it('no permite registrar movimientos sobre una caja ya cerrada', async () => {
+    await resetCajas();
+    const token = await login(CAJERO_CENTRO);
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
+    const apertura = await request(app)
+      .post(`/cajas/${cajas.body.cajas[0].id}/abrir`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ montoInicial: 100000 });
+    const aperturaId = apertura.body.apertura.id as string;
+
+    await request(app)
+      .post(`/cajas/aperturas/${aperturaId}/cerrar`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ totalContadoEfectivo: 100000 });
+
+    const mov = await request(app)
+      .post(`/cajas/aperturas/${aperturaId}/movimientos`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ tipo: 'EGRESO', monto: 5000, concepto: 'tarde' });
+    expect(mov.status).toBe(409);
+  });
 });
 
 describe('POST /cajas/aperturas/:id/cerrar', () => {
@@ -428,6 +479,7 @@ describe('GET /cajas/cierres/:id — descuentos del turno', () => {
         pedidoId: pedido.body.pedido.id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: totalConDesc }],
+        numeroPager: 1,
       });
     expect(comp.status).toBe(201);
 

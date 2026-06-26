@@ -1,12 +1,11 @@
 'use client';
 
-import { Check, Hash, Loader2, Play, Truck, Users } from 'lucide-react';
+import { Check, Hash, Loader2, Play, ShoppingBag, Truck, Users } from 'lucide-react';
 
 import { Timer } from './Timer';
 
 import { useCambiarEstadoItem, type KdsPedido } from '@/hooks/useKds';
 import { cn } from '@/lib/utils';
-
 
 interface PedidoKdsCardProps {
   pedido: KdsPedido;
@@ -27,14 +26,34 @@ export function PedidoKdsCard({ pedido, filtroSector }: PedidoKdsCardProps) {
 
   const tipoIcon = pedido.tipo === 'MESA' ? Users : pedido.tipo.includes('DELIVERY') ? Truck : Hash;
   const TipoIcon = tipoIcon;
+  // Para llevar (delivery + retiro en local) se resalta en naranja para que
+  // cocina sepa de un vistazo que va en packaging, no se arma en plato.
+  const esParaLlevar = pedido.tipo.includes('DELIVERY') || pedido.tipo === 'RETIRO_LOCAL';
 
   return (
-    <div className="overflow-hidden rounded-lg border border-border bg-card shadow-md">
+    <div
+      className={cn(
+        'overflow-hidden rounded-lg border bg-card shadow-md',
+        esParaLlevar ? 'border-orange-500 ring-1 ring-orange-500/40' : 'border-border',
+      )}
+    >
       {/* Header */}
-      <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-2">
+      <div
+        className={cn(
+          'flex items-center justify-between border-b border-border px-3 py-2',
+          esParaLlevar ? 'bg-orange-500/20' : 'bg-muted/30',
+        )}
+      >
         <div className="flex items-center gap-2">
-          <TipoIcon className="h-4 w-4 text-muted-foreground" />
+          <TipoIcon
+            className={cn('h-4 w-4', esParaLlevar ? 'text-orange-400' : 'text-muted-foreground')}
+          />
           <span className="text-base font-bold text-foreground">#{pedido.numero}</span>
+          {esParaLlevar && (
+            <span className="inline-flex items-center gap-1 rounded-md bg-orange-500/30 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-orange-300">
+              <ShoppingBag className="h-3 w-3" /> Para llevar
+            </span>
+          )}
           {pedido.mesa && (
             <span className="rounded-md bg-primary/20 px-1.5 py-0.5 text-xs font-semibold text-primary">
               Mesa {pedido.mesa.numero}

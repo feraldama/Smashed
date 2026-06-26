@@ -3,13 +3,16 @@
 import {
   Banknote,
   BellRing,
+  Bike,
   CreditCard,
+  Gift,
   Loader2,
   Percent,
   Plus,
   Receipt,
   Trash2,
   User,
+  Utensils,
   Wallet,
   X,
 } from 'lucide-react';
@@ -30,7 +33,7 @@ import { type PedidoConDescuento, useRemoverDescuento } from '@/hooks/useDescuen
 import { useEmpresa } from '@/hooks/useEmpresa';
 import { useKeyboardInput } from '@/hooks/useKeyboardInput';
 import { useNumpadInput } from '@/hooks/useNumpadInput';
-import { usePedidoDetalle } from '@/hooks/usePedidos';
+import { useConfirmarPedido, usePedidoDetalle } from '@/hooks/usePedidos';
 import { ApiError } from '@/lib/api';
 import { cn, formatGs } from '@/lib/utils';
 
@@ -48,6 +51,14 @@ interface Props {
   clienteInicial: Cliente | null;
   onCancel: () => void;
   onSuccess: (comprobante: ComprobanteDetalle) => void;
+  /**
+   * Cortesía 100% (total = 0): en vez de facturar, el pedido se manda a cocina
+   * directo. Si el contenedor provee este callback, el modal ofrece el botón
+   * "Enviar a cocina" cuando el total queda en cero. Se invoca tras confirmar
+   * el pedido OK — el contenedor resetea su UI (limpiar carrito, etc.).
+   * Sin este callback el modal mantiene el flujo normal de cobro.
+   */
+  onCortesia?: () => void;
 }
 
 interface DescuentoAplicado {
@@ -81,6 +92,9 @@ const METODOS: {
     icon: CreditCard,
     requiereReferencia: true,
   },
+  // El dinero lo liquida la plataforma, no entra al efectivo de la caja. La
+  // referencia sirve para anotar el Nº de pedido de PedidosYa.
+  { value: 'PEDIDOS_YA', label: 'PedidosYa', icon: Bike, requiereReferencia: true },
 ];
 
 function parseGs(s: string): number {
@@ -117,6 +131,7 @@ export function CobrarModal({
   clienteInicial,
   onCancel,
   onSuccess,
+  onCortesia,
 }: Props) {
   const { data: empresa } = useEmpresa();
   const [tipoDoc, setTipoDoc] = useState<TipoDocumentoFiscal>(() =>
@@ -168,6 +183,12 @@ export function CobrarModal({
   const total = descuento ? descuento.totalConDescuento : totalSinDescuento;
   const [pagos, setPagos] = useState<Pago[]>([nuevoPago(totalInicial)]);
 
+  // El nº de pager sólo es obligatorio para pedidos que esperan en el local
+  // (mostrador / retiro): delivery y mesa no usan pager. Mientras el detalle no
+  // cargó, asumimos que se requiere (lo afina el backend igual).
+  const requierePager =
+    !pedidoDetalle || pedidoDetalle.tipo === 'MOSTRADOR' || pedidoDetalle.tipo === 'RETIRO_LOCAL';
+
   // Hidratar descuento + pagos cuando llega el pedido detalle si ya tiene descuento.
   useEffect(() => {
     if (!pedidoDetalle || descuento) return;
@@ -193,6 +214,13 @@ export function CobrarModal({
     maxLength: 2,
   });
   const emitir = useEmitirComprobante();
+  const confirmarPedido = useConfirmarPedido();
+
+  // Cortesía 100%: el pedido queda en cero y no hay nada que facturar. Si el
+  // contenedor habilitó el flujo (`onCortesia`), mostramos "Enviar a cocina"
+  // en lugar del cobro. Solo aplica con total exacto en cero (una cortesía de
+  // delivery con recargo, por ejemplo, sigue teniendo monto a cobrar).
+  const modoCortesia = total <= 0 && Boolean(onCortesia);
 
   const totalPagado = useMemo(() => pagos.reduce((acc, p) => acc + parseGs(p.monto), 0), [pagos]);
   const diferencia = totalPagado - total;
@@ -302,6 +330,9 @@ export function CobrarModal({
         return;
       }
       pagerPayload = n;
+    } else if (requierePager) {
+      toast.error('El número de pager es obligatorio');
+      return;
     }
 
     try {
@@ -316,6 +347,19 @@ export function CobrarModal({
       onSuccess(res.comprobante);
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : 'Error al emitir');
+    }
+  }
+
+  // Cortesía 100%: confirmar el pedido (descuenta stock + lo manda a cocina,
+  // igual que la emisión del comprobante por dentro) pero sin facturar. El
+  // pedido queda CONFIRMADO sin comprobante asociado.
+  async function handleEnviarCortesia() {
+    try {
+      await confirmarPedido.mutateAsync(pedidoId);
+      toast.success('Cortesía enviada a cocina');
+      onCortesia?.();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : 'Error al enviar a cocina');
     }
   }
 
@@ -399,79 +443,94 @@ export function CobrarModal({
             </button>
           )}
 
-          {/* Tipo de documento */}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Tipo de comprobante
-            </label>
-            <div className="grid grid-cols-2 gap-2">
-              <DocBtn
-                active={tipoDoc === 'TICKET'}
-                icon={<Receipt className="h-4 w-4" />}
-                label="Ticket"
-                hint="Sin RUC, no fiscal"
-                onClick={() => {
-                  setTipoDoc('TICKET');
-                  setTipoDocTouched(true);
-                }}
-              />
-              <DocBtn
-                active={tipoDoc === 'FACTURA'}
-                icon={<Receipt className="h-4 w-4" />}
-                label="Factura"
-                hint="Con RUC, fiscal"
-                onClick={() => {
-                  setTipoDoc('FACTURA');
-                  setTipoDocTouched(true);
-                }}
-              />
+          {/* Cortesía 100%: no se factura, va directo a cocina */}
+          {modoCortesia && (
+            <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/30">
+              <Gift className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <p className="text-amber-800 dark:text-amber-200">
+                <strong>Cortesía 100%.</strong> No se emite comprobante — el pedido va directo a
+                cocina.
+              </p>
             </div>
-          </div>
+          )}
+
+          {/* Tipo de documento */}
+          {!modoCortesia && (
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Tipo de comprobante
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <DocBtn
+                  active={tipoDoc === 'TICKET'}
+                  icon={<Receipt className="h-4 w-4" />}
+                  label="Ticket"
+                  hint="Sin RUC, no fiscal"
+                  onClick={() => {
+                    setTipoDoc('TICKET');
+                    setTipoDocTouched(true);
+                  }}
+                />
+                <DocBtn
+                  active={tipoDoc === 'FACTURA'}
+                  icon={<Receipt className="h-4 w-4" />}
+                  label="Factura"
+                  hint="Con RUC, fiscal"
+                  onClick={() => {
+                    setTipoDoc('FACTURA');
+                    setTipoDocTouched(true);
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Cliente */}
-          <div>
-            <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Cliente
-            </label>
-            <button
-              type="button"
-              onClick={() => setShowClienteSelector(true)}
-              className="flex w-full items-center gap-3 rounded-md border border-input p-3 text-left hover:border-primary/50"
-            >
-              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                <User className="h-4 w-4" />
-              </div>
-              <div className="flex-1">
-                {cliente ? (
-                  <>
-                    <p className="text-sm font-semibold">{cliente.razonSocial}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {cliente.ruc
-                        ? `RUC ${cliente.ruc}-${cliente.dv}`
-                        : cliente.documento
-                          ? `CI ${cliente.documento}`
-                          : cliente.esConsumidorFinal
-                            ? 'Consumidor final'
-                            : 'Sin documento'}
-                    </p>
-                  </>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Tocá para elegir un cliente</p>
-                )}
-              </div>
-              <span className="text-xs font-medium text-primary">Cambiar</span>
-            </button>
-            {tipoDoc === 'FACTURA' && cliente && !cliente.ruc && (
-              <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
-                ⚠ Cliente sin RUC. Se va a emitir FACTURA pero idealmente requiere RUC.
-              </p>
-            )}
-          </div>
+          {!modoCortesia && (
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Cliente
+              </label>
+              <button
+                type="button"
+                onClick={() => setShowClienteSelector(true)}
+                className="flex w-full items-center gap-3 rounded-md border border-input p-3 text-left hover:border-primary/50"
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                  <User className="h-4 w-4" />
+                </div>
+                <div className="flex-1">
+                  {cliente ? (
+                    <>
+                      <p className="text-sm font-semibold">{cliente.razonSocial}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {cliente.ruc
+                          ? `RUC ${cliente.ruc}-${cliente.dv}`
+                          : cliente.documento
+                            ? `CI ${cliente.documento}`
+                            : cliente.esConsumidorFinal
+                              ? 'Consumidor final'
+                              : 'Sin documento'}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Tocá para elegir un cliente</p>
+                  )}
+                </div>
+                <span className="text-xs font-medium text-primary">Cambiar</span>
+              </button>
+              {tipoDoc === 'FACTURA' && cliente && !cliente.ruc && (
+                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">
+                  ⚠ Cliente sin RUC. Se va a emitir FACTURA pero idealmente requiere RUC.
+                </p>
+              )}
+            </div>
+          )}
 
           {/* Nº de pager */}
           <div>
             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Nº de pager
+              Nº de pager {requierePager && <span className="text-destructive">*</span>}
             </label>
             <div className="relative">
               <BellRing className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -479,7 +538,9 @@ export function CobrarModal({
                 type="text"
                 value={numeroPager}
                 onChange={(e) => setNumeroPager(e.target.value.replace(/\D/g, '').slice(0, 2))}
-                placeholder="Opcional — entre 1 y 50"
+                placeholder={
+                  requierePager ? 'Obligatorio — entre 1 y 50' : 'Opcional — entre 1 y 50'
+                }
                 maxLength={2}
                 className="pl-9"
                 {...pagerNp.inputProps}
@@ -488,87 +549,110 @@ export function CobrarModal({
           </div>
 
           {/* Pagos */}
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Pagos ({pagos.length})
-              </label>
-              {pagos.length < 5 && (
-                <button
-                  type="button"
-                  onClick={agregarPago}
-                  className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-                >
-                  <Plus className="h-3 w-3" /> Agregar pago
-                </button>
-              )}
+          {!modoCortesia && (
+            <div>
+              <div className="mb-1.5 flex items-center justify-between">
+                <label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Pagos ({pagos.length})
+                </label>
+                {pagos.length < 5 && (
+                  <button
+                    type="button"
+                    onClick={agregarPago}
+                    className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+                  >
+                    <Plus className="h-3 w-3" /> Agregar pago
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {pagos.map((p, idx) => (
+                  <PagoRow
+                    key={p.id}
+                    pago={p}
+                    index={idx}
+                    total={total}
+                    pagado={totalPagado}
+                    canDelete={pagos.length > 1}
+                    onChange={(patch) => actualizarPago(p.id, patch)}
+                    onDelete={() => eliminarPago(p.id)}
+                  />
+                ))}
+              </div>
             </div>
-            <div className="space-y-2">
-              {pagos.map((p, idx) => (
-                <PagoRow
-                  key={p.id}
-                  pago={p}
-                  index={idx}
-                  total={total}
-                  pagado={totalPagado}
-                  canDelete={pagos.length > 1}
-                  onChange={(patch) => actualizarPago(p.id, patch)}
-                  onDelete={() => eliminarPago(p.id)}
-                />
-              ))}
-            </div>
-          </div>
+          )}
         </div>
 
         {/* Footer con totales y botón */}
         <div className="space-y-2 border-t bg-muted/20 px-4 py-3">
-          <div className="grid grid-cols-3 gap-2 text-sm">
-            <div>
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pagado</p>
-              <p className="font-bold tabular-nums">Gs. {totalPagado.toLocaleString('es-PY')}</p>
+          {!modoCortesia && (
+            <div className="grid grid-cols-3 gap-2 text-sm">
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pagado</p>
+                <p className="font-bold tabular-nums">Gs. {totalPagado.toLocaleString('es-PY')}</p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {insuficiente ? 'Falta' : vuelto > 0 ? 'Vuelto' : 'Diferencia'}
+                </p>
+                <p
+                  className={cn(
+                    'font-bold tabular-nums',
+                    insuficiente
+                      ? 'text-red-700 dark:text-red-300'
+                      : vuelto > 0
+                        ? 'text-amber-700 dark:text-amber-300'
+                        : 'text-emerald-700 dark:text-emerald-300',
+                  )}
+                >
+                  Gs.{' '}
+                  {Math.abs(insuficiente ? total - totalPagado : vuelto).toLocaleString('es-PY')}
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total</p>
+                <p className="font-bold tabular-nums">Gs. {total.toLocaleString('es-PY')}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                {insuficiente ? 'Falta' : vuelto > 0 ? 'Vuelto' : 'Diferencia'}
-              </p>
-              <p
-                className={cn(
-                  'font-bold tabular-nums',
-                  insuficiente
-                    ? 'text-red-700 dark:text-red-300'
-                    : vuelto > 0
-                      ? 'text-amber-700 dark:text-amber-300'
-                      : 'text-emerald-700 dark:text-emerald-300',
-                )}
-              >
-                Gs. {Math.abs(insuficiente ? total - totalPagado : vuelto).toLocaleString('es-PY')}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total</p>
-              <p className="font-bold tabular-nums">Gs. {total.toLocaleString('es-PY')}</p>
-            </div>
-          </div>
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <button
               type="button"
               onClick={onCancel}
-              disabled={emitir.isPending}
+              disabled={emitir.isPending || confirmarPedido.isPending}
               className="rounded-md border border-input px-3 py-1.5 text-sm hover:bg-accent"
             >
               Cancelar
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                void handleSubmit();
-              }}
-              disabled={emitir.isPending || !completo || (diferencia > 0 && !esEfectivoFinal)}
-              className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
-            >
-              {emitir.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-              Emitir {tipoDoc === 'TICKET' ? 'ticket' : 'factura'}
-            </button>
+            {modoCortesia ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleEnviarCortesia();
+                }}
+                disabled={confirmarPedido.isPending}
+                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+              >
+                {confirmarPedido.isPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Utensils className="h-3.5 w-3.5" />
+                )}
+                Enviar a cocina
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  void handleSubmit();
+                }}
+                disabled={emitir.isPending || !completo || (diferencia > 0 && !esEfectivoFinal)}
+                className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-1.5 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+              >
+                {emitir.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Emitir {tipoDoc === 'TICKET' ? 'ticket' : 'factura'}
+              </button>
+            )}
           </div>
         </div>
       </div>

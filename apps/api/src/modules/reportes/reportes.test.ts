@@ -98,8 +98,8 @@ async function emitirVentas(token: string) {
       pedidoId: p1.body.pedido.id,
       tipoDocumento: 'TICKET',
       pagos: [{ metodo: 'EFECTIVO', monto: 80000 }],
+      numeroPager: 1,
     });
-
   // Pedido 2: 1 Smash + 2 Cocas = 35000 + 20000 = 55000, pagado mixto
   const p2 = await request(app)
     .post('/pedidos')
@@ -124,6 +124,7 @@ async function emitirVentas(token: string) {
         { metodo: 'EFECTIVO', monto: 30000 },
         { metodo: 'TARJETA_CREDITO', monto: 25000 },
       ],
+      numeroPager: 1,
     });
 
   return { totalVentas: 80000 + 55000, totalEfectivo: 80000 + 30000, totalTarjeta: 25000 };
@@ -193,6 +194,103 @@ describe('GET /reportes/productos/top', () => {
     expect(res.body.productos[1].nombre).toBe('Coca-Cola 500ml');
     expect(Number(res.body.productos[1].ingreso_total)).toBe(3 * 10000);
   });
+
+  it('suma las unidades de los productos pedidos dentro de combos', async () => {
+    await reset();
+    const token = await login(CAJERO);
+
+    // Abrir caja para poder emitir comprobantes.
+    const cajas = await request(app).get('/cajas').set('Authorization', `Bearer ${token}`);
+    const caja1 = cajas.body.cajas.find((c: { nombre: string }) => c.nombre === 'Caja 1');
+    await request(app)
+      .post(`/cajas/${caja1.id}/abrir`)
+      .set('Authorization', `Bearer ${token}`)
+      .send({ montoInicial: 100000 });
+
+    // Combo Smash con todas las opciones default (Smash Clásica + Papas + Coca).
+    const comboId = await prisma.productoVenta
+      .findFirstOrThrow({ where: { codigo: 'COMBO-SMASH' } })
+      .then((p) => p.id);
+    const combo = await prisma.combo.findFirstOrThrow({
+      where: { productoVentaId: comboId },
+      include: { grupos: { include: { opciones: true } } },
+    });
+    const opciones = combo.grupos.map((g) => ({
+      comboGrupoId: g.id,
+      comboGrupoOpcionId: g.opciones.find((o) => o.esDefault)!.id,
+    }));
+    const grupoHam = combo.grupos.find((g) => g.nombre.toLowerCase().includes('hamburguesa'))!;
+    const punto = await prisma.modificadorOpcion.findFirstOrThrow({
+      where: { modificadorGrupo: { nombre: 'Punto de cocción' }, nombre: 'Medio' },
+    });
+    const smash = await prisma.productoVenta.findFirstOrThrow({ where: { codigo: 'HAM-001' } });
+
+    async function emitir(items: unknown[]) {
+      const ped = await request(app)
+        .post('/pedidos')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ tipo: 'MOSTRADOR', items });
+      if (ped.status !== 201) throw new Error(`pedido falló: ${JSON.stringify(ped.body)}`);
+      await request(app)
+        .post(`/pedidos/${ped.body.pedido.id}/confirmar`)
+        .set('Authorization', `Bearer ${token}`);
+      const comp = await request(app)
+        .post('/comprobantes')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          pedidoId: ped.body.pedido.id,
+          tipoDocumento: 'TICKET',
+          pagos: [{ metodo: 'EFECTIVO', monto: Number(ped.body.pedido.total) }],
+          numeroPager: 1,
+        });
+      if (comp.status !== 201) throw new Error(`comprobante falló: ${JSON.stringify(comp.body)}`);
+    }
+
+    // 1 Combo Smash (trae 1 Smash Clásica) + 1 Smash Clásica suelta.
+    await emitir([
+      {
+        productoVentaId: comboId,
+        cantidad: 1,
+        combosOpcion: opciones,
+        modificadores: [{ modificadorOpcionId: punto.id, comboGrupoId: grupoHam.id }],
+      },
+    ]);
+    await emitir([
+      {
+        productoVentaId: smash.id,
+        cantidad: 1,
+        modificadores: [{ modificadorOpcionId: punto.id }],
+      },
+    ]);
+
+    const tokenAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/productos/top?desde=2024-01-01&hasta=2030-01-01&limite=20')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(res.status).toBe(200);
+
+    type Fila = { producto_id: string | null; cantidad_total: string; ingreso_total: string };
+    const filas = res.body.productos as Fila[];
+
+    // El combo conserva su línea con ingreso completo (55.000).
+    const filaCombo = filas.find((f) => f.producto_id === comboId);
+    expect(filaCombo?.cantidad_total).toBe('1');
+    expect(Number(filaCombo?.ingreso_total)).toBe(55000);
+
+    // Smash Clásica: 1 suelta + 1 dentro del combo = 2 unidades. El ingreso es
+    // sólo el de la suelta (35.000); el aporte del combo suma unidades, no plata.
+    const filaSmash = filas.find((f) => f.producto_id === smash.id);
+    expect(filaSmash?.cantidad_total).toBe('2');
+    expect(Number(filaSmash?.ingreso_total)).toBe(35000);
+
+    // Coca y Papas, sólo pedidas dentro del combo → 1 unidad, ingreso 0.
+    const cocaId = await prisma.productoVenta
+      .findFirstOrThrow({ where: { codigo: 'BEB-001' } })
+      .then((p) => p.id);
+    const filaCoca = filas.find((f) => f.producto_id === cocaId);
+    expect(filaCoca?.cantidad_total).toBe('1');
+    expect(Number(filaCoca?.ingreso_total)).toBe(0);
+  });
 });
 
 describe('GET /reportes/productos/rentabilidad', () => {
@@ -234,6 +332,7 @@ describe('GET /reportes/productos/rentabilidad', () => {
         pedidoId: pedido.body.pedido.id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(pedido.body.pedido.total) }],
+        numeroPager: 1,
       });
     if (comprobante.status !== 201) {
       throw new Error(`Emitir comprobante falló: ${JSON.stringify(comprobante.body)}`);
@@ -453,6 +552,28 @@ describe('GET /reportes/ventas/descuentos', () => {
       .set('Authorization', `Bearer ${tAdmin}`)
       .send({ tipo: 'PORCENTAJE', valor: 1500, motivoDescuentoId: motivo.id });
 
+    // Confirmar + emitir el comprobante para que el reporte muestre su ticket.
+    await request(app)
+      .post(`/pedidos/${pedido.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${tAdmin}`);
+    const totalConDesc = Number(
+      (
+        await request(app)
+          .get(`/pedidos/${pedido.body.pedido.id}`)
+          .set('Authorization', `Bearer ${tAdmin}`)
+      ).body.pedido.total,
+    );
+    const comp = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        pedidoId: pedido.body.pedido.id,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: totalConDesc }],
+        numeroPager: 1,
+      });
+    expect(comp.status).toBe(201);
+
     const res = await request(app)
       .get('/reportes/ventas/descuentos?desde=2024-01-01&hasta=2030-01-01')
       .set('Authorization', `Bearer ${tAdmin}`);
@@ -463,6 +584,12 @@ describe('GET /reportes/ventas/descuentos', () => {
     expect(d).toHaveProperty('numero');
     expect(d.tipo).toBe('PORCENTAJE');
     expect(d.motivo).toBe('Test report descuento');
+    // Ticket vinculado al pedido con descuento.
+    expect(d.comprobante_id).toBe(comp.body.comprobante.id);
+    expect(d.comprobante_numero).toBe(comp.body.comprobante.numeroDocumento);
+    // No es descuento empleado → sin beneficiario, pero la propiedad existe.
+    expect(d).toHaveProperty('empleado_beneficiario');
+    expect(d.empleado_beneficiario).toBeNull();
 
     // Filtro por motivo
     const conFiltro = await request(app)
@@ -808,6 +935,21 @@ describe('GET /reportes/ventas/descuentos-por-empleado', () => {
       });
     expect(aplicar.status).toBe(200);
 
+    // Confirmar + emitir comprobante para poder linkear el ticket en el reporte.
+    await request(app)
+      .post(`/pedidos/${pedido.body.pedido.id}/confirmar`)
+      .set('Authorization', `Bearer ${tAdmin}`);
+    const comp = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${tAdmin}`)
+      .send({
+        pedidoId: pedido.body.pedido.id,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: 5000 }],
+        numeroPager: 1,
+      });
+    expect(comp.status).toBe(201);
+
     const res = await request(app)
       .get('/reportes/ventas/descuentos-por-empleado?desde=2024-01-01&hasta=2030-01-01')
       .set('Authorization', `Bearer ${tAdmin}`);
@@ -821,6 +963,14 @@ describe('GET /reportes/ventas/descuentos-por-empleado', () => {
     expect(fila.total_descontado).toBe('5000');
     expect(fila.base_original).toBe('10000');
     expect(fila.total_cobrado).toBe('5000');
+
+    // Drill-down: detalle con el ticket de cada descuento del empleado.
+    expect(Array.isArray(fila.tickets)).toBe(true);
+    expect(fila.tickets.length).toBe(1);
+    expect(fila.tickets[0].pedido_id).toBe(pedido.body.pedido.id);
+    expect(fila.tickets[0].monto).toBe('5000');
+    expect(fila.tickets[0].comprobante_id).toBe(comp.body.comprobante.id);
+    expect(fila.tickets[0].comprobante_numero).toBe(comp.body.comprobante.numeroDocumento);
 
     // Cleanup
     await prisma.usuario.update({
@@ -998,6 +1148,142 @@ describe('GET /reportes/ventas/promociones', () => {
     const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
     expect(lineas[0]).toContain('Promoción');
     expect(lineas[0]).toContain('Ahorro cliente');
+  });
+});
+
+describe('GET /reportes/combos', () => {
+  // Arma N pedidos del Combo Smash eligiendo opciones puntuales por grupo, para
+  // tener datos predecibles que validar. Devuelve nombres legibles de cada
+  // opción elegida para chequear el agrupado del reporte.
+  async function comboFixture() {
+    const comboId = await prisma.productoVenta
+      .findFirstOrThrow({ where: { codigo: 'COMBO-SMASH' } })
+      .then((p) => p.id);
+    const combo = await prisma.combo.findFirstOrThrow({
+      where: { productoVentaId: comboId },
+      include: {
+        grupos: {
+          orderBy: { orden: 'asc' },
+          include: { opciones: { include: { productoVenta: true } } },
+        },
+      },
+    });
+    const grupoHam = combo.grupos.find((g) => g.nombre.toLowerCase().includes('hamburguesa'))!;
+    const grupoBebida = combo.grupos.find((g) => g.nombre.toLowerCase().includes('bebida'))!;
+    return { comboId, combo, grupoHam, grupoBebida };
+  }
+
+  async function pedirCombo(
+    token: string,
+    comboId: string,
+    grupoHamId: string,
+    opciones: { comboGrupoId: string; comboGrupoOpcionId: string }[],
+    cantidad: number,
+  ) {
+    const r = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [
+          {
+            productoVentaId: comboId,
+            cantidad,
+            combosOpcion: opciones,
+            modificadores: [{ modificadorOpcionId: await puntoMedio(), comboGrupoId: grupoHamId }],
+          },
+        ],
+      });
+    if (r.status !== 201) throw new Error(`crear combo falló: ${JSON.stringify(r.body)}`);
+    return r;
+  }
+
+  // Cachea la opción "Medio" de Punto de cocción (precioExtra=0) para los combos
+  // con hamburguesa, igual que en pedido.test.ts.
+  let _punto: string | null = null;
+  async function puntoMedio() {
+    if (_punto) return _punto;
+    const op = await prisma.modificadorOpcion.findFirstOrThrow({
+      where: { modificadorGrupo: { nombre: 'Punto de cocción' }, nombre: 'Medio' },
+    });
+    _punto = op.id;
+    return op.id;
+  }
+
+  // 2 combos con Coca + 1 combo con la 2da bebida, todos con ham/acomp default.
+  async function sembrarCombos(token: string) {
+    const { comboId, combo, grupoHam, grupoBebida } = await comboFixture();
+    const defaults = combo.grupos.map((g) => ({
+      comboGrupoId: g.id,
+      comboGrupoOpcionId: g.opciones.find((o) => o.esDefault)!.id,
+    }));
+    const bebidaDefault = grupoBebida.opciones.find((o) => o.esDefault)!;
+    const bebidaAlt = grupoBebida.opciones.find((o) => !o.esDefault)!;
+
+    await pedirCombo(token, comboId, grupoHam.id, defaults, 2);
+    const alt = defaults.map((d) =>
+      d.comboGrupoId === grupoBebida.id ? { ...d, comboGrupoOpcionId: bebidaAlt.id } : d,
+    );
+    await pedirCombo(token, comboId, grupoHam.id, alt, 1);
+
+    return {
+      grupoBebidaNombre: grupoBebida.nombre,
+      bebidaDefaultNombre: bebidaDefault.productoVenta.nombre,
+      bebidaAltNombre: bebidaAlt.productoVenta.nombre,
+    };
+  }
+
+  it('opciones: agrega veces por grupo/opción contando unidades de combo', async () => {
+    await reset();
+    const tAdmin = await login(ADMIN);
+    const seed = await sembrarCombos(tAdmin);
+
+    const res = await request(app)
+      .get('/reportes/combos/opciones?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+
+    const filas = res.body.opciones as {
+      grupo_nombre: string;
+      opcion_nombre: string;
+      veces: string;
+    }[];
+    const bebidas = filas.filter((f) => f.grupo_nombre === seed.grupoBebidaNombre);
+    // Bebida default elegida en 2 combos, la alternativa en 1.
+    const def = bebidas.find((b) => b.opcion_nombre === seed.bebidaDefaultNombre);
+    const altF = bebidas.find((b) => b.opcion_nombre === seed.bebidaAltNombre);
+    expect(def?.veces).toBe('2');
+    expect(altF?.veces).toBe('1');
+  });
+
+  it('combinaciones: rankea la canasta exacta por combo', async () => {
+    await reset();
+    const tAdmin = await login(ADMIN);
+    const seed = await sembrarCombos(tAdmin);
+
+    const res = await request(app)
+      .get('/reportes/combos/combinaciones?desde=2024-01-01&hasta=2030-01-01')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+
+    const combos = res.body.combinaciones as { combinacion: string; veces: string }[];
+    // 2 combinaciones distintas: la default (×2) y la de bebida alternativa (×1).
+    expect(combos.length).toBe(2);
+    expect(combos[0]?.veces).toBe('2'); // ordenado por veces desc
+    expect(combos[0]?.combinacion).toContain(seed.bebidaDefaultNombre);
+    const alt = combos.find((c) => c.combinacion.includes(seed.bebidaAltNombre));
+    expect(alt?.veces).toBe('1');
+  });
+
+  it('exporta CSV con headers correctos', async () => {
+    const tAdmin = await login(ADMIN);
+    const res = await request(app)
+      .get('/reportes/combos/combinaciones?desde=2024-01-01&hasta=2030-01-01&formato=csv')
+      .set('Authorization', `Bearer ${tAdmin}`);
+    expect(res.status).toBe(200);
+    const lineas = res.text.replace(/^\uFEFF/, '').split('\n');
+    expect(lineas[0]).toContain('Combo');
+    expect(lineas[0]).toContain('Combinación');
   });
 });
 

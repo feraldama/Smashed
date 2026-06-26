@@ -5,6 +5,12 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { KeyboardProvider } from '@/components/Keyboard/KeyboardProvider';
 import { bootstrapAuth } from '@/lib/api';
+import { useApplyTheme } from '@/lib/theme-store';
+
+function ThemeApplier() {
+  useApplyTheme();
+  return null;
+}
 
 export function AppProviders({ children }: { children: ReactNode }) {
   const [queryClient] = useState(
@@ -26,6 +32,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <ThemeApplier />
       <KeyboardProvider>{children}</KeyboardProvider>
     </QueryClientProvider>
   );

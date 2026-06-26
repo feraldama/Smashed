@@ -121,6 +121,11 @@ function SucursalCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <h3 className="truncate font-bold">{sucursal.nombre}</h3>
+            {sucursal.esDeposito && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                Depósito
+              </span>
+            )}
             {!sucursal.activa && (
               <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase text-muted-foreground">
                 Inactiva
@@ -131,9 +136,13 @@ function SucursalCard({
             <span className="rounded-sm bg-muted px-1.5 py-0.5 font-mono font-semibold">
               {sucursal.codigo}
             </span>
-            <span>
-              Estab. <span className="font-mono">{sucursal.establecimiento}</span>
-            </span>
+            {sucursal.esDeposito ? (
+              <span>Solo inventario</span>
+            ) : (
+              <span>
+                Estab. <span className="font-mono">{sucursal.establecimiento}</span>
+              </span>
+            )}
           </div>
         </div>
         {sucursal.activa && (
@@ -159,14 +168,20 @@ function SucursalCard({
         )}
 
         <div className="mt-2 flex gap-3 border-t pt-2 text-[11px] text-muted-foreground">
-          <span>
-            <strong className="text-foreground">{sucursal._count.cajas}</strong> caja
-            {sucursal._count.cajas !== 1 ? 's' : ''}
-          </span>
-          <span>
-            <strong className="text-foreground">{sucursal._count.puntosExpedicion}</strong> pto.
-            exp.
-          </span>
+          {sucursal.esDeposito ? (
+            <span>Depósito de insumos · sin cajas ni facturación</span>
+          ) : (
+            <>
+              <span>
+                <strong className="text-foreground">{sucursal._count.cajas}</strong> caja
+                {sucursal._count.cajas !== 1 ? 's' : ''}
+              </span>
+              <span>
+                <strong className="text-foreground">{sucursal._count.puntosExpedicion}</strong> pto.
+                exp.
+              </span>
+            </>
+          )}
         </div>
       </div>
 

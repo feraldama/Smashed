@@ -21,6 +21,7 @@ const app = createApp();
 const CAJERO_CENTRO = { email: 'cajero1@smash.com.py', password: 'Smash123!' };
 const CAJERO_SLO = { email: 'cajero2@smash.com.py', password: 'Smash123!' };
 const COCINA_CENTRO = { email: 'cocina1@smash.com.py', password: 'Smash123!' };
+const GERENTE_CENTRO = { email: 'gerente.centro@smash.com.py', password: 'Smash123!' };
 
 async function loginAs(creds: { email: string; password: string }) {
   const res = await request(app).post('/auth/login').send(creds);
@@ -808,8 +809,8 @@ describe('POST /pedidos/:id/items — cuenta abierta de mesa', () => {
         pedidoId: id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(crear.body.pedido.total) }],
+        numeroPager: 1,
       });
-
     const agregar = await request(app)
       .post(`/pedidos/${id}/items`)
       .set('Authorization', `Bearer ${token}`)
@@ -1017,6 +1018,101 @@ describe('Tenant guard', () => {
       .get(`/pedidos/${crear.body.pedido.id}`)
       .set('Authorization', `Bearer ${tCajero2}`);
     expect([403, 404]).toContain(res.status);
+  });
+});
+
+describe('POST /pedidos/:id/items/:itemId/cancelar — cancelar un ítem', () => {
+  async function crearPedidoDosItems(token: string) {
+    const hamId = await getProductoIdPorCodigo('HAM-001');
+    const acoId = await getProductoIdPorCodigo('ACO-002');
+    const crear = await request(app)
+      .post('/pedidos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        tipo: 'MOSTRADOR',
+        items: [await itemHam(hamId, 1), { productoVentaId: acoId, cantidad: 1 }],
+      });
+    expect(crear.status).toBe(201);
+    const pedidoId = crear.body.pedido.id as string;
+    await request(app)
+      .post(`/pedidos/${pedidoId}/confirmar`)
+      .set('Authorization', `Bearer ${token}`);
+    const items = await prisma.itemPedido.findMany({
+      where: { pedidoId },
+      select: { id: true, subtotal: true, productoVenta: { select: { codigo: true } } },
+    });
+    return {
+      id: pedidoId,
+      total: crear.body.pedido.total as string,
+      items: items.map((i) => ({
+        id: i.id,
+        subtotal: i.subtotal.toString(),
+        productoVenta: { codigo: i.productoVenta.codigo },
+      })),
+    };
+  }
+
+  it('gerente cancela un ítem → reverso de stock + total recalculado, otro ítem sigue', async () => {
+    await reset();
+    const tCajero = await loginAs(CAJERO_CENTRO);
+    const pedido = await crearPedidoDosItems(tCajero);
+    const itemAco = pedido.items.find((i) => i.productoVenta.codigo === 'ACO-002')!;
+
+    const tGerente = await loginAs(GERENTE_CENTRO);
+    const res = await request(app)
+      .post(`/pedidos/${pedido.id}/items/${itemAco.id}/cancelar`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({ motivo: 'Cliente no quiere el acompañamiento' });
+    expect(res.status).toBe(200);
+    expect(res.body.pedidoCancelado).toBe(false);
+
+    // El ítem quedó CANCELADO y el otro sigue activo.
+    const item = await prisma.itemPedido.findUnique({ where: { id: itemAco.id } });
+    expect(item?.estado).toBe('CANCELADO');
+
+    // Reverso de stock (ENTRADA_AJUSTE) generado.
+    const reverso = await prisma.movimientoStock.count({
+      where: { pedidoId: pedido.id, tipo: 'ENTRADA_AJUSTE' },
+    });
+    expect(reverso).toBeGreaterThan(0);
+
+    // Total del pedido bajó exactamente el subtotal del ítem cancelado.
+    const actualizado = await prisma.pedido.findUnique({ where: { id: pedido.id } });
+    expect(actualizado?.estado).not.toBe('CANCELADO');
+    expect(actualizado?.total.toString()).toBe(
+      (BigInt(pedido.total) - BigInt(itemAco.subtotal)).toString(),
+    );
+  });
+
+  it('cancelar todos los ítems → el pedido queda CANCELADO', async () => {
+    await reset();
+    const tCajero = await loginAs(CAJERO_CENTRO);
+    const pedido = await crearPedidoDosItems(tCajero);
+    const tGerente = await loginAs(GERENTE_CENTRO);
+
+    for (const it of pedido.items) {
+      const res = await request(app)
+        .post(`/pedidos/${pedido.id}/items/${it.id}/cancelar`)
+        .set('Authorization', `Bearer ${tGerente}`)
+        .send({ motivo: 'Pedido completo anulado' });
+      expect(res.status).toBe(200);
+    }
+
+    const actualizado = await prisma.pedido.findUnique({ where: { id: pedido.id } });
+    expect(actualizado?.estado).toBe('CANCELADO');
+    expect(actualizado?.canceladoEn).not.toBeNull();
+  });
+
+  it('cajero NO puede cancelar un ítem → 403', async () => {
+    await reset();
+    const tCajero = await loginAs(CAJERO_CENTRO);
+    const pedido = await crearPedidoDosItems(tCajero);
+
+    const res = await request(app)
+      .post(`/pedidos/${pedido.id}/items/${pedido.items[0]!.id}/cancelar`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ motivo: 'intento sin permiso' });
+    expect(res.status).toBe(403);
   });
 });
 

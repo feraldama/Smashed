@@ -10,6 +10,7 @@ import { AuthGate } from '@/components/AuthGate';
 import { toast } from '@/components/Toast';
 import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { useInsumos } from '@/hooks/useInventario';
+import { useSucursales } from '@/hooks/useSucursales';
 import { useCrearTransferencia } from '@/hooks/useTransferencias';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
@@ -33,8 +34,25 @@ export default function NuevaTransferenciaPage() {
 
 function NuevaTransferenciaScreen() {
   const router = useRouter();
-  const sucursales = useAuthStore((s) => s.user?.sucursales ?? []);
+  const sucursalesAsignadas = useAuthStore((s) => s.user?.sucursales ?? []);
   const sucursalActivaId = useAuthStore((s) => s.user?.sucursalActivaId ?? null);
+  const { data: todasSucursales = [] } = useSucursales();
+
+  // Opciones: las sucursales asignadas al usuario + todos los depósitos activos
+  // de la empresa (recurso central: cualquiera puede transferir desde/hacia un
+  // depósito). El backend valida el permiso real.
+  const sucursales = useMemo(() => {
+    const map = new Map<string, { id: string; nombre: string; codigo: string }>();
+    for (const s of sucursalesAsignadas) {
+      map.set(s.id, { id: s.id, nombre: s.nombre, codigo: s.codigo });
+    }
+    for (const d of todasSucursales) {
+      if (d.esDeposito && d.activa && !map.has(d.id)) {
+        map.set(d.id, { id: d.id, nombre: d.nombre, codigo: d.codigo });
+      }
+    }
+    return [...map.values()];
+  }, [sucursalesAsignadas, todasSucursales]);
 
   const { data: insumosData } = useInsumos();
   const insumos = insumosData?.insumos ?? [];

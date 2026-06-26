@@ -12,6 +12,7 @@ const app = createApp();
 
 const CAJERO_CENTRO = { email: 'cajero1@smash.com.py', password: 'Smash123!' };
 const CAJERO_SLO = { email: 'cajero2@smash.com.py', password: 'Smash123!' };
+const GERENTE_CENTRO = { email: 'gerente.centro@smash.com.py', password: 'Smash123!' };
 
 async function login(creds: { email: string; password: string }) {
   const res = await request(app).post('/auth/login').send(creds);
@@ -97,6 +98,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(201);
     expect(res.body.comprobante.estado).toBe('EMITIDO');
@@ -131,6 +133,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId: r1.pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(r1.total) }],
+        numeroPager: 1,
       });
     expect(c1.body.comprobante.numero).toBe(1);
 
@@ -160,6 +163,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId: crear2.body.pedido.id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(crear2.body.pedido.total) }],
+        numeroPager: 1,
       });
     expect(c2.status).toBe(201);
     expect(c2.body.comprobante.numero).toBe(2);
@@ -182,6 +186,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(201);
 
@@ -209,6 +214,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     // 20.000 (ACO-002) con IVA 10% → IVA = 1818, base = 18182
     expect(res.body.comprobante.totalIva10).toBe('1818');
@@ -233,6 +239,7 @@ describe('POST /comprobantes — emitir', () => {
           { metodo: 'EFECTIVO', monto: Math.floor(t / 2) },
           { metodo: 'TARJETA_CREDITO', monto: t - Math.floor(t / 2), referencia: 'auth-12345' },
         ],
+        numeroPager: 1,
       });
     expect(res.status).toBe(201);
     expect(res.body.comprobante.pagos.length).toBe(2);
@@ -254,6 +261,24 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: 1000 }],
+        numeroPager: 1,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('VALIDATION_ERROR');
+  });
+
+  it('pedido MOSTRADOR sin nº de pager → 400', async () => {
+    await reset();
+    const token = await login(CAJERO_CENTRO);
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, 'ACO-002');
+
+    const res = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
       });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('VALIDATION_ERROR');
@@ -290,6 +315,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId: crear.body.pedido.id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: 35000 }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/caja abierta/);
@@ -307,8 +333,8 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     const res = await request(app)
       .post('/comprobantes')
       .set('Authorization', `Bearer ${token}`)
@@ -316,6 +342,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(409);
     expect(res.body.error.message).toMatch(/comprobante/i);
@@ -359,6 +386,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId: crear.body.pedido.id,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(crear.body.pedido.total) }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(201);
 
@@ -391,6 +419,7 @@ describe('POST /comprobantes — emitir', () => {
         clienteId: cliente.id,
         tipoDocumento: 'FACTURA',
         pagos: [{ metodo: 'TARJETA_DEBITO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.status).toBe(201);
     expect(res.body.comprobante.receptorRazonSocial).toBe('CONSULTORA DEL ESTE S.A.');
@@ -410,6 +439,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.body.comprobante.receptorRazonSocial).toBe('SIN NOMBRE');
     expect(res.body.comprobante.receptorRuc).toBeNull();
@@ -426,6 +456,7 @@ describe('POST /comprobantes — emitir', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     expect(res.body.comprobante.cdc).toBeNull();
     expect(res.body.comprobante.estadoSifen).toBe('NO_ENVIADO');
@@ -447,8 +478,8 @@ describe('POST /comprobantes/:id/anular', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     const res = await request(app)
       .post(`/comprobantes/${c.body.comprobante.id}/anular`)
       .set('Authorization', `Bearer ${token}`)
@@ -481,8 +512,8 @@ describe('POST /comprobantes/:id/anular', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     const res = await request(app)
       .post(`/comprobantes/${c.body.comprobante.id}/anular`)
       .set('Authorization', `Bearer ${token}`)
@@ -513,8 +544,8 @@ describe('POST /comprobantes/:id/anular', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     // Marcar entregado al cliente
     await request(app)
       .post(`/pedidos/${pedidoId}/entregar`)
@@ -542,6 +573,7 @@ describe('POST /comprobantes/:id/anular', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
     await request(app)
       .post(`/comprobantes/${c.body.comprobante.id}/anular`)
@@ -565,8 +597,8 @@ describe('POST /comprobantes/:id/anular', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     const t2 = await login(CAJERO_SLO);
     const res = await request(app)
       .post(`/comprobantes/${c.body.comprobante.id}/anular`)
@@ -588,12 +620,166 @@ describe('GET /comprobantes', () => {
         pedidoId,
         tipoDocumento: 'TICKET',
         pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
       });
-
     const res = await request(app).get('/comprobantes').set('Authorization', `Bearer ${token}`);
     expect(res.status).toBe(200);
     expect(res.body.comprobantes.length).toBe(1);
     expect(res.body.comprobantes[0].numeroDocumento).toMatch(/^001-001-\d{7}$/);
+  });
+});
+
+describe('POST /comprobantes/:id/nota-credito — nota de crédito parcial', () => {
+  /**
+   * El fixture no trae timbrado de NOTA_CREDITO. Lo creamos para el punto de
+   * expedición del comprobante recién emitido (upsert idempotente; reset() ya
+   * deja `ultimoNumeroUsado` en 0 para todos los timbrados).
+   */
+  async function asegurarTimbradoNC(comprobanteId: string) {
+    const comp = await prisma.comprobante.findUniqueOrThrow({
+      where: { id: comprobanteId },
+      select: { puntoExpedicionId: true },
+    });
+    await prisma.timbrado.upsert({
+      where: { id: 'test-nc-timbrado' },
+      update: {
+        puntoExpedicionId: comp.puntoExpedicionId,
+        activo: true,
+        ultimoNumeroUsado: 0,
+      },
+      create: {
+        id: 'test-nc-timbrado',
+        puntoExpedicionId: comp.puntoExpedicionId,
+        numero: '90000000',
+        fechaInicioVigencia: new Date('2026-01-01'),
+        fechaFinVigencia: new Date('2026-12-31'),
+        rangoDesde: 1,
+        rangoHasta: 9999999,
+        ultimoNumeroUsado: 0,
+        tipoDocumento: 'NOTA_CREDITO',
+        activo: true,
+      },
+    });
+  }
+
+  async function emitirTicket(token: string, codigo: string, cantidad: number) {
+    const { pedidoId, total } = await abrirCajaYHacerPedido(token, codigo, cantidad);
+    const c = await request(app)
+      .post('/comprobantes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        pedidoId,
+        tipoDocumento: 'TICKET',
+        pagos: [{ metodo: 'EFECTIVO', monto: Number(total) }],
+        numeroPager: 1,
+      });
+    expect(c.status).toBe(201);
+    return c.body.comprobante as { id: string; total: string };
+  }
+
+  it('gerente emite NC por un ítem → NOTA_CREDITO con total prorrateado', async () => {
+    await reset();
+    const tCajero = await login(CAJERO_CENTRO);
+    const comp = await emitirTicket(tCajero, 'ACO-002', 2);
+    await asegurarTimbradoNC(comp.id);
+    const item = await prisma.itemComprobante.findFirstOrThrow({
+      where: { comprobanteId: comp.id },
+    });
+
+    const tGerente = await login(GERENTE_CENTRO);
+    const res = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({
+        items: [{ itemComprobanteId: item.id, cantidad: 1 }],
+        motivo: 'Cliente devolvió una unidad',
+        registrarEgresoCaja: false,
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.comprobante.tipoDocumento).toBe('NOTA_CREDITO');
+    // Total = subtotal de la línea prorrateado por 1 de 2 unidades.
+    const esperado = (BigInt(item.subtotal) * 1n) / 2n;
+    expect(res.body.comprobante.total).toBe(esperado.toString());
+
+    const nc = await prisma.comprobante.findUniqueOrThrow({
+      where: { id: res.body.comprobante.id },
+    });
+    expect(nc.comprobanteOriginalId).toBe(comp.id);
+  });
+
+  it('no permite acreditar más cantidad que la facturada → 400', async () => {
+    await reset();
+    const tCajero = await login(CAJERO_CENTRO);
+    const comp = await emitirTicket(tCajero, 'ACO-002', 1);
+    await asegurarTimbradoNC(comp.id);
+    const item = await prisma.itemComprobante.findFirstOrThrow({
+      where: { comprobanteId: comp.id },
+    });
+
+    const tGerente = await login(GERENTE_CENTRO);
+    const res = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({ items: [{ itemComprobanteId: item.id, cantidad: 2 }], motivo: 'demasiado' });
+    expect(res.status).toBe(400);
+  });
+
+  it('acumulado de NCs no puede superar lo vendido → 409 en la tercera', async () => {
+    await reset();
+    const tCajero = await login(CAJERO_CENTRO);
+    const comp = await emitirTicket(tCajero, 'ACO-002', 2);
+    await asegurarTimbradoNC(comp.id);
+    const item = await prisma.itemComprobante.findFirstOrThrow({
+      where: { comprobanteId: comp.id },
+    });
+    const tGerente = await login(GERENTE_CENTRO);
+
+    const nc1 = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({
+        items: [{ itemComprobanteId: item.id, cantidad: 1 }],
+        motivo: 'primera unidad',
+        registrarEgresoCaja: false,
+      });
+    expect(nc1.status).toBe(201);
+
+    const nc2 = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({
+        items: [{ itemComprobanteId: item.id, cantidad: 1 }],
+        motivo: 'segunda unidad',
+        registrarEgresoCaja: false,
+      });
+    expect(nc2.status).toBe(201);
+
+    // Ya se acreditaron las 2 vendidas → la tercera debe rebotar.
+    const nc3 = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tGerente}`)
+      .send({
+        items: [{ itemComprobanteId: item.id, cantidad: 1 }],
+        motivo: 'tercera (sobra)',
+        registrarEgresoCaja: false,
+      });
+    expect(nc3.status).toBe(409);
+  });
+
+  it('cajero NO puede emitir NC → 403', async () => {
+    await reset();
+    const tCajero = await login(CAJERO_CENTRO);
+    const comp = await emitirTicket(tCajero, 'ACO-002', 1);
+    await asegurarTimbradoNC(comp.id);
+    const item = await prisma.itemComprobante.findFirstOrThrow({
+      where: { comprobanteId: comp.id },
+    });
+
+    const res = await request(app)
+      .post(`/comprobantes/${comp.id}/nota-credito`)
+      .set('Authorization', `Bearer ${tCajero}`)
+      .send({ items: [{ itemComprobanteId: item.id, cantidad: 1 }], motivo: 'sin permiso' });
+    expect(res.status).toBe(403);
   });
 });
 

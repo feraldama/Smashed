@@ -1,6 +1,6 @@
 'use client';
 
-import { Loader2, Save, X } from 'lucide-react';
+import { Loader2, Plus, Save, Trash2, X } from 'lucide-react';
 import { useState } from 'react';
 
 import { toast } from '@/components/Toast';
@@ -13,17 +13,20 @@ import {
 } from '@/hooks/useInventario';
 import { useProveedores } from '@/hooks/useProveedores';
 import { ApiError } from '@/lib/api';
+import { etiquetaUnidad, familiaUnidad, TODAS_UNIDADES } from '@/lib/unidades';
 import { formatGs } from '@/lib/utils';
 
-const UNIDADES: UnidadMedida[] = [
-  'UNIDAD',
-  'KILOGRAMO',
-  'GRAMO',
-  'LITRO',
-  'MILILITRO',
-  'PORCION',
-  'DOCENA',
-];
+const UNIDADES = TODAS_UNIDADES;
+
+interface FilaEquivalencia {
+  localId: string;
+  unidad: UnidadMedida;
+  cantidadUnidad: string;
+  cantidadBase: string;
+}
+
+let equivSeq = 0;
+const nuevoLocalId = () => `eq_${++equivSeq}`;
 
 interface InsumoFormModalProps {
   insumo?: Insumo;
@@ -43,7 +46,38 @@ export function InsumoFormModal({ insumo, onClose }: InsumoFormModalProps) {
   const [costoUnitario, setCostoUnitario] = useState(insumo ? String(insumo.costoUnitario) : '');
   const [categoria, setCategoria] = useState(insumo?.categoria ?? '');
   const [proveedorId, setProveedorId] = useState(insumo?.proveedor?.id ?? '');
+  const [equivalencias, setEquivalencias] = useState<FilaEquivalencia[]>(
+    () =>
+      insumo?.unidadesAlternativas?.map((u) => ({
+        localId: nuevoLocalId(),
+        unidad: u.unidad,
+        cantidadUnidad: String(u.cantidadUnidad),
+        cantidadBase: String(u.cantidadBase),
+      })) ?? [],
+  );
   const [error, setError] = useState<string | null>(null);
+
+  // Una equivalencia solo tiene sentido cruzando familias distintas a la de la
+  // unidad de stock (dentro de la misma familia la conversión ya es automática).
+  const familiaBase = familiaUnidad(unidadMedida);
+  const unidadesParaEquiv = UNIDADES.filter((u) => familiaUnidad(u) !== familiaBase);
+
+  function agregarEquivalencia() {
+    const primera = unidadesParaEquiv[0];
+    if (!primera) return;
+    setEquivalencias((prev) => [
+      ...prev,
+      { localId: nuevoLocalId(), unidad: primera, cantidadUnidad: '', cantidadBase: '1' },
+    ]);
+  }
+
+  function actualizarEquivalencia(localId: string, patch: Partial<FilaEquivalencia>) {
+    setEquivalencias((prev) => prev.map((f) => (f.localId === localId ? { ...f, ...patch } : f)));
+  }
+
+  function eliminarEquivalencia(localId: string) {
+    setEquivalencias((prev) => prev.filter((f) => f.localId !== localId));
+  }
 
   const costoNum = Number.parseInt(costoUnitario.replace(/[^\d]/g, ''), 10);
   const costoValido = !Number.isNaN(costoNum) && costoUnitario;
@@ -54,6 +88,27 @@ export function InsumoFormModal({ insumo, onClose }: InsumoFormModalProps) {
     if (!nombre.trim()) return setError('Nombre requerido');
     const costoFinal = Number.isNaN(costoNum) ? 0 : costoNum;
 
+    // Validar + mapear equivalencias.
+    const familiasUsadas = new Set<string>();
+    const unidadesAlternativas: Array<{
+      unidad: UnidadMedida;
+      cantidadUnidad: number;
+      cantidadBase: number;
+    }> = [];
+    for (const [i, f] of equivalencias.entries()) {
+      const cu = Number.parseFloat(f.cantidadUnidad);
+      const cb = Number.parseFloat(f.cantidadBase);
+      if (!(cu > 0) || !(cb > 0)) {
+        return setError(`Equivalencia ${i + 1}: las cantidades deben ser mayores a 0`);
+      }
+      const fam = familiaUnidad(f.unidad);
+      if (familiasUsadas.has(fam)) {
+        return setError(`Equivalencia ${i + 1}: ya hay otra equivalencia de ${fam.toLowerCase()}`);
+      }
+      familiasUsadas.add(fam);
+      unidadesAlternativas.push({ unidad: f.unidad, cantidadUnidad: cu, cantidadBase: cb });
+    }
+
     const body = {
       codigo: codigo.trim() || undefined,
       codigoBarras: codigoBarras.trim() || undefined,
@@ -62,6 +117,7 @@ export function InsumoFormModal({ insumo, onClose }: InsumoFormModalProps) {
       costoUnitario: costoFinal,
       categoria: categoria.trim() || undefined,
       proveedorId: proveedorId || undefined,
+      unidadesAlternativas,
     };
 
     try {
@@ -177,6 +233,89 @@ export function InsumoFormModal({ insumo, onClose }: InsumoFormModalProps) {
               placeholder="7790895001234"
             />
           </Field>
+
+          {/* Equivalencias de unidad — para usar el insumo en recetas con otra
+              familia de unidad (ej: stock en unidades, receta en gramos). */}
+          <div className="rounded-md border border-dashed border-input p-3">
+            <div className="mb-1 flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Equivalencias de unidad
+              </p>
+              <button
+                type="button"
+                onClick={agregarEquivalencia}
+                disabled={unidadesParaEquiv.length === 0}
+                className="flex items-center gap-1 rounded-md border border-input px-2 py-1 text-xs hover:bg-accent disabled:opacity-50"
+              >
+                <Plus className="h-3.5 w-3.5" /> Agregar
+              </button>
+            </div>
+            <p className="mb-2 text-[11px] text-muted-foreground">
+              Solo si querés usar este insumo en recetas con otro tipo de unidad que{' '}
+              <span className="font-medium">{etiquetaUnidad(unidadMedida).toLowerCase()}</span>. Ej:
+              stock en unidades pero la receta lo mide en gramos → “150 gramo = 1 unidad”.
+            </p>
+
+            {equivalencias.length === 0 ? (
+              <p className="text-xs text-muted-foreground">Sin equivalencias.</p>
+            ) : (
+              <div className="space-y-2">
+                {equivalencias.map((f) => (
+                  <div key={f.localId} className="flex flex-wrap items-center gap-2 text-xs">
+                    <Input
+                      type="number"
+                      step="0.000001"
+                      min="0"
+                      value={f.cantidadUnidad}
+                      onChange={(e) =>
+                        actualizarEquivalencia(f.localId, { cantidadUnidad: e.target.value })
+                      }
+                      className="w-20 px-2 py-1 text-right font-mono"
+                      placeholder="150"
+                    />
+                    <Select
+                      value={f.unidad}
+                      onChange={(e) =>
+                        actualizarEquivalencia(f.localId, {
+                          unidad: e.target.value as UnidadMedida,
+                        })
+                      }
+                      className="w-32 px-2 py-1"
+                    >
+                      {unidadesParaEquiv.map((u) => (
+                        <option key={u} value={u}>
+                          {etiquetaUnidad(u)}
+                        </option>
+                      ))}
+                    </Select>
+                    <span className="text-muted-foreground">=</span>
+                    <Input
+                      type="number"
+                      step="0.000001"
+                      min="0"
+                      value={f.cantidadBase}
+                      onChange={(e) =>
+                        actualizarEquivalencia(f.localId, { cantidadBase: e.target.value })
+                      }
+                      className="w-20 px-2 py-1 text-right font-mono"
+                      placeholder="1"
+                    />
+                    <span className="text-muted-foreground">
+                      {etiquetaUnidad(unidadMedida).toLowerCase()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => eliminarEquivalencia(f.localId)}
+                      className="ml-auto rounded-md p-1 text-destructive hover:bg-destructive/10"
+                      aria-label="Eliminar equivalencia"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {error && (
             <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-xs text-destructive">

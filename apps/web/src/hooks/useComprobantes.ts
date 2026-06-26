@@ -8,6 +8,7 @@ export type EstadoComprobante = 'EMITIDO' | 'ANULADO';
 
 export type EstadoSifen =
   | 'NO_ENVIADO'
+  | 'ENVIANDO'
   | 'PENDIENTE'
   | 'APROBADO'
   | 'RECHAZADO'
@@ -164,7 +165,7 @@ export function useComprobante(id: string | null) {
 
 // ───── Emisión ─────
 
-export type MetodoPago = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO';
+export type MetodoPago = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO' | 'PEDIDOS_YA';
 
 export interface EmitirComprobanteInput {
   pedidoId: string;
@@ -209,6 +210,34 @@ export function useAnularComprobante(id: string | null) {
       void qc.invalidateQueries({ queryKey: ['admin', 'caja', 'mi-apertura'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'pedido'] });
       void qc.invalidateQueries({ queryKey: ['admin', 'pedidos'] });
+    },
+  });
+}
+
+// ───── Nota de crédito parcial ─────
+
+export interface EmitirNotaCreditoInput {
+  items: { itemComprobanteId: string; cantidad: number }[];
+  motivo: string;
+  /** Si hay caja abierta, registra el egreso de la devolución (default true). */
+  registrarEgresoCaja?: boolean;
+}
+
+/**
+ * Emite una nota de crédito por items puntuales de un comprobante ya emitido
+ * (devolución / cancelación post-factura). Solo gerente/admin.
+ */
+export function useEmitirNotaCredito(comprobanteOriginalId: string | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EmitirNotaCreditoInput) =>
+      api<{ comprobante: ComprobanteDetalle }>(
+        `/comprobantes/${comprobanteOriginalId ?? ''}/nota-credito`,
+        { method: 'POST', body: input },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'comprobantes'] });
+      void qc.invalidateQueries({ queryKey: ['admin', 'caja', 'mi-apertura'] });
     },
   });
 }

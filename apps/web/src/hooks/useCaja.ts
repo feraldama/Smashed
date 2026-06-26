@@ -15,7 +15,7 @@ export type TipoMovimiento =
   | 'RETIRO_PARCIAL'
   | 'CIERRE';
 
-export type MetodoPago = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO';
+export type MetodoPago = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO' | 'PEDIDOS_YA';
 
 export interface CajaListItem {
   id: string;

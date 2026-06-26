@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import adminEmpresaRoutes from './modules/admin/empresa/admin-empresa.routes.js';
+import auditoriaRoutes from './modules/auditoria/auditoria.routes.js';
 import authRoutes from './modules/auth/auth.routes.js';
 import cajaRoutes from './modules/caja/caja.routes.js';
 import catalogoRoutes from './modules/catalogo/catalogo.routes.js';
@@ -48,6 +49,7 @@ router.use('/subpreparaciones', subpreparacionRoutes);
 router.use('/pedidos', pedidoRoutes);
 router.use('/comprobantes', comprobanteRoutes);
 router.use('/reportes', reportesRoutes);
+router.use('/auditoria', auditoriaRoutes);
 router.use('/descuentos', descuentoRoutes);
 router.use('/promociones', promocionRoutes);
 router.use('/', cajaRoutes); // expone /cajas y /cajas/aperturas/...

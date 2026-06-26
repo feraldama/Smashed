@@ -108,13 +108,14 @@ export function useConfirmarPedido() {
   });
 }
 
-export type MetodoPagoCode = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO';
+export type MetodoPagoCode = 'EFECTIVO' | 'TARJETA_CREDITO' | 'TARJETA_DEBITO' | 'PEDIDOS_YA';
 
 interface EmitirComprobanteInput {
   pedidoId: string;
   clienteId?: string;
   tipoDocumento?: 'TICKET' | 'FACTURA';
   pagos: Array<{ metodo: MetodoPagoCode; monto: number; referencia?: string }>;
+  numeroPager?: number;
 }
 
 interface ComprobanteResp {

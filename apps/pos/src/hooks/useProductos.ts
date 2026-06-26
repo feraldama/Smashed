@@ -24,6 +24,8 @@ export interface ProductoListado {
   esCombo: boolean;
   esVendible: boolean;
   tienePrecioSucursal: boolean;
+  /** Algún insumo del producto está en 0/negativo en la sucursal (aviso, no bloquea). */
+  sinStock: boolean;
   categoria: { id: string; nombre: string; categoriaBase: string } | null;
 }
 

@@ -266,6 +266,9 @@ export interface DescuentoAplicado {
   motivo: string | null;
   aplicado_por: string | null;
   autorizado_por: string | null;
+  empleado_beneficiario: string | null;
+  comprobante_id: string | null;
+  comprobante_numero: string | null;
   tipo_pedido: string;
   sucursal_nombre: string;
 }
@@ -294,6 +297,15 @@ export function useDescuentosListado(rango: RangoFechas, filtros: FiltrosDescuen
 
 // ───── Descuentos por empleado (agregado) ─────
 
+export interface DescuentoEmpleadoTicket {
+  pedido_id: string;
+  numero: number;
+  fecha: string;
+  monto: string;
+  comprobante_id: string | null;
+  comprobante_numero: string | null;
+}
+
 export interface DescuentoPorEmpleado {
   empleado_id: string;
   empleado_nombre: string;
@@ -302,6 +314,7 @@ export interface DescuentoPorEmpleado {
   total_descontado: string;
   base_original: string;
   total_cobrado: string;
+  tickets: DescuentoEmpleadoTicket[];
 }
 
 export function useDescuentosPorEmpleado(rango: RangoFechas) {
@@ -336,6 +349,46 @@ export function usePromocionesAhorro(rango: RangoFechas) {
         `/reportes/ventas/promociones?${buildQuery(rango)}`,
       ),
     select: (d) => d.promociones,
+  });
+}
+
+// ───── Combos — qué se pide dentro de cada combo ─────
+
+export interface ComboOpcionFila {
+  combo_id: string;
+  combo_nombre: string;
+  grupo_id: string;
+  grupo_nombre: string;
+  grupo_orden: number;
+  opcion_producto_id: string;
+  opcion_nombre: string;
+  veces: string;
+}
+
+export function useCombosOpciones(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'combos-opciones', rango],
+    queryFn: () =>
+      api<{ opciones: ComboOpcionFila[] }>(`/reportes/combos/opciones?${buildQuery(rango)}`),
+    select: (d) => d.opciones,
+  });
+}
+
+export interface ComboCombinacionFila {
+  combo_id: string;
+  combo_nombre: string;
+  combinacion: string;
+  veces: string;
+}
+
+export function useCombosCombinaciones(rango: RangoFechas) {
+  return useQuery({
+    queryKey: ['reportes', 'combos-combinaciones', rango],
+    queryFn: () =>
+      api<{ combinaciones: ComboCombinacionFila[] }>(
+        `/reportes/combos/combinaciones?${buildQuery(rango)}`,
+      ),
+    select: (d) => d.combinaciones,
   });
 }
 

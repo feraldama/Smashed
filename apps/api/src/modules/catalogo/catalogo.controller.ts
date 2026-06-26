@@ -10,6 +10,7 @@ import {
   listarRecetasQuery,
   obtenerProductoParams,
   productoIdParam,
+  reordenarProductosInput,
   setComboInput,
   setPrecioSucursalInput,
   setRecetaInput,
@@ -121,6 +122,13 @@ export async function actualizarProducto(req: Request, res: Response) {
   const input = actualizarProductoInput.parse(req.body);
   const producto = await service.actualizarProducto(empresaId, id, input);
   res.json({ producto });
+}
+
+export async function reordenarProductos(req: Request, res: Response) {
+  const { empresaId } = requireEmpresa(req);
+  const { ids } = reordenarProductosInput.parse(req.body);
+  await service.reordenarProductos(empresaId, ids);
+  res.status(204).send();
 }
 
 export async function eliminarProducto(req: Request, res: Response) {

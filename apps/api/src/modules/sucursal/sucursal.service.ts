@@ -20,6 +20,7 @@ const SELECT_SUCURSAL = {
   nombre: true,
   codigo: true,
   establecimiento: true,
+  esDeposito: true,
   direccion: true,
   ciudad: true,
   departamento: true,
@@ -86,12 +87,15 @@ export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
   if (!user.empresaId) throw Errors.forbidden('Sin empresa asignada');
   const empresaId = user.empresaId;
 
-  // Código y establecimiento únicos por empresa
+  // Un depósito no factura, así que no tiene establecimiento SIFEN.
+  const establecimiento = input.esDeposito ? null : (input.establecimiento ?? null);
+
+  // Código siempre único; establecimiento sólo se valida si la sucursal vende.
   const ya = await prisma.sucursal.findFirst({
     where: {
       empresaId,
       deletedAt: null,
-      OR: [{ codigo: input.codigo }, { establecimiento: input.establecimiento }],
+      OR: [{ codigo: input.codigo }, ...(establecimiento ? [{ establecimiento }] : [])],
     },
     select: { codigo: true, establecimiento: true },
   });
@@ -99,7 +103,7 @@ export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
     throw Errors.conflict(
       ya.codigo === input.codigo
         ? `Ya existe una sucursal con código ${input.codigo}`
-        : `Ya existe una sucursal con establecimiento ${input.establecimiento}`,
+        : `Ya existe una sucursal con establecimiento ${establecimiento}`,
     );
   }
 
@@ -109,7 +113,8 @@ export async function crearSucursal(user: UserCtx, input: CrearSucursalInput) {
         empresaId,
         nombre: input.nombre,
         codigo: input.codigo,
-        establecimiento: input.establecimiento,
+        establecimiento,
+        esDeposito: input.esDeposito,
         direccion: input.direccion,
         ciudad: input.ciudad,
         departamento: input.departamento,
@@ -192,7 +197,13 @@ export async function actualizarSucursal(
   const data: Prisma.SucursalUpdateInput = {};
   if (input.nombre !== undefined) data.nombre = input.nombre;
   if (input.codigo !== undefined) data.codigo = input.codigo;
-  if (input.establecimiento !== undefined) data.establecimiento = input.establecimiento;
+  if (input.esDeposito !== undefined) data.esDeposito = input.esDeposito;
+  // Un depósito no factura: al marcarlo como tal, limpiamos su establecimiento.
+  if (input.esDeposito === true) {
+    data.establecimiento = null;
+  } else if (input.establecimiento !== undefined) {
+    data.establecimiento = input.establecimiento;
+  }
   if (input.direccion !== undefined) data.direccion = input.direccion;
   if (input.ciudad !== undefined) data.ciudad = input.ciudad;
   if (input.departamento !== undefined) data.departamento = input.departamento;

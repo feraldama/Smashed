@@ -137,6 +137,36 @@ describe('POST /compras', () => {
     expect(movs[0]?.tipo).toBe('ENTRADA_COMPRA');
   });
 
+  it('compras concurrentes en la misma sucursal no duplican ni pierden número', async () => {
+    await cleanupCompras();
+    const token = await login(ADMIN);
+    const { sucursal, proveedor, insumo1 } = await getRefs();
+
+    const N = 5;
+    const resultados = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        request(app)
+          .post('/compras')
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            proveedorId: proveedor.id,
+            sucursalId: sucursal.id,
+            numeroFactura: `TEST_CONC-${i}`,
+            items: [{ productoInventarioId: insumo1.id, cantidad: 1, costoUnitario: 1000 }],
+          }),
+      ),
+    );
+
+    expect(resultados.every((r) => r.status === 201)).toBe(true);
+    const numeros = resultados.map((r) => r.body.compra.numero as number);
+    // Todos distintos (sin duplicados por la race) y correlativos sin huecos.
+    expect(new Set(numeros).size).toBe(N);
+    const ordenados = [...numeros].sort((a, b) => a - b);
+    for (let i = 1; i < ordenados.length; i++) {
+      expect(ordenados[i]).toBe((ordenados[i - 1] ?? 0) + 1);
+    }
+  });
+
   it('rechaza items vacíos → 400', async () => {
     const token = await login(ADMIN);
     const { sucursal, proveedor } = await getRefs();

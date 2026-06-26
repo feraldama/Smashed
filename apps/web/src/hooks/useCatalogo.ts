@@ -31,6 +31,8 @@ export interface ProductoListado {
   esCombo: boolean;
   esVendible: boolean;
   esPreparacion: boolean;
+  /** Orden manual dentro de la categoría en el menú del POS (asc). */
+  ordenMenu: number;
   tienePrecioSucursal: boolean;
   /** True si el producto tiene al menos un grupo de modificadores vinculado.
    * El POS lo usa para decidir si abrir el modal de configuración antes de añadir al carrito. */
@@ -308,6 +310,21 @@ export function useEliminarProducto() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api<void>(`/catalogo/productos/${id}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
+    },
+  });
+}
+
+/**
+ * Reordena productos en lote. `ids` viaja en el orden deseado; el backend les
+ * asigna ordenMenu 0..n-1. Se usa desde la pantalla de drag & drop.
+ */
+export function useReordenarProductos() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: string[]) =>
+      api<void>('/catalogo/productos/reordenar', { method: 'PATCH', body: { ids } }),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ['admin', 'productos'] });
     },

@@ -119,10 +119,12 @@ async function assertSucursalEnEmpresa(user: UserCtx, sucursalId: string) {
   if (!user.empresaId) throw Errors.unauthorized();
   const suc = await prisma.sucursal.findUnique({
     where: { id: sucursalId },
-    select: { empresaId: true },
+    select: { empresaId: true, esDeposito: true },
   });
   if (!suc) throw Errors.notFound('Sucursal no encontrada');
   if (!user.isSuperAdmin && suc.empresaId !== user.empresaId) throw Errors.tenantMismatch();
+  // Un depósito no vende: no se le pueden abrir cajas.
+  if (suc.esDeposito) throw Errors.conflict('Un depósito no maneja cajas — sólo inventario');
 }
 
 async function getCajaOwned(user: UserCtx, id: string) {
@@ -333,36 +335,67 @@ export async function registrarMovimiento(
   user: UserCtx,
   aperturaId: string,
   input: MovimientoCajaInput,
+  meta: { ip?: string },
 ) {
-  const apertura = await prisma.aperturaCaja.findUnique({
-    where: { id: aperturaId },
-    include: {
-      cierre: true,
-      caja: { select: { sucursalId: true, sucursal: { select: { empresaId: true } } } },
-    },
-  });
-  if (!apertura) throw Errors.notFound('Apertura no encontrada');
-  if (apertura.cierre) throw Errors.conflict('La caja ya está cerrada');
+  // Un movimiento de caja (ingreso/egreso/retiro de efectivo) afecta directo el
+  // total esperado del cierre Z. Va en transacción + audit log igual que
+  // abrir/cerrar: es justo el evento que un auditor necesita rastrear (quién
+  // sacó/metió plata, cuánto y por qué). El re-chequeo del cierre DENTRO de la
+  // tx cierra la carrera de registrar un movimiento sobre una caja que se acaba
+  // de cerrar en paralelo.
+  return prisma.$transaction(async (tx) => {
+    const apertura = await tx.aperturaCaja.findUnique({
+      where: { id: aperturaId },
+      include: {
+        cierre: { select: { id: true } },
+        caja: { select: { sucursalId: true, sucursal: { select: { empresaId: true } } } },
+      },
+    });
+    if (!apertura) throw Errors.notFound('Apertura no encontrada');
+    if (apertura.cierre) throw Errors.conflict('La caja ya está cerrada');
 
-  // Tenant guard
-  if (!user.isSuperAdmin && apertura.caja.sucursal.empresaId !== user.empresaId) {
-    throw Errors.tenantMismatch();
-  }
-  // Solo dueño o roles de gestión
-  const esDueno = apertura.usuarioId === user.userId;
-  if (!esDueno && !ROLES_GESTION_CAJA.includes(user.rol)) {
-    throw Errors.forbidden('Solo el cajero o un gerente pueden registrar movimientos en esta caja');
-  }
+    // Tenant guard
+    if (!user.isSuperAdmin && apertura.caja.sucursal.empresaId !== user.empresaId) {
+      throw Errors.tenantMismatch();
+    }
+    // Solo dueño o roles de gestión
+    const esDueno = apertura.usuarioId === user.userId;
+    if (!esDueno && !ROLES_GESTION_CAJA.includes(user.rol)) {
+      throw Errors.forbidden(
+        'Solo el cajero o un gerente pueden registrar movimientos en esta caja',
+      );
+    }
 
-  return prisma.movimientoCaja.create({
-    data: {
-      cajaId: apertura.cajaId,
-      aperturaCajaId: apertura.id,
-      tipo: input.tipo,
-      metodoPago: MetodoPago.EFECTIVO,
-      monto: input.monto,
-      concepto: input.concepto,
-    },
+    const movimiento = await tx.movimientoCaja.create({
+      data: {
+        cajaId: apertura.cajaId,
+        aperturaCajaId: apertura.id,
+        tipo: input.tipo,
+        metodoPago: MetodoPago.EFECTIVO,
+        monto: input.monto,
+        concepto: input.concepto,
+      },
+    });
+
+    await tx.auditLog.create({
+      data: {
+        empresaId: user.empresaId,
+        sucursalId: apertura.caja.sucursalId,
+        usuarioId: user.userId,
+        accion: 'MOVIMIENTO_CAJA',
+        entidad: 'MovimientoCaja',
+        entidadId: movimiento.id,
+        ip: meta.ip,
+        metadata: {
+          aperturaId: apertura.id,
+          tipo: input.tipo,
+          monto: input.monto.toString(),
+          concepto: input.concepto,
+        },
+      },
+    });
+
+    return movimiento;
   });
 }
 

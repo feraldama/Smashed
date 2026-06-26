@@ -134,9 +134,9 @@ function Dashboard() {
                   <span
                     className={cn(
                       'flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold',
-                      i === 0 && 'bg-yellow-500/20 text-yellow-700',
-                      i === 1 && 'bg-gray-400/20 text-gray-700',
-                      i === 2 && 'bg-amber-700/20 text-amber-800',
+                      i === 0 && 'bg-yellow-500/20 text-yellow-700 dark:text-yellow-400',
+                      i === 1 && 'bg-gray-400/20 text-gray-700 dark:text-gray-300',
+                      i === 2 && 'bg-amber-700/20 text-amber-800 dark:text-amber-400',
                       i > 2 && 'bg-muted text-muted-foreground',
                     )}
                   >
@@ -173,7 +173,7 @@ function Dashboard() {
             </Link>
           </div>
           {data.alertasStock.length === 0 ? (
-            <p className="rounded-md bg-emerald-500/10 p-3 text-center text-sm text-emerald-700">
+            <p className="rounded-md bg-emerald-500/10 p-3 text-center text-sm text-emerald-700 dark:text-emerald-400">
               ✓ Todos los insumos tienen stock saludable
             </p>
           ) : (
@@ -189,7 +189,7 @@ function Dashboard() {
                     <p className="text-[10px] text-muted-foreground">{a.sucursal_nombre}</p>
                   </div>
                   <span className="font-mono text-xs">
-                    <span className="font-bold text-amber-700">
+                    <span className="font-bold text-amber-700 dark:text-amber-400">
                       {Number(a.stock_actual).toFixed(2)}
                     </span>
                     <span className="text-muted-foreground">
@@ -255,7 +255,7 @@ function BigKpi({
         className={cn(
           'mt-1 truncate font-mono text-2xl font-bold',
           highlight && 'text-primary',
-          intent === 'warning' && 'text-amber-700',
+          intent === 'warning' && 'text-amber-700 dark:text-amber-400',
         )}
       >
         {value}

@@ -12,6 +12,7 @@ import { Field, Input, Select, Textarea } from '@/components/ui/Input';
 import { useCrearCompra } from '@/hooks/useCompras';
 import { useInsumos } from '@/hooks/useInventario';
 import { useProveedores } from '@/hooks/useProveedores';
+import { useSucursales } from '@/hooks/useSucursales';
 import { ApiError } from '@/lib/api';
 import { useAuthStore } from '@/lib/auth-store';
 import { formatGs, localId } from '@/lib/utils';
@@ -35,8 +36,24 @@ export default function NuevaCompraPage() {
 
 function NuevaCompraScreen() {
   const router = useRouter();
-  const sucursales = useAuthStore((s) => s.user?.sucursales ?? []);
+  const sucursalesAsignadas = useAuthStore((s) => s.user?.sucursales ?? []);
   const sucursalActivaId = useAuthStore((s) => s.user?.sucursalActivaId ?? null);
+  const { data: todasSucursales = [] } = useSucursales();
+
+  // Opciones: sucursales asignadas + depósitos activos de la empresa. La compra
+  // de insumos puede ingresar directo a un depósito central.
+  const sucursales = useMemo(() => {
+    const map = new Map<string, { id: string; nombre: string; codigo: string }>();
+    for (const s of sucursalesAsignadas) {
+      map.set(s.id, { id: s.id, nombre: s.nombre, codigo: s.codigo });
+    }
+    for (const d of todasSucursales) {
+      if (d.esDeposito && d.activa && !map.has(d.id)) {
+        map.set(d.id, { id: d.id, nombre: d.nombre, codigo: d.codigo });
+      }
+    }
+    return [...map.values()];
+  }, [sucursalesAsignadas, todasSucursales]);
 
   const { data: proveedores = [] } = useProveedores();
   const { data: insumosData } = useInsumos();

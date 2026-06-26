@@ -1,5 +1,6 @@
 import { EstadoTransferencia, Prisma, TipoMovimientoStock } from '@prisma/client';
 
+import { siguienteNumeroSucursal } from '../../lib/correlativos.js';
 import { Errors } from '../../lib/errors.js';
 import { prisma } from '../../lib/prisma.js';
 
@@ -119,11 +120,11 @@ export async function crear(user: UserCtx, input: CrearTransferenciaInput) {
   const [origen, destino] = await Promise.all([
     prisma.sucursal.findFirst({
       where: { id: input.sucursalOrigenId, empresaId, deletedAt: null },
-      select: { id: true, activa: true, nombre: true },
+      select: { id: true, activa: true, nombre: true, esDeposito: true },
     }),
     prisma.sucursal.findFirst({
       where: { id: input.sucursalDestinoId, empresaId, deletedAt: null },
-      select: { id: true, activa: true, nombre: true },
+      select: { id: true, activa: true, nombre: true, esDeposito: true },
     }),
   ]);
   if (!origen) throw Errors.notFound('Sucursal de origen no encontrada');
@@ -131,10 +132,17 @@ export async function crear(user: UserCtx, input: CrearTransferenciaInput) {
   if (!origen.activa) throw Errors.conflict(`Sucursal origen "${origen.nombre}" inactiva`);
   if (!destino.activa) throw Errors.conflict(`Sucursal destino "${destino.nombre}" inactiva`);
 
-  // Si user no es admin y tiene sucursalActiva, sólo puede transferir desde la suya
-  if (!user.isSuperAdmin && user.sucursalActivaId && user.sucursalActivaId !== origen.id) {
+  // Si user no es admin y tiene sucursalActiva, sólo puede transferir desde la
+  // suya. Excepción: un depósito es un recurso central compartido — cualquier
+  // usuario autorizado puede sacar stock de él hacia su sucursal.
+  if (
+    !user.isSuperAdmin &&
+    user.sucursalActivaId &&
+    user.sucursalActivaId !== origen.id &&
+    !origen.esDeposito
+  ) {
     throw Errors.forbidden(
-      'Sólo podés generar transferencias desde tu sucursal activa. Cambiá de sucursal o pedí a un admin.',
+      'Sólo podés generar transferencias desde tu sucursal activa o desde un depósito. Cambiá de sucursal o pedí a un admin.',
     );
   }
 
@@ -161,13 +169,8 @@ export async function crear(user: UserCtx, input: CrearTransferenciaInput) {
   }));
 
   return prisma.$transaction(async (tx) => {
-    // Numero correlativo por sucursal origen
-    const ultima = await tx.transferenciaStock.findFirst({
-      where: { sucursalOrigenId: input.sucursalOrigenId },
-      orderBy: { numero: 'desc' },
-      select: { numero: true },
-    });
-    const numero = (ultima?.numero ?? 0) + 1;
+    // Número correlativo por sucursal de ORIGEN, race-free (ver lib/correlativos.ts).
+    const numero = await siguienteNumeroSucursal(tx, input.sucursalOrigenId, 'transferencia');
 
     const ahora = new Date();
     const transferencia = await tx.transferenciaStock.create({

@@ -104,7 +104,17 @@ function ComprobantesScreen() {
 
         {/* Resumen por estado SIFEN */}
         <div className="ml-auto flex flex-wrap items-center gap-2">
-          {(['APROBADO', 'PENDIENTE', 'RECHAZADO', 'NO_ENVIADO', 'CANCELADO'] as const).map((e) => {
+          {(
+            [
+              'APROBADO',
+              'PENDIENTE',
+              'ENVIANDO',
+              'RECHAZADO',
+              'NO_ENVIADO',
+              'CANCELADO',
+              'INUTILIZADO',
+            ] as const
+          ).map((e) => {
             const n = totales.porEstado[e] ?? 0;
             if (n === 0) return null;
             return (

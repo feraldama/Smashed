@@ -12,7 +12,8 @@ export interface SesionUsuario {
     id: string;
     nombre: string;
     codigo: string;
-    establecimiento: string;
+    establecimiento: string | null;
+    esDeposito: boolean;
     esPrincipal: boolean;
   }[];
   sucursalActivaId: string | null;

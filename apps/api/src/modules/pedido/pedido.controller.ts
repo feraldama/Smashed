@@ -65,6 +65,14 @@ export async function cancelar(req: Request, res: Response) {
   res.json({ pedido });
 }
 
+export async function cancelarItem(req: Request, res: Response) {
+  const ctx = ctxOrThrow(req);
+  const { id, itemId } = itemIdParam.parse(req.params);
+  const input = cancelarPedidoInput.parse(req.body);
+  const result = await service.cancelarItemPedido(ctx, id, itemId, input.motivo);
+  res.json(result);
+}
+
 export async function cambiarEstadoItem(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
   const { id, itemId } = itemIdParam.parse(req.params);

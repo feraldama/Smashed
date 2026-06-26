@@ -4,6 +4,8 @@
  * Acá viven los tipos que el frontend necesita sin tener que depender de Prisma.
  */
 
+export * from './unidad-medida.js';
+
 export type Money = number; // guaraníes enteros
 
 export type SucursalId = string; // UUID
@@ -152,6 +154,7 @@ export const MENU_DEFINICIONES: readonly MenuDefinicion[] = [
 
   // Análisis
   { path: '/reportes', label: 'Reportes', grupo: 'Análisis', defaults: ROLES_ADMIN },
+  { path: '/auditoria', label: 'Auditoría', grupo: 'Análisis', defaults: ROLES_GESTION },
 
   // Configuración
   { path: '/salon', label: 'Salón / Mesas', grupo: 'Configuración', defaults: ROLES_ADMIN },

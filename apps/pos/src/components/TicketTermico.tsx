@@ -14,6 +14,7 @@ const METODO_LABELS: Record<string, string> = {
   EFECTIVO: 'Efectivo',
   TARJETA_CREDITO: 'Tarjeta de Crédito',
   TARJETA_DEBITO: 'Tarjeta de Débito',
+  PEDIDOS_YA: 'PedidosYa',
 };
 
 const TIPO_LABELS: Record<string, string> = {

@@ -2,6 +2,7 @@ import {
   EstadoComprobante,
   EstadoMesa,
   EstadoPedido,
+  MetodoPago,
   Prisma,
   type Rol,
   TasaIva,
@@ -25,6 +26,7 @@ import {
 import type {
   AnularComprobanteInput,
   EmitirComprobanteInput,
+  EmitirNotaCreditoInput,
   ListarComprobantesQuery,
 } from './comprobante.schemas.js';
 
@@ -114,6 +116,14 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
   if (pedido.sucursalId !== user.sucursalActivaId) throw Errors.sucursalNoAutorizada();
   if (pedido.estado === EstadoPedido.CANCELADO) {
     throw Errors.conflict('No se puede facturar un pedido cancelado');
+  }
+  // El nº de pager es obligatorio sólo para pedidos que esperan en el local y
+  // se llaman cuando están listos (mostrador / retiro). Delivery y mesa no lo
+  // usan, así que ahí queda opcional.
+  const requierePager =
+    pedido.tipo === TipoPedido.MOSTRADOR || pedido.tipo === TipoPedido.RETIRO_LOCAL;
+  if (requierePager && input.numeroPager === undefined) {
+    throw Errors.validation({ numeroPager: 'El número de pager es obligatorio' });
   }
   // ¿Ya hay un comprobante EMITIDO para este pedido? Bloquea doble emisión sin
   // depender del estado del pedido (que ahora puede ser CONFIRMADO post-cobro).
@@ -209,6 +219,12 @@ export async function emitirComprobante(user: UserCtx, input: EmitirComprobanteI
         }
 
         const establecimiento = timbrado.puntoExpedicion.sucursal.establecimiento;
+        // Una sucursal sin establecimiento es un depósito (no factura). No
+        // debería llegar acá nunca —no tiene cajas ni puntos de expedición—,
+        // pero el campo es nullable a nivel schema, así que lo cerramos.
+        if (!establecimiento) {
+          throw Errors.conflict('La sucursal no tiene establecimiento SIFEN: no puede facturar');
+        }
         const ptoExpCodigo = timbrado.puntoExpedicion.codigo;
         const numeroDocumento = `${establecimiento}-${ptoExpCodigo}-${String(siguiente).padStart(7, '0')}`;
 
@@ -488,6 +504,290 @@ export async function anularComprobante(
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+//  NOTA DE CRÉDITO PARCIAL — acredita items puntuales de un comprobante emitido
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Emite una nota de crédito por un subconjunto de items de un comprobante ya
+ * emitido (devolución / cancelación de items post-factura). Solo gerente/admin.
+ *
+ *  - Numera contra un timbrado de NOTA_CREDITO del mismo punto de expedición que
+ *    el original (numeración fiscal independiente por tipo de documento).
+ *  - Snapshot de receptor y de los items acreditados (precio/descr/tasa) tomados
+ *    del original; el subtotal se prorratea por cantidad para respetar descuentos.
+ *  - Controla no acreditar más de lo vendido, sumando NCs previas del mismo
+ *    original (agrupando por producto+precio+descripción+tasa, sin FK item→item).
+ *  - Si hay caja abierta y `registrarEgresoCaja`, registra el EGRESO del dinero.
+ *  - NO revierte stock (la mercadería ya se entregó: la NC es el ajuste fiscal).
+ *  - Dispara la emisión a SIFEN en segundo plano (la NC es documento fiscal).
+ */
+export async function emitirNotaCreditoParcial(
+  user: UserCtx,
+  comprobanteOriginalId: string,
+  input: EmitirNotaCreditoInput,
+) {
+  if (!user.empresaId) throw Errors.forbidden('Usuario sin empresa');
+  const empresaId = user.empresaId;
+  if (!user.isSuperAdmin && !ROLES_GESTION.includes(user.rol)) {
+    throw Errors.forbidden('Solo un gerente o admin puede emitir notas de crédito');
+  }
+
+  const original = await prisma.comprobante.findUnique({
+    where: { id: comprobanteOriginalId },
+    include: { items: true },
+  });
+  if (!original) throw Errors.notFound('Comprobante no encontrado');
+  if (!user.isSuperAdmin && original.empresaId !== user.empresaId) throw Errors.tenantMismatch();
+  if (original.estado !== EstadoComprobante.EMITIDO) {
+    throw Errors.conflict('Solo se puede acreditar un comprobante EMITIDO');
+  }
+  if (
+    original.tipoDocumento === TipoDocumentoFiscal.NOTA_CREDITO ||
+    original.comprobanteOriginalId
+  ) {
+    throw Errors.conflict('No se puede emitir una nota de crédito sobre otra nota');
+  }
+  if (!original.establecimiento) {
+    throw Errors.conflict('El comprobante original no tiene establecimiento SIFEN');
+  }
+
+  // Clave de agrupación de items: sin FK item→item, agrupamos por la identidad
+  // del snapshot (producto + precio + descripción + tasa) para acumular cantidades.
+  const claveItem = (it: {
+    productoVentaId: string | null;
+    precioUnitario: bigint;
+    descripcion: string;
+    tasaIva: TasaIva;
+  }) => `${it.productoVentaId ?? ''}|${it.precioUnitario}|${it.descripcion}|${it.tasaIva}`;
+
+  const itemMap = new Map(original.items.map((it) => [it.id, it]));
+  const vendidoPorClave = new Map<string, number>();
+  for (const it of original.items) {
+    vendidoPorClave.set(claveItem(it), (vendidoPorClave.get(claveItem(it)) ?? 0) + it.cantidad);
+  }
+
+  // Notas de crédito previas no anuladas sobre este original → ya acreditado.
+  const notasPrevias = await prisma.comprobante.findMany({
+    where: {
+      comprobanteOriginalId: original.id,
+      tipoDocumento: TipoDocumentoFiscal.NOTA_CREDITO,
+      estado: { not: EstadoComprobante.ANULADO },
+      deletedAt: null,
+    },
+    include: { items: true },
+  });
+  const acreditadoPorClave = new Map<string, number>();
+  for (const nc of notasPrevias) {
+    for (const it of nc.items) {
+      acreditadoPorClave.set(
+        claveItem(it),
+        (acreditadoPorClave.get(claveItem(it)) ?? 0) + it.cantidad,
+      );
+    }
+  }
+
+  // Construir los items de la NC y acumular lo solicitado por clave.
+  const solicitadoPorClave = new Map<string, number>();
+  const itemsNc: {
+    productoVentaId: string | null;
+    codigo: string | null;
+    descripcion: string;
+    cantidad: number;
+    precioUnitario: bigint;
+    tasaIva: TasaIva;
+    subtotal: bigint;
+    costoUnitarioSnapshot: bigint;
+  }[] = [];
+  for (const sel of input.items) {
+    const orig = itemMap.get(sel.itemComprobanteId);
+    if (!orig) {
+      throw Errors.validation({
+        items: `Item ${sel.itemComprobanteId} no pertenece al comprobante`,
+      });
+    }
+    if (sel.cantidad > orig.cantidad) {
+      throw Errors.validation({
+        items: `Cantidad ${sel.cantidad} supera la facturada (${orig.cantidad})`,
+      });
+    }
+    const clave = claveItem(orig);
+    solicitadoPorClave.set(clave, (solicitadoPorClave.get(clave) ?? 0) + sel.cantidad);
+
+    // Prorrateo del subtotal (IVA-incluido) por la cantidad acreditada, para
+    // respetar descuentos/NXM aplicados en la línea original.
+    const subtotalNc = roundDiv(orig.subtotal * BigInt(sel.cantidad), BigInt(orig.cantidad));
+    itemsNc.push({
+      productoVentaId: orig.productoVentaId,
+      codigo: orig.codigo,
+      descripcion: orig.descripcion,
+      cantidad: sel.cantidad,
+      precioUnitario: orig.precioUnitario,
+      tasaIva: orig.tasaIva,
+      subtotal: subtotalNc,
+      costoUnitarioSnapshot: orig.costoUnitarioSnapshot,
+    });
+  }
+
+  // No acreditar más de lo vendido (acumulado entre todas las NCs del original).
+  for (const [clave, solicitado] of solicitadoPorClave) {
+    const disponible = (vendidoPorClave.get(clave) ?? 0) - (acreditadoPorClave.get(clave) ?? 0);
+    if (solicitado > disponible) {
+      throw Errors.conflict(
+        `Cantidad a acreditar supera lo disponible (vendido ${vendidoPorClave.get(clave) ?? 0}, ya acreditado ${acreditadoPorClave.get(clave) ?? 0})`,
+      );
+    }
+  }
+
+  const totales = discriminarIva(
+    itemsNc.map((it) => ({ subtotal: it.subtotal, tasaIva: it.tasaIva })),
+  );
+  const totalNc = itemsNc.reduce((acc, it) => acc + it.subtotal, 0n);
+
+  // Caja abierta del usuario para registrar el egreso (devolución del dinero).
+  const apertura = input.registrarEgresoCaja
+    ? await prisma.aperturaCaja.findFirst({
+        where: { usuarioId: user.userId, cierre: null },
+        include: { caja: { select: { id: true } } },
+      })
+    : null;
+
+  const establecimiento = original.establecimiento;
+  const puntoExpedicionId = original.puntoExpedicionId;
+
+  let intento = 0;
+  while (true) {
+    intento += 1;
+    try {
+      const nc = await prisma.$transaction(async (tx) => {
+        const timbrado = await tx.timbrado.findFirst({
+          where: {
+            puntoExpedicionId,
+            tipoDocumento: TipoDocumentoFiscal.NOTA_CREDITO,
+            activo: true,
+            fechaInicioVigencia: { lte: new Date() },
+            fechaFinVigencia: { gte: new Date() },
+          },
+          include: { puntoExpedicion: { select: { codigo: true } } },
+        });
+        if (!timbrado) {
+          throw Errors.conflict(
+            'No hay timbrado activo de NOTA_CREDITO para el punto de expedición del comprobante',
+          );
+        }
+
+        const siguiente = timbrado.ultimoNumeroUsado + 1;
+        if (siguiente > timbrado.rangoHasta) {
+          throw Errors.conflict('Timbrado de nota de crédito agotado — solicitá uno nuevo');
+        }
+        const updateRes = await tx.timbrado.updateMany({
+          where: { id: timbrado.id, ultimoNumeroUsado: timbrado.ultimoNumeroUsado },
+          data: { ultimoNumeroUsado: siguiente },
+        });
+        if (updateRes.count === 0) {
+          throw new Prisma.PrismaClientKnownRequestError('numeracion race', {
+            code: 'P2002',
+            clientVersion: 'unknown',
+          });
+        }
+
+        const ptoExpCodigo = timbrado.puntoExpedicion.codigo;
+        const numeroDocumento = `${establecimiento}-${ptoExpCodigo}-${String(siguiente).padStart(7, '0')}`;
+
+        const comprobante = await tx.comprobante.create({
+          data: {
+            empresaId,
+            sucursalId: original.sucursalId,
+            puntoExpedicionId,
+            timbradoId: timbrado.id,
+            cajaId: apertura?.cajaId ?? null,
+            aperturaCajaId: apertura?.id ?? null,
+            pedidoId: original.pedidoId,
+            clienteId: original.clienteId,
+            emitidoPorId: user.userId,
+            tipoDocumento: TipoDocumentoFiscal.NOTA_CREDITO,
+            establecimiento,
+            puntoExpedicionCodigo: ptoExpCodigo,
+            numero: siguiente,
+            numeroDocumento,
+            fechaEmision: new Date(),
+            condicionVenta: original.condicionVenta,
+            estado: EstadoComprobante.EMITIDO,
+            comprobanteOriginalId: original.id,
+            // Snapshot del receptor, copiado del original.
+            receptorTipoContribuyente: original.receptorTipoContribuyente,
+            receptorRuc: original.receptorRuc,
+            receptorDv: original.receptorDv,
+            receptorDocumento: original.receptorDocumento,
+            receptorRazonSocial: original.receptorRazonSocial,
+            receptorEmail: original.receptorEmail,
+            receptorDireccion: original.receptorDireccion,
+            subtotalExentas: totales.subtotalExentas,
+            subtotalIva5: totales.subtotalIva5,
+            subtotalIva10: totales.subtotalIva10,
+            totalIva5: totales.totalIva5,
+            totalIva10: totales.totalIva10,
+            total: totalNc,
+            items: { create: itemsNc },
+          },
+          include: {
+            items: true,
+            cliente: { select: { id: true, razonSocial: true, ruc: true, dv: true } },
+          },
+        });
+
+        // Egreso de caja por la devolución (resta del efectivo esperado).
+        if (apertura) {
+          await tx.movimientoCaja.create({
+            data: {
+              cajaId: apertura.cajaId,
+              aperturaCajaId: apertura.id,
+              tipo: TipoMovimientoCaja.EGRESO,
+              metodoPago: MetodoPago.EFECTIVO,
+              monto: totalNc,
+              concepto: `Nota de crédito ${numeroDocumento} (orig. ${original.numeroDocumento})`,
+              comprobanteId: comprobante.id,
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            empresaId,
+            sucursalId: original.sucursalId,
+            usuarioId: user.userId,
+            accion: 'CREAR',
+            entidad: 'Comprobante',
+            entidadId: comprobante.id,
+            metadata: {
+              tipoDocumento: 'NOTA_CREDITO',
+              numero: numeroDocumento,
+              comprobanteOriginal: original.numeroDocumento,
+              total: totalNc.toString(),
+              motivo: input.motivo,
+            },
+          },
+        });
+
+        return comprobante;
+      });
+
+      // La NC es documento fiscal → siempre se manda a SIFEN en segundo plano.
+      dispararEmision(nc.id);
+      return nc;
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === 'P2002' &&
+        intento < 5
+      ) {
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 //  LIST + DETAIL
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -597,7 +897,11 @@ interface ItemPedidoInput {
   }[];
 }
 
-function calcularTotalesComprobante(items: ItemPedidoInput[]) {
+/**
+ * Discrimina subtotales e IVA por tasa a partir de montos IVA-incluidos. El IVA
+ * va embebido en el precio (régimen PY): para 10% es monto/11, para 5% monto/21.
+ */
+function discriminarIva(items: { subtotal: bigint; tasaIva: TasaIva }[]) {
   let subtotalIva10 = 0n;
   let subtotalIva5 = 0n;
   let subtotalExentas = 0n;
@@ -606,15 +910,13 @@ function calcularTotalesComprobante(items: ItemPedidoInput[]) {
 
   for (const it of items) {
     const monto = it.subtotal;
-    if (it.productoVenta.tasaIva === TasaIva.IVA_10) {
+    if (it.tasaIva === TasaIva.IVA_10) {
       const iva = roundDiv(monto, 11n);
-      const base = monto - iva;
-      subtotalIva10 += base;
+      subtotalIva10 += monto - iva;
       totalIva10 += iva;
-    } else if (it.productoVenta.tasaIva === TasaIva.IVA_5) {
+    } else if (it.tasaIva === TasaIva.IVA_5) {
       const iva = roundDiv(monto, 21n);
-      const base = monto - iva;
-      subtotalIva5 += base;
+      subtotalIva5 += monto - iva;
       totalIva5 += iva;
     } else {
       subtotalExentas += monto;
@@ -622,6 +924,12 @@ function calcularTotalesComprobante(items: ItemPedidoInput[]) {
   }
 
   return { subtotalIva10, subtotalIva5, subtotalExentas, totalIva10, totalIva5 };
+}
+
+function calcularTotalesComprobante(items: ItemPedidoInput[]) {
+  return discriminarIva(
+    items.map((it) => ({ subtotal: it.subtotal, tasaIva: it.productoVenta.tasaIva })),
+  );
 }
 
 /**

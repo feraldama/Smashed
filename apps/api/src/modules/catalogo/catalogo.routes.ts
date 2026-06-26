@@ -26,6 +26,9 @@ router.patch('/categorias/:id', requireAdmin, asyncH(ctrl.actualizarCategoria));
 router.delete('/categorias/:id', requireAdmin, asyncH(ctrl.eliminarCategoria));
 
 router.post('/productos', requireAdmin, asyncH(ctrl.crearProducto));
+// IMPORTANTE: registrar antes de `/productos/:id` para que "reordenar" no se
+// matchee como un id de producto.
+router.patch('/productos/reordenar', requireAdmin, asyncH(ctrl.reordenarProductos));
 router.patch('/productos/:id', requireAdmin, asyncH(ctrl.actualizarProducto));
 router.delete('/productos/:id', requireAdmin, asyncH(ctrl.eliminarProducto));
 router.post('/productos/:id/imagen', requireAdmin, uploadImagen, asyncH(ctrl.subirImagenProducto));

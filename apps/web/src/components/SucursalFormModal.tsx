@@ -36,6 +36,8 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
   const [email, setEmail] = useState(sucursal?.email ?? '');
   const [zonaHoraria, setZonaHoraria] = useState(sucursal?.zonaHoraria ?? 'America/Asuncion');
   const [activa, setActiva] = useState(sucursal?.activa ?? true);
+  // Depósito: sólo inventario. No vende, no factura, no requiere establecimiento.
+  const [esDeposito, setEsDeposito] = useState(sucursal?.esDeposito ?? false);
 
   // Recargo delivery (admin-only — el cajero ve el monto auto-aplicado, no edita).
   const [recargoActivo, setRecargoActivo] = useState(sucursal?.deliveryRecargoActivo ?? false);
@@ -59,7 +61,8 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
     setError(null);
     if (!nombre.trim()) return setError('Nombre requerido');
     if (!codigo.trim()) return setError('Código requerido');
-    if (!/^\d{3}$/.test(establecimiento)) {
+    // El establecimiento SIFEN sólo aplica a sucursales que venden.
+    if (!esDeposito && !/^\d{3}$/.test(establecimiento)) {
       return setError('Establecimiento debe ser exactamente 3 dígitos');
     }
     if (direccion.trim().length < 3) return setError('Dirección requerida');
@@ -84,7 +87,8 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
           id: sucursal.id,
           nombre: nombre.trim(),
           codigo: codigo.trim().toUpperCase(),
-          establecimiento,
+          esDeposito,
+          establecimiento: esDeposito ? null : establecimiento,
           direccion: direccion.trim(),
           ciudad: ciudad.trim() || null,
           departamento: departamento.trim() || null,
@@ -101,7 +105,8 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
         await crear.mutateAsync({
           nombre: nombre.trim(),
           codigo: codigo.trim().toUpperCase(),
-          establecimiento,
+          esDeposito,
+          establecimiento: esDeposito ? undefined : establecimiento,
           direccion: direccion.trim(),
           ciudad: ciudad.trim() || undefined,
           departamento: departamento.trim() || undefined,
@@ -155,35 +160,49 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
           className="flex flex-1 flex-col overflow-hidden"
         >
           <div className="flex-1 space-y-4 overflow-y-auto p-5">
-            <div className="grid gap-3 sm:grid-cols-[1fr_140px_120px]">
+            <SwitchField
+              label="Depósito (solo inventario)"
+              description="No vende ni factura: guarda insumos y los transfiere a las sucursales. No aparece en POS ni caja y no necesita establecimiento SIFEN."
+              checked={esDeposito}
+              onCheckedChange={setEsDeposito}
+            />
+
+            <div
+              className={cn(
+                'grid gap-3',
+                esDeposito ? 'sm:grid-cols-[1fr_140px]' : 'sm:grid-cols-[1fr_140px_120px]',
+              )}
+            >
               <Field label="Nombre" required>
                 <Input
                   autoFocus
                   value={nombre}
                   onChange={(e) => setNombre(e.target.value)}
-                  placeholder="Asunción Centro"
+                  placeholder={esDeposito ? 'Depósito Central' : 'Asunción Centro'}
                 />
               </Field>
-              <Field label="Código interno" required hint="ej: CEN, SLO">
+              <Field label="Código interno" required hint="ej: CEN, DEP">
                 <Input
                   value={codigo}
                   onChange={(e) => setCodigo(e.target.value.toUpperCase())}
                   className="font-mono"
-                  placeholder="CEN"
+                  placeholder={esDeposito ? 'DEP' : 'CEN'}
                   maxLength={20}
                 />
               </Field>
-              <Field label="Establecimiento" required hint="3 dígitos SIFEN">
-                <Input
-                  value={establecimiento}
-                  onChange={(e) =>
-                    setEstablecimiento(e.target.value.replace(/\D/g, '').slice(0, 3))
-                  }
-                  className="text-center font-mono"
-                  placeholder="001"
-                  maxLength={3}
-                />
-              </Field>
+              {!esDeposito && (
+                <Field label="Establecimiento" required hint="3 dígitos SIFEN">
+                  <Input
+                    value={establecimiento}
+                    onChange={(e) =>
+                      setEstablecimiento(e.target.value.replace(/\D/g, '').slice(0, 3))
+                    }
+                    className="text-center font-mono"
+                    placeholder="001"
+                    maxLength={3}
+                  />
+                </Field>
+              )}
             </div>
 
             <Field label="Dirección" required>
@@ -242,7 +261,7 @@ export function SucursalFormModal({ sucursal, onClose }: Props) {
               />
             )}
 
-            {isEdit && (
+            {isEdit && !esDeposito && (
               <div className="rounded-md border bg-muted/10 p-4">
                 <h3 className="mb-1 text-sm font-bold">Recargo delivery</h3>
                 <p className="mb-3 text-xs text-muted-foreground">

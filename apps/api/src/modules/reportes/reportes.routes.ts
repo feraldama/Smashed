@@ -20,6 +20,9 @@ router.get('/ventas/descuentos', requireGestion, asyncH(ctrl.descuentosListado))
 router.get('/ventas/descuentos-por-empleado', requireGestion, asyncH(ctrl.descuentosPorEmpleado));
 router.get('/ventas/promociones', requireGestion, asyncH(ctrl.promocionesAhorro));
 
+router.get('/combos/opciones', requireGestion, asyncH(ctrl.combosOpciones));
+router.get('/combos/combinaciones', requireGestion, asyncH(ctrl.combosCombinaciones));
+
 router.get('/cocina/tiempos', requireGestion, asyncH(ctrl.tiemposCocina));
 
 router.get('/caja/turnos', requireGestion, asyncH(ctrl.cajaTurnos));

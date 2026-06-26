@@ -3,6 +3,7 @@
 import {
   ArrowDownCircle,
   ArrowUpCircle,
+  ArrowLeftRight,
   Calculator,
   Loader2,
   ReceiptText,
@@ -15,6 +16,7 @@ import { AdminShell } from '@/components/AdminShell';
 import { AuthGate } from '@/components/AuthGate';
 import { AbrirCajaModal } from '@/components/caja/AbrirCajaModal';
 import { CerrarCajaModal } from '@/components/caja/CerrarCajaModal';
+import { MovimientoCajaModal } from '@/components/caja/MovimientoCajaModal';
 import {
   type AperturaDetalle,
   type MovimientoApertura,
@@ -50,6 +52,7 @@ function CajaScreen() {
 
   const [showAbrir, setShowAbrir] = useState(false);
   const [showCerrar, setShowCerrar] = useState(false);
+  const [showMovimiento, setShowMovimiento] = useState(false);
 
   if (cajasLoading || aperturaLoading) {
     return (
@@ -77,13 +80,22 @@ function CajaScreen() {
             <Wallet className="h-4 w-4" /> Abrir caja
           </button>
         ) : (
-          <button
-            type="button"
-            onClick={() => setShowCerrar(true)}
-            className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-200"
-          >
-            <Calculator className="h-4 w-4" /> Cerrar caja Z
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowMovimiento(true)}
+              className="flex items-center gap-1.5 rounded-md border border-input bg-background px-3 py-2 text-sm font-medium hover:bg-accent"
+            >
+              <ArrowLeftRight className="h-4 w-4" /> Movimiento de caja
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCerrar(true)}
+              className="flex items-center gap-1.5 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm font-medium text-red-700 hover:bg-red-100 dark:bg-red-950/40 dark:text-red-200"
+            >
+              <Calculator className="h-4 w-4" /> Cerrar caja Z
+            </button>
+          </div>
         )}
       </header>
 
@@ -129,6 +141,9 @@ function CajaScreen() {
           }}
           onClose={() => setShowCerrar(false)}
         />
+      )}
+      {showMovimiento && miApertura && (
+        <MovimientoCajaModal aperturaId={miApertura.id} onClose={() => setShowMovimiento(false)} />
       )}
     </div>
   );

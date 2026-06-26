@@ -98,6 +98,6 @@ export async function movimiento(req: Request, res: Response) {
   const ctx = ctxOrThrow(req);
   const { aperturaId } = aperturaIdParam.parse(req.params);
   const input = movimientoCajaSchema.parse(req.body);
-  const mov = await service.registrarMovimiento(ctx, aperturaId, input);
+  const mov = await service.registrarMovimiento(ctx, aperturaId, input, { ip: req.ip });
   res.status(201).json({ movimiento: mov });
 }

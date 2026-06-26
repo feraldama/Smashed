@@ -7,6 +7,22 @@ const guaraniEntero = z
 
 const decimalCantidad = z.union([z.number().nonnegative(), z.string().regex(/^\d+(\.\d{1,3})?$/)]);
 
+// Cantidad positiva con hasta 6 decimales para las equivalencias de unidad
+// (necesita más precisión que decimalCantidad: ej. densidades, peso por pieza).
+const decimalEquivalencia = z
+  .union([z.number().positive(), z.string().regex(/^\d+(\.\d{1,6})?$/)])
+  .refine((v) => Number(v) > 0, { message: 'debe ser mayor a 0' });
+
+// Equivalencia de una unidad alternativa respecto a la unidad de stock del
+// insumo: `cantidadUnidad [unidad] = cantidadBase [unidadMedida del insumo]`.
+// (ej: tomate en UNIDAD → { unidad: GRAMO, cantidadUnidad: 150, cantidadBase: 1 }
+//  = "150 gramos equivalen a 1 unidad").
+export const unidadAlternativaInput = z.object({
+  unidad: z.nativeEnum(UnidadMedida),
+  cantidadUnidad: decimalEquivalencia,
+  cantidadBase: decimalEquivalencia,
+});
+
 // ───── Insumos ─────
 
 export const crearInsumoInput = z.object({
@@ -18,6 +34,7 @@ export const crearInsumoInput = z.object({
   costoUnitario: guaraniEntero.default(0),
   categoria: z.string().trim().max(100).optional(),
   proveedorId: z.string().cuid().optional(),
+  unidadesAlternativas: z.array(unidadAlternativaInput).max(6).optional(),
 });
 
 export const actualizarInsumoInput = z.object({
@@ -30,6 +47,9 @@ export const actualizarInsumoInput = z.object({
   categoria: z.string().trim().max(100).nullable().optional(),
   proveedorId: z.string().cuid().nullable().optional(),
   activo: z.boolean().optional(),
+  // Si se pasa, reemplaza TODAS las equivalencias del insumo (set completo).
+  // Omitir = no tocar; pasar [] = borrar todas.
+  unidadesAlternativas: z.array(unidadAlternativaInput).max(6).optional(),
 });
 
 export const listarInsumosQuery = z.object({

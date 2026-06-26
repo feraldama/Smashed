@@ -151,6 +151,7 @@ describe('E2E: flujo MESA completo (caja → pedido → cocina → entregar → 
     expect(mesaAntesCobrar?.estado).not.toBe('LIBRE');
 
     // ─── 7) Emitir comprobante TICKET (efectivo) ──────────────────────
+    // Sin nº de pager a propósito: MESA no lo requiere (sólo mostrador / retiro).
     const totalNum = Number(totalEsperado);
     const emitir = await request(app)
       .post('/comprobantes')
