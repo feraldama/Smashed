@@ -3,6 +3,7 @@
 import {
   AlertCircle,
   ChevronLeft,
+  FileText,
   Loader2,
   MapPin,
   Minus,
@@ -26,6 +27,7 @@ import { useMemo, useReducer, useState } from 'react';
 import { AuthGate } from '@/components/AuthGate';
 import { ClienteSelector } from '@/components/pos/ClienteSelector';
 import { CobrarModal } from '@/components/pos/CobrarModal';
+import { ComprobantesPanel } from '@/components/pos/ComprobantesPanel';
 import { ConfigurarItemModal } from '@/components/pos/ConfigurarItemModal';
 import { MesaSelector } from '@/components/pos/MesaSelector';
 import { ProductoCard } from '@/components/pos/ProductoCard';
@@ -47,6 +49,7 @@ import {
   useAgregarItems,
   useConfirmarPedido,
   useCrearPedido,
+  usePedidoDetalle,
   type TipoPedido,
 } from '@/hooks/usePedidos';
 import { type Promocion, usePromocionesVigentes } from '@/hooks/usePromociones';
@@ -124,6 +127,7 @@ function POSScreen() {
     null,
   );
   const [showCobrar, setShowCobrar] = useState(false);
+  const [showComprobantes, setShowComprobantes] = useState(false);
 
   // Modo de venta + selección
   const [tipo, setTipo] = useState<TipoPedido>('MOSTRADOR');
@@ -141,6 +145,10 @@ function POSScreen() {
   const pedidoExistenteId = mesa?.estado === 'OCUPADA' ? (mesa.pedidoActivo?.id ?? null) : null;
   const pedidoExistenteNumero =
     mesa?.estado === 'OCUPADA' ? (mesa.pedidoActivo?.numero ?? null) : null;
+  // Detalle de la cuenta abierta de la mesa — lo usamos para mostrar el total
+  // acumulado y poder cobrar la mesa en cualquier momento (sin esperar a que la
+  // comida esté lista). El backend ya permite emitir desde cualquier estado.
+  const { data: pedidoAbierto } = usePedidoDetalle(pedidoExistenteId);
 
   const total = useMemo(() => totalCarrito(cart), [cart]);
   const totalItems = useMemo(() => cantidadTotal(cart), [cart]);
@@ -371,6 +379,16 @@ function POSScreen() {
     }
   }
 
+  // Cobrar la cuenta abierta de una mesa desde el POS, sin pasar por /entregas
+  // ni esperar a que la comida esté lista. Tras emitir, la comanda sigue su
+  // curso en cocina; la mesa se libera al entregar (el backend marca FACTURADO
+  // al entregar si ya hay comprobante emitido).
+  function handleCobrarMesa() {
+    if (!pedidoExistenteId || !pedidoAbierto) return;
+    setPedidoConfirmado({ id: pedidoExistenteId, total: Number(pedidoAbierto.total) });
+    setShowCobrar(true);
+  }
+
   function handleCobrarSuccess(comprobante: ComprobanteDetalle) {
     dispatch({ type: 'CLEAR' });
     setPedidoConfirmado(null);
@@ -418,6 +436,15 @@ function POSScreen() {
           <span className="hidden text-xs text-muted-foreground sm:inline">
             {user?.nombreCompleto}
           </span>
+          <button
+            type="button"
+            onClick={() => setShowComprobantes(true)}
+            className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
+            title="Ver y reimprimir comprobantes de hoy"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            Comprobantes
+          </button>
           <Link
             href="/entregas"
             className="flex items-center gap-1.5 rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-medium hover:bg-accent"
@@ -602,11 +629,26 @@ function POSScreen() {
                 </button>
                 {pedidoExistenteId && (
                   <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs dark:bg-amber-950/30 dark:text-amber-200">
-                    <p className="font-bold">Cuenta abierta · Pedido #{pedidoExistenteNumero}</p>
+                    <div className="flex items-baseline justify-between gap-2">
+                      <p className="font-bold">Cuenta abierta · Pedido #{pedidoExistenteNumero}</p>
+                      {pedidoAbierto && (
+                        <p className="text-sm font-bold tabular-nums text-foreground">
+                          Gs. {Number(pedidoAbierto.total).toLocaleString('es-PY')}
+                        </p>
+                      )}
+                    </div>
                     <p className="text-muted-foreground">
-                      Lo que agregues se suma a esta cuenta. Se cobra desde Entregas cuando esté
-                      lista.
+                      Lo que agregues se suma a esta cuenta. Podés cobrarla en cualquier momento; la
+                      mesa se libera al entregar.
                     </p>
+                    <button
+                      type="button"
+                      onClick={handleCobrarMesa}
+                      disabled={!pedidoAbierto}
+                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-bold text-primary-foreground shadow hover:bg-primary/90 disabled:opacity-50"
+                    >
+                      <Wallet className="h-4 w-4" /> Cobrar mesa {mesa?.numero}
+                    </button>
                   </div>
                 )}
               </>
@@ -851,6 +893,7 @@ function POSScreen() {
             onClose={() => setShowClienteSel(false)}
           />
         )}
+        {showComprobantes && <ComprobantesPanel onClose={() => setShowComprobantes(false)} />}
       </div>
     </div>
   );

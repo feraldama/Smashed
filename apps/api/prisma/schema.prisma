@@ -220,6 +220,7 @@ enum MetodoPago {
   TARJETA_CREDITO
   TARJETA_DEBITO
   PEDIDOS_YA
+  TRANSFERENCIA
 }
 
 /// Proveedor de facturación electrónica configurado por empresa.

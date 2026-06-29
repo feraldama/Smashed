@@ -460,6 +460,10 @@ function mapMetodoPago(metodo: MetodoPago): string {
       // PedidosYa liquida el cobro electrónicamente a la cuenta del comercio →
       // "Pago Electrónico" (21), mismo criterio que las tarjetas.
       return '21';
+    case 'TRANSFERENCIA':
+      // Transferencia bancaria: SIFEN tiene un código propio (5), que no exige
+      // los campos adicionales de tarjeta. Lo informamos como tal.
+      return '5';
     default:
       return '99';
   }

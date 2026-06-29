@@ -261,6 +261,7 @@ function labelMetodo(m: string): string {
     TARJETA_CREDITO: 'Tarjeta de Crédito',
     TARJETA_DEBITO: 'Tarjeta de Débito',
     PEDIDOS_YA: 'PedidosYa',
+    TRANSFERENCIA: 'Transferencia',
   };
   return (
     labels[m] ??

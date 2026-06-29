@@ -6,6 +6,7 @@ import {
   Bike,
   CreditCard,
   Gift,
+  Landmark,
   Loader2,
   Percent,
   Plus,
@@ -95,6 +96,9 @@ const METODOS: {
   // El dinero lo liquida la plataforma, no entra al efectivo de la caja. La
   // referencia sirve para anotar el Nº de pedido de PedidosYa.
   { value: 'PEDIDOS_YA', label: 'PedidosYa', icon: Bike, requiereReferencia: true },
+  // Transferencia bancaria: no entra al efectivo de la caja. La referencia
+  // sirve para anotar el Nº de operación / comprobante de la transferencia.
+  { value: 'TRANSFERENCIA', label: 'Transferencia', icon: Landmark, requiereReferencia: true },
 ];
 
 function parseGs(s: string): number {
