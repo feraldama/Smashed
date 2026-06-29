@@ -20,7 +20,7 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
     <div
       className="ticket-print"
       style={{
-        width: '66mm', // 69mm - 3mm de márgenes laterales (área imprimible real)
+        width: '65mm', // 68mm - 3mm de márgenes laterales (área imprimible real)
         margin: '0 auto',
         padding: '1.5mm',
         fontFamily: '"Courier New", "Courier", monospace',
@@ -42,7 +42,7 @@ export function TicketTermico({ comp }: { comp: ComprobanteDetalle }) {
         >
           Smashed
         </p>
-        <p style={{ fontWeight: 'bold', fontSize: '13px', margin: 0 }}>
+        <p style={{ fontWeight: 'bold', fontSize: '11px', margin: 0 }}>
           {comp.empresa.razonSocial}
         </p>
         <p style={{ margin: 0 }}>

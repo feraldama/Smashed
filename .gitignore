@@ -54,3 +54,6 @@ pgadmin-data/
 .cache/
 .temp/
 *.local
+
+# Backups de base de datos (nunca al repo, exceden límite de GitHub)
+backup_*.sql
