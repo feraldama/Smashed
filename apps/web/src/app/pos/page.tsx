@@ -122,6 +122,13 @@ function POSScreen() {
 
   const [cart, dispatch] = useReducer(cartReducer, cartInitial);
   const [configProductoId, setConfigProductoId] = useState<string | null>(null);
+  // Cola de productos del combo que requieren configuración (esCombo o con
+  // modificadores). Se procesa uno por uno: el modal abre con el primero, al
+  // confirmar se carga al carrito con el precio prorrateado y se quita de la
+  // cola; cuando queda vacía el combo terminó de cargarse.
+  const [comboConfigQueue, setComboConfigQueue] = useState<
+    { productoId: string; precioUnitario: number; cantidad: number }[]
+  >([]);
   const [editandoItem, setEditandoItem] = useState<ItemCarrito | null>(null);
   const [pedidoConfirmado, setPedidoConfirmado] = useState<{ id: string; total: number } | null>(
     null,
@@ -232,6 +239,11 @@ function POSScreen() {
    * los items al recibirlos, así que acá pasamos el precio base y dejamos
    * que el backend recalcule. Para preview en UI mostramos el precioFijo
    * dividido por la cantidad total (aproximado).
+   *
+   * Los productos del combo que necesitan configuración (esCombo o con
+   * modificadores) se cargan abriendo el modal de configuración en cola: se
+   * agregan directo los que no requieren elegir nada y se encolan los demás
+   * para configurarlos uno por uno (ver `comboConfigQueue`).
    */
   function handleCargarCombo() {
     if (!promoActiva || promoActiva.tipo !== 'COMBO') return;
@@ -247,21 +259,13 @@ function POSScreen() {
       return;
     }
 
-    // Bloqueamos combos que tienen productos con esCombo o modificadores —
-    // requieren configuración por producto y la pseudo-categoría de combo no
-    // los soporta todavía.
-    if (productosCombo.some((x) => x.prod.esCombo || x.prod.tieneModificadores)) {
-      toast.error('Algún producto del combo necesita configuración — no soportado todavía');
-      return;
-    }
-
     // Distribuir precioFijo proporcional al precioBase * cantidadMin (espejo
     // del cálculo del backend — el backend re-valida y ajusta si difiere).
     const precioFijo = Number(promoActiva.precioFijo ?? 0);
     const pesos = productosCombo.map((x) => Number(x.prod.precio) * x.cantidadMin);
     const sumaPesos = pesos.reduce((acc, w) => acc + w, 0);
     let acumulado = 0;
-    productosCombo.forEach((x, i) => {
+    const items = productosCombo.map((x, i) => {
       const esUltimo = i === productosCombo.length - 1;
       const peso = pesos[i] ?? 0;
       const asignadoTotal = esUltimo
@@ -269,6 +273,15 @@ function POSScreen() {
         : Math.floor((precioFijo * peso) / sumaPesos);
       acumulado += asignadoTotal;
       const precioUnit = Math.floor(asignadoTotal / x.cantidadMin);
+      return { prod: x.prod, cantidadMin: x.cantidadMin, precioUnit };
+    });
+
+    // Los que no requieren elegir nada van directo al carrito; los que tienen
+    // combo/modificadores se encolan para configurarlos en el modal.
+    const aConfigurar = items.filter((x) => x.prod.esCombo || x.prod.tieneModificadores);
+    const directos = items.filter((x) => !x.prod.esCombo && !x.prod.tieneModificadores);
+
+    directos.forEach((x) => {
       dispatch({
         type: 'ADD',
         item: {
@@ -276,7 +289,7 @@ function POSScreen() {
           codigo: x.prod.codigo,
           nombre: x.prod.nombre,
           imagenUrl: null,
-          precioUnitario: precioUnit,
+          precioUnitario: x.precioUnit,
           cantidad: x.cantidadMin,
           modificadores: [],
           combosOpcion: [],
@@ -285,7 +298,19 @@ function POSScreen() {
         },
       });
     });
-    toast.success(`+ ${promoActiva.nombre}`);
+
+    if (aConfigurar.length === 0) {
+      toast.success(`+ ${promoActiva.nombre}`);
+      return;
+    }
+
+    setComboConfigQueue(
+      aConfigurar.map((x) => ({
+        productoId: x.prod.id,
+        precioUnitario: x.precioUnit,
+        cantidad: x.cantidadMin,
+      })),
+    );
   }
 
   /**
@@ -847,6 +872,39 @@ function POSScreen() {
               dispatch({ type: 'ADD', item: toAdd });
               setConfigProductoId(null);
               toast.success(`+ ${item.nombre}${promoActiva ? ' (promo)' : ''}`);
+            }}
+          />
+        )}
+        {comboConfigQueue[0] && promoActiva && (
+          <ConfigurarItemModal
+            // `key` fuerza remount al avanzar la cola: cada producto arranca
+            // con sus defaults/selecciones limpias.
+            key={comboConfigQueue[0].productoId}
+            productoId={comboConfigQueue[0].productoId}
+            onCancel={() => {
+              // Cancelar aborta el resto del combo. Lo ya cargado (directos y
+              // productos configurados antes) queda en el carrito; el cajero
+              // completa a mano lo que falte.
+              toast.error('Combo incompleto — faltó configurar algún producto');
+              setComboConfigQueue([]);
+            }}
+            onConfirm={(item) => {
+              const [head, ...resto] = comboConfigQueue;
+              if (!head) return;
+              dispatch({
+                type: 'ADD',
+                item: {
+                  ...item,
+                  // Precio prorrateado del combo (no el base del modal) y
+                  // cantidad fija = cantidadMin: el backend rechaza otra cosa.
+                  precioUnitario: head.precioUnitario,
+                  cantidad: head.cantidad,
+                  promocionId: promoActiva.id,
+                  promocionNombre: promoActiva.nombre,
+                },
+              });
+              setComboConfigQueue(resto);
+              if (resto.length === 0) toast.success(`+ ${promoActiva.nombre}`);
             }}
           />
         )}

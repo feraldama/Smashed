@@ -9,7 +9,7 @@ import { Pool } from 'pg';
 
 async function main() {
   const args = process.argv.slice(2);
-  const numeroPedido = parseInt(args[0], 10);
+  const numeroPedido = parseInt(args[0] ?? '', 10);
 
   if (isNaN(numeroPedido)) {
     console.error('❌ Uso: fix-stuck-item-direct.ts <numeroPedido>');
@@ -63,12 +63,14 @@ async function main() {
     const pendientes = itemsResult.rows.filter((row) => row.estado === 'PENDIENTE');
 
     for (const item of itemsResult.rows) {
-      const emoji = {
-        PENDIENTE: '⏳',
-        EN_PREPARACION: '👨‍🍳',
-        LISTO: '✅',
-        CANCELADO: '❌',
-      }[item.estado];
+      const emoji = (
+        {
+          PENDIENTE: '⏳',
+          EN_PREPARACION: '👨‍🍳',
+          LISTO: '✅',
+          CANCELADO: '❌',
+        } as Record<string, string>
+      )[item.estado];
       console.log(`${emoji} ${item.cantidad}× ${item.nombre} (${item.estado})`);
     }
 

@@ -5,14 +5,14 @@
  * Ejemplo: npx tsx inspect-pedido.ts 90
  */
 
-import '../src/config/env.js';
+import { env } from '../src/config/env.js';
 
 import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '@prisma/client';
 import * as readline from 'readline';
 
 const prisma = new PrismaClient({
-  adapter: new PrismaPg(),
+  adapter: new PrismaPg({ connectionString: env.DATABASE_URL }),
   log: [],
 });
 
@@ -31,7 +31,7 @@ function pregunta(msg: string): Promise<string> {
 
 async function main() {
   const args = process.argv.slice(2);
-  const numeroPedido = parseInt(args[0], 10);
+  const numeroPedido = parseInt(args[0] ?? '', 10);
 
   if (isNaN(numeroPedido)) {
     console.error('❌ Uso: inspect-pedido.ts <numeroPedido>');
@@ -61,7 +61,7 @@ async function main() {
     console.log(`ID:           ${pedido.id}`);
     console.log(`Tipo:         ${pedido.tipo}`);
     console.log(`Estado:       ${pedido.estado}`);
-    console.log(`Creado:       ${new Date(pedido.creadoEn).toLocaleString('es-PY')}`);
+    console.log(`Creado:       ${new Date(pedido.createdAt).toLocaleString('es-PY')}`);
     console.log(
       `Total:        ${(Number(pedido.total) / 1000).toLocaleString('es-PY', { style: 'currency', currency: 'PYG' })}`,
     );
@@ -73,12 +73,15 @@ async function main() {
 
     for (let i = 0; i < pedido.items.length; i++) {
       const item = pedido.items[i];
-      const estadoEmoji = {
-        PENDIENTE: '⏳',
-        EN_PREPARACION: '👨‍🍳',
-        LISTO: '✅',
-        CANCELADO: '❌',
-      }[item.estado];
+      if (!item) continue;
+      const estadoEmoji = (
+        {
+          PENDIENTE: '⏳',
+          EN_PREPARACION: '👨‍🍳',
+          LISTO: '✅',
+          CANCELADO: '❌',
+        } as Record<string, string>
+      )[item.estado];
 
       console.log(
         `${i + 1}. ${estadoEmoji} ${item.cantidad}× ${item.productoVenta.nombre} (${item.estado})`,
@@ -154,13 +157,11 @@ async function main() {
         process.exit(0);
       }
 
-      const ahora = new Date();
       for (const item of itemsProblematicos) {
         await prisma.itemPedido.update({
           where: { id: item.id },
           data: {
             estado: 'CANCELADO',
-            canceladoEn: ahora,
           },
         });
         console.log(`🗑️  ${item.cantidad}× ${item.productoVenta.nombre} → CANCELADO`);

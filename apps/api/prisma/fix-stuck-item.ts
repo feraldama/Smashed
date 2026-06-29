@@ -11,7 +11,7 @@ const prisma = new PrismaClient();
 
 async function main() {
   const args = process.argv.slice(2);
-  const numeroPedido = parseInt(args[0], 10);
+  const numeroPedido = parseInt(args[0] ?? '', 10);
   const nombreProducto = args[1];
 
   if (isNaN(numeroPedido)) {
